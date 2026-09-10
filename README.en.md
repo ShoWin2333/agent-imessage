@@ -70,7 +70,7 @@ If DSH runs under launchd or another persistent service, restart that service af
 
 ### Compatibility target
 
-- DeepSeek Harness `0.1.2-alpha.5` (current official alpha channel)
+- DeepSeek Harness `0.1.5-rc.1` (current official latest / next)
 - Spectrum `12.7.x` (currently pinned to `12.7.0`)
 - Node.js `22.19+` or `24+`
 
@@ -202,7 +202,7 @@ npm ci --legacy-peer-deps
 npm test
 npm run build
 npm pack --dry-run
-# With an alpha.5 DSH binary available:
+# With an 0.1.5-rc.1 DSH binary available:
 DSH_BIN=/path/to/dsh npm run test:profile
 ```
 

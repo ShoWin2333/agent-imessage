@@ -396,10 +396,11 @@ export class SessionRouter {
       return live
     }
 
-    const inspection = await this.ctx.sessionPersistence.inspect(id)
-    if (!this.isVisibleHeader(inspection.meta)) {
+    const snapshot = await this.ctx.sessionPersistence.stat(id)
+    if (snapshot === undefined || !this.isVisibleHeader(snapshot.header)) {
       throw new PluginError('runtime-failed', 'The selected session is not a root session in this workspace.')
     }
+    const inspection = await this.readStoredSession(id)
     try {
       const handle = await this.resumeAgent(id, inspection)
       this.ownedHandle = handle
@@ -412,6 +413,19 @@ export class SessionRouter {
       if (raced === undefined || !this.isVisibleLiveRoot(raced)) throw error
       this.bindAgent(raced)
       return raced
+    }
+  }
+
+  /** Read one cold session's header and event log without taking write ownership. */
+  private async readStoredSession(
+    id: ReturnType<typeof SessionId>,
+  ): Promise<{ meta: SessionHeader; events: readonly SessionEvent[] }> {
+    const handle = await this.ctx.sessionPersistence.open(id, 'read')
+    try {
+      const { events } = await handle.read()
+      return { meta: handle.header, events }
+    } finally {
+      await handle.close()
     }
   }
 
@@ -502,7 +516,8 @@ export class SessionRouter {
         active: agent.id === active,
       })
     }
-    for (const header of await this.ctx.sessionPersistence.list()) {
+    for (const snapshot of await this.ctx.sessionPersistence.list()) {
+      const header = snapshot.header
       if (!this.isVisibleHeader(header)) continue
       const existing = rows.get(header.id)
       rows.set(header.id, existing ?? {
