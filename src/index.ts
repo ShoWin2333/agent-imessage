@@ -4,9 +4,9 @@ import type {} from '@deepseek-ai/dsh-agent-default-model'
 import type {} from '@deepseek-ai/dsh-agent-presets'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import {
-  settingsNamespace,
   SettingsConflictError,
   type SettingsDescriptor,
+  type SettingsNamespace,
   type SettingsScope,
 } from '@deepseek-ai/dsh-settings'
 import {
@@ -109,7 +109,7 @@ export const inject = [
 ]
 
 /** DSH non-secret settings namespace. */
-export const SETTINGS_NAMESPACE = settingsNamespace(SETTINGS_NAME)
+export const SETTINGS_NAMESPACE = SETTINGS_NAME as SettingsNamespace
 
 /** Opaque Photon credential reference. */
 export const PHOTON_CREDENTIAL_REF = credentialRef(CREDENTIAL_NAME)

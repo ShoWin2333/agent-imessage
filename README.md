@@ -70,7 +70,7 @@ dsh web
 
 ### 兼容目标
 
-- DeepSeek Harness `0.1.0-rc.6`
+- DeepSeek Harness `0.1.2-alpha.5`（当前官方 alpha 通道版本）
 - Spectrum `12.7.x`（当前锁定为 `12.7.0`）
 - Node.js `22.19+` 或 `24+`
 
@@ -202,7 +202,7 @@ npm ci --legacy-peer-deps
 npm test
 npm run build
 npm pack --dry-run
-# 如果本机有 rc.6 DSH：
+# 如果本机有 alpha.5 DSH：
 DSH_BIN=/path/to/dsh npm run test:profile
 ```
 
