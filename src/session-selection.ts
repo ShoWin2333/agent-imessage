@@ -1,7 +1,7 @@
 import type { ModelSelection } from '@deepseek-ai/dsh-agent'
 import { foldRequestHeader, type SessionEvent, type SessionHeader } from '@deepseek-ai/dsh-session'
 
-/** Reconstruct the preset using DSH rc.6's header-plus-last-selection convention. */
+/** Reconstruct the preset using DSH's header-plus-last-selection convention. */
 export function presetForResume(
   header: SessionHeader,
   events: readonly SessionEvent[],

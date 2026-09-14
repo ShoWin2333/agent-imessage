@@ -25,6 +25,13 @@ function header(
   }
 }
 
+function snapshot(meta: SessionHeader) {
+  return {
+    header: meta,
+    revision: 'rev-0' as never,
+  }
+}
+
 function fakeAgent(id: string, meta = header(id), status: 'idle' | 'running' = 'idle'): Agent {
   return {
     id,
@@ -53,8 +60,22 @@ function fakeContext(options: FakeContextOptions = {}) {
       resume,
     },
     sessionPersistence: {
-      list: vi.fn(async () => options.stored ?? []),
-      inspect: vi.fn(),
+      list: vi.fn(async () => (options.stored ?? []).map(snapshot)),
+      stat: vi.fn(async (id: string) => {
+        const meta = (options.stored ?? []).find(item => item.id === id)
+        return meta === undefined ? undefined : snapshot(meta)
+      }),
+      open: vi.fn(async (id: string) => {
+        const meta = (options.stored ?? []).find(item => item.id === id) ?? header(id)
+        return {
+          id,
+          header: meta,
+          inheritedEventCount: 0,
+          access: 'read' as const,
+          read: vi.fn(async () => ({ eventState: 'shared', events: [] })),
+          close: vi.fn(async () => {}),
+        }
+      }),
     },
     agentPresets: {
       defaultId: 'coding-default',
