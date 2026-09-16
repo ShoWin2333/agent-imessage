@@ -214,6 +214,12 @@ DSH_BIN=/path/to/dsh npm run test:profile
 
 这个 fork 仍使用与上游相同的 npm 包名 `dsh-imessage`。仓库中继承的发布 workflow 和 npm Trusted Publisher 原本绑定 `photon-hq/dsh-imessage`，不会自动赋予 fork 发布上游 npm 包的权限。除非为 fork 单独配置包名和发布凭据，否则请使用本地 tarball 或 fork 自己的 GitHub Release 分发。
 
+## 开发背景与致谢
+
+这是我在开源开发起步阶段持续学习和维护的一个项目。感谢上游 [photon-hq/dsh-imessage](https://github.com/photon-hq/dsh-imessage) 提供的基础，也感谢 Codex 帮助我理解已有代码、探索实现方式，把原本难以独立完成的想法逐步变成可用的改进。
+
+我还没有成熟的社区或推广经验，希望从自己的实际需求出发，把这些改进公开分享，并在持续维护中成长。
+
 ## 上游与参考资料
 
 - [上游 dsh-imessage](https://github.com/photon-hq/dsh-imessage)

@@ -214,6 +214,12 @@ The repository contains CI workflows for Node 22.19 and Node 24, plus a smoke te
 
 This fork still uses the upstream npm package name `dsh-imessage`. The inherited release workflow and npm Trusted Publisher were originally bound to `photon-hq/dsh-imessage`; they do not automatically grant the fork permission to publish the upstream npm package. Until the fork has its own package name and publishing configuration, distribute it as a local tarball or through the fork's own GitHub Releases.
 
+## Development background and acknowledgments
+
+This project is part of my early journey into open-source development, where I am learning by building and maintaining it. I am grateful to upstream [photon-hq/dsh-imessage](https://github.com/photon-hq/dsh-imessage) for the foundation, and to Codex for helping me understand the existing code, explore implementation approaches, and gradually turn ideas I could not yet implement on my own into working improvements.
+
+I do not yet have an established community or experience promoting my work. I hope to start with practical needs, share useful improvements publicly, and grow through ongoing maintenance.
+
 ## Upstream and references
 
 - [Upstream dsh-imessage](https://github.com/photon-hq/dsh-imessage)
