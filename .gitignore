@@ -4,3 +4,4 @@ coverage/
 *.tgz
 .typert-workspace-*/
 .DS_Store
+packages/codex/dist/

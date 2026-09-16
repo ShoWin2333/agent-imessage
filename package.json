@@ -1,17 +1,17 @@
 {
   "name": "dsh-imessage",
   "version": "0.2.1",
-  "description": "Photon-hosted iMessage transport and configuration UI for DeepSeek Harness",
+  "description": "Agent iMessage: DSH adapter and shared transport for DSH and local Codex",
   "type": "module",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/photon-hq/dsh-imessage.git"
+    "url": "git+https://github.com/ShoWin2333/agent-imessage.git"
   },
   "bugs": {
-    "url": "https://github.com/photon-hq/dsh-imessage/issues"
+    "url": "https://github.com/ShoWin2333/agent-imessage/issues"
   },
-  "homepage": "https://github.com/photon-hq/dsh-imessage#readme",
+  "homepage": "https://github.com/ShoWin2333/agent-imessage#readme",
   "keywords": [
     "deepseek-harness",
     "dsh",
@@ -91,7 +91,10 @@
     "test:profile": "node ./scripts/profile-smoke.mjs",
     "audit:prod": "npm audit --omit=dev --audit-level=high",
     "check": "npm run test && npm run build && npm run audit:prod && npm pack --dry-run --ignore-scripts",
-    "prepare": "npm run build"
+    "prepare": "npm run build",
+    "build:codex": "tsdown --config tsdown.codex.config.ts",
+    "test:codex:pack": "node scripts/codex-pack-smoke.mjs",
+    "test:codex:live": "node scripts/codex-smoke.mjs"
   },
   "dependencies": {
     "@elysiajs/eden": "1.4.9",

@@ -7,8 +7,8 @@ import {
 } from '@spectrum-ts/core'
 import { imessage } from '@spectrum-ts/imessage'
 import { extname } from 'node:path'
-import { PluginError } from './errors.js'
-import type { OutboundMediaPayload } from './outbound-media.js'
+import { PluginError } from './transport-error.js'
+import type { OutboundMediaPayload } from './media.js'
 import type { RuntimeView } from './types.js'
 
 /** Recipient marker emitted by Spectrum 12.7 for project-scoped shared lines. */

@@ -1,0 +1,12 @@
+{
+  "codexBinary": "codex",
+  "stateDir": "/absolute/path/to/private-agent-imessage-state",
+  "routes": [{
+    "id": "codex-main",
+    "cwd": "/absolute/path/to/your/project",
+    "projectId": "YOUR_PHOTON_PROJECT_ID",
+    "projectSecretEnv": "AGENT_IMESSAGE_PHOTON_SECRET",
+    "senderPhoneNumber": "+15551234567",
+    "assignedPhoneNumber": "+15557654321"
+  }]
+}
