@@ -17,3 +17,16 @@ it('rejects duplicate Photon projects and missing secrets without exposing their
   await writeFile(file, JSON.stringify({ stateDir: dir, routes: [route, { ...route, id: 'two' }] }))
   await expect(loadConfig(file)).rejects.toThrow('unique')
 })
+
+it('validates backend and mode without changing the default Codex route', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'agent-config-')); dirs.push(dir)
+  const file = join(dir, 'config.json')
+  vi.stubEnv('AGENT_TEST_SECRET', 'fixture')
+  const route = { id: 'one', cwd: dir, projectId: 'p', projectSecretEnv: 'AGENT_TEST_SECRET', senderPhoneNumber: '+15551234567', assignedPhoneNumber: '+15557654321' }
+  const put = async (extra: object) => writeFile(file, JSON.stringify({ stateDir: dir, routes: [{ ...route, ...extra }] }))
+  await put({ backend: 'cursor', cursorMode: 'ask' })
+  await expect(loadConfig(file)).resolves.toMatchObject({ cursorBinary: 'agent', routes: [{ backend: 'cursor', cursorMode: 'ask' }] })
+  await put({ cursorMode: 'ask' }); await expect(loadConfig(file)).rejects.toThrow('requires')
+  await put({ backend: 'unknown' }); await expect(loadConfig(file)).rejects.toThrow('Invalid')
+  await put({}); await expect(loadConfig(file)).resolves.toMatchObject({ routes: [{ id: 'one' }] })
+})

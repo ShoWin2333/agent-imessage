@@ -1,13 +1,14 @@
-# Agent iMessage：连接 Codex、DSH 与 iMessage
+# Agent iMessage：连接 Codex、Cursor、DSH 与 iMessage
 
-同一个项目，两种接入方式：
+同一个项目，三种接入方式：
 
 | 接入 | 运行方式 | 安装说明 |
 | --- | --- | --- |
 | **Codex（预览版）** | 独立本机桥接，通过 Codex App Server 工作，无需 DSH | [Codex 中文指南](docs/codex.zh-CN.md) |
+| **Cursor（预览版）** | 独立本机桥接，通过 Cursor CLI ACP 工作 | [Cursor 中文指南](docs/cursor.zh-CN.md) |
 | **DSH** | 原有 DSH 插件，保留现有设置与安装标识 | 本文下方 |
 
-Codex 版本支持文字任务、会话恢复、审批与停止，以及工作区内文件和语音发送；手机端完整验收待配置专用 Photon 路由后进行。它不接管桌面端已有任务，也不是 Codex 云端桥接。两个适配共用 Photon 收发和媒体检查代码，分别配置路由。
+Codex 版本支持文字任务、会话恢复、审批与停止，以及工作区内文件和语音发送；手机端完整验收待配置专用 Photon 路由后进行。它不接管桌面端已有任务，也不是 Codex 云端桥接。三个适配共用 Photon 收发；Codex 与 DSH 另共用媒体检查代码，分别配置路由。
 
 本项目由 `photon-hq/dsh-imessage` 衍生，原名 `dsh-imessage`。为兼容现有 DSH 安装，DSH 的包名、插件 ID 和设置命名空间仍为 `dsh-imessage`；Codex 安装包为 `@showin2333/agent-imessage`。两者尚无统一设置界面。项目更名不代表 OpenAI 官方产品或背书。
 
