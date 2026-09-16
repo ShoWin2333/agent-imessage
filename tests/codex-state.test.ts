@@ -21,3 +21,16 @@ it('rejects a publicly readable state directory', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'agent-state-')); dirs.push(dir); await chmod(dir, 0o755)
   await expect(StateStore.open(dir, route)).rejects.toThrow('private directory')
 })
+
+it('isolates Cursor sessions by backend and mode while preserving Codex state', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'agent-state-')); dirs.push(dir)
+  const codex = await StateStore.open(dir, route)
+  codex.state.threadId = 'codex-thread'; await codex.save(); await codex.close()
+  const cursor = await StateStore.open(dir, { ...route, backend: 'cursor' })
+  expect(cursor.state.threadId).toBeUndefined()
+  cursor.state.threadId = 'cursor-thread'; await cursor.save(); await cursor.close()
+  const ask = await StateStore.open(dir, { ...route, backend: 'cursor', cursorMode: 'ask' })
+  expect(ask.state.threadId).toBeUndefined(); await ask.close()
+  const original = await StateStore.open(dir, { ...route, backend: 'codex' })
+  expect(original.state.threadId).toBe('codex-thread'); await original.close()
+})

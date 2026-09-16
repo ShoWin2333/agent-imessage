@@ -9,10 +9,13 @@ const routeSchema = z.object({
   projectSecretEnv: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/),
   senderPhoneNumber: z.string().regex(/^\+[1-9]\d{6,14}$/),
   assignedPhoneNumber: z.string().regex(/^\+[1-9]\d{6,14}$/),
+  backend: z.enum(['codex', 'cursor']).optional(),
+  cursorMode: z.enum(['agent', 'plan', 'ask']).optional(),
   model: z.string().min(1).optional(),
 }).strict()
 const schema = z.object({
   codexBinary: z.string().min(1).default('codex'),
+  cursorBinary: z.string().min(1).default('agent'),
   stateDir: z.string().refine(isAbsolute, 'Use an absolute state directory'),
   routes: z.array(routeSchema).min(1).max(16),
 }).strict()
@@ -26,6 +29,7 @@ export async function loadConfig(file: string): Promise<BridgeConfig> {
   const ids = new Set<string>()
   const projects = new Set<string>()
   for (const route of config.routes) {
+    if (route.cursorMode && route.backend !== 'cursor') throw new Error('cursorMode requires backend cursor')
     if (ids.has(route.id) || projects.has(route.projectId)) throw new Error('Each route requires a unique id and Photon project')
     ids.add(route.id); projects.add(route.projectId)
     route.cwd = await realpath(route.cwd)

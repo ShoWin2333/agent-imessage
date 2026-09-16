@@ -17,7 +17,7 @@ export class StateStore {
     await mkdir(dir, { recursive: true, mode: 0o700 })
     const info = await lstat(dir)
     if (!info.isDirectory() || info.isSymbolicLink() || (info.mode & 0o077)) throw new Error('State directory must be a private directory (chmod 700)')
-    const key = createHash('sha256').update(JSON.stringify([route.id, route.cwd, route.projectId, route.senderPhoneNumber, route.assignedPhoneNumber])).digest('hex')
+    const key = createHash('sha256').update(JSON.stringify([route.id, route.cwd, route.projectId, route.senderPhoneNumber, route.assignedPhoneNumber, ...(route.backend === 'cursor' ? ['cursor', route.cursorMode ?? 'agent'] : [])])).digest('hex')
     // Lock the route id as well as its state, preventing duplicate listeners after config edits.
     const lock = join(dir, `${route.id}.lock`)
     await mkdir(lock, { mode: 0o700 })

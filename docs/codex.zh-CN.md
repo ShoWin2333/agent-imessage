@@ -49,3 +49,5 @@ agent-imessage doctor
 - PR 阶段验证自动测试、独立打包和本机 Codex 接口；真实手机收发按维护者计划在独立 Photon 路由配置后验收。
 
 完整说明见 [Codex package README](../packages/codex/README.md)。
+
+如需使用 Cursor 账户，请参阅 [Cursor 适配指南](cursor.zh-CN.md)。同一独立桥接安装包通过每条路由的 `backend` 选择 Codex 或 Cursor；省略时仍为 Codex。

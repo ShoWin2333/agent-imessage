@@ -100,3 +100,20 @@ npm run test:codex:live
 ```
 
 A live Codex smoke test uses a temporary workspace and fake iMessage transport. Real phone delivery must be verified separately with a dedicated Photon route before treating this preview as production-ready.
+
+## Cursor backend
+
+The same standalone package also supports [Cursor CLI ACP](https://cursor.com/docs/cli/acp). Install a CLI that supports `agent acp` and run `agent login` locally first. The editor alone is not sufficient. Build/install this package as above (the historical `packages/codex` path is unchanged), then run:
+
+```sh
+agent-imessage doctor cursor
+agent-imessage start /absolute/path/to/config.json
+```
+
+Copy `config.cursor.example.json`, set `cursorBinary` if `agent` is not on PATH, and configure a dedicated Photon project/number. `doctor cursor /absolute/path/to/agent` checks that binary. Each route may choose `backend: "codex"` or `"cursor"`; omitted means Codex. Cursor routes optionally accept `cursorMode: "agent" | "plan" | "ask"` (default `agent`) and a Cursor `model`. Modes must be advertised by the installed CLI. Changing backend or Cursor mode separates stored sessions; existing Codex state remains compatible. Restart after configuration changes.
+
+Cursor supports text prompts, resume, `/new`, `/status`, `/stop`, single-use tool approvals, plan approvals and single-choice questions. Reply to questions with `/answer ID {"question-id":"option-id"}`. Multiple-choice selection and unknown requests are cancelled/rejected. Permanent approvals are never offered. Oversized or incomplete approval prompts fail closed. Cursor text chunks are accumulated until completion; unlike Codex, ACP has no final-answer phase marker, so this may include user-facing progress text. Thought chunks are excluded.
+
+Cursor uses its own login, usage, permissions, rules, hooks and MCP configuration, not Codex sandbox settings. Only approvals actually requested by Cursor reach the phone; this is not a guarantee that every command requires approval. The bridge does not pass `--force`. `ask` is a Cursor mode, not a free ChatGPT Chat quota. Each Photon route still needs exactly one receiver and a unique project; different backends may coexist on separate routes.
+
+The preview does not send files/voice through Cursor, accept inbound attachments, forward generated-image notifications, support team-level MCP, or promise access to existing editor conversations. Prompt completion has a 30-minute deadline; cancellation keeps the route busy until the backend finishes, and closes the process/bridge if it has not finished within 10 seconds. Connection failure stops the bridge without replaying ambiguous tasks. `doctor` checks handshake/authentication only. Real Cursor model execution and phone delivery require separate acceptance with your account and Photon route. See also the [Chinese guide](../../docs/cursor.zh-CN.md).

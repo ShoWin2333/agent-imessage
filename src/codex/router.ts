@@ -47,6 +47,8 @@ export class CodexRouter {
     rpc.onClose = () => { this.closed = true; this.cancelPending(); this.active?.abort.abort(); this.active = undefined }
   }
 
+  private get agentName(): string { return this.route.backend === 'cursor' ? 'Cursor' : 'Codex' }
+
   setConnected(value: boolean): void {
     this.connected = value
     if (!value && this.active) {
@@ -93,7 +95,7 @@ export class CodexRouter {
       return
     }
     if (command === '/status') {
-      await this.send(channel, `Route: ${this.route.id}\nThread: ${this.store.state.threadId ?? 'not started'}\nState: ${this.active ? (this.active.stopping ? 'stopping' : 'running') : 'idle'}\nPending questions/approvals: ${this.pending.size}`)
+      await this.send(channel, `Route: ${this.route.id}\nAgent: ${this.agentName}\nThread: ${this.store.state.threadId ?? 'not started'}\nState: ${this.active ? (this.active.stopping ? 'stopping' : 'running') : 'idle'}\nPending questions/approvals: ${this.pending.size}`)
       return
     }
     if (command === '/stop' || command === '/cancel') {
@@ -103,7 +105,7 @@ export class CodexRouter {
       active.abort.abort()
       this.cancelPending()
       if (active.turnId) await this.rpc.request('turn/interrupt', { threadId: this.store.state.threadId, turnId: active.turnId })
-      await this.send(channel, 'Stop requested. Waiting for Codex to finish interrupting.')
+      await this.send(channel, `Stop requested. Waiting for ${this.agentName} to finish interrupting.`)
       return
     }
     if (command === '/approve' || command === '/deny' || command === '/answer') {
@@ -115,7 +117,7 @@ export class CodexRouter {
       delete this.store.state.threadId
       this.ready = false
       await this.store.save()
-      await this.send(channel, 'The next message will start a new Codex thread.')
+      await this.send(channel, `The next message will start a new ${this.agentName} thread.`)
       return
     }
     if (text.startsWith('/') && !text.startsWith('//')) { await this.send(channel, 'Unknown command. Send /help.'); return }
@@ -132,14 +134,14 @@ export class CodexRouter {
     if (active.turnId && active.turnId !== id) throw new Error('Turn ownership mismatch')
     active.turnId = id
     if (active.stopping || !this.connected) await this.rpc.request('turn/interrupt', { threadId: this.store.state.threadId, turnId: id })
-    else await this.send(channel, 'Codex has started your task.')
+    else await this.send(channel, `${this.agentName} has started your task.`)
   }
 
   private async ensureThread(): Promise<void> {
     if (this.ready) return
     const threadId = this.store.state.threadId
     const response = await this.rpc.request(threadId ? 'thread/resume' : 'thread/start', {
-      ...(threadId ? { threadId } : { dynamicTools: tools }),
+      ...(threadId ? { threadId } : { dynamicTools: this.route.backend === 'cursor' ? [] : tools }),
       cwd: this.route.cwd,
       approvalPolicy: 'untrusted',
       sandbox: 'workspace-write',
@@ -176,7 +178,7 @@ export class CodexRouter {
       this.active = undefined
       if (!this.connected) return
       if (active.stopping || turn.status === 'interrupted') await this.send(active.channel, 'Task stopped.')
-      else if (turn.status === 'failed') await this.send(active.channel, 'Codex could not complete the task. Check the local Codex account and configuration.')
+      else if (turn.status === 'failed') await this.send(active.channel, `${this.agentName} could not complete the task. Check the local account and configuration.`)
       else await this.send(active.channel, [...active.answers.values()].join('\n\n') || 'Task completed without a text response.')
       return
     }
@@ -198,6 +200,7 @@ export class CodexRouter {
     const active = this.owns(params)
     if (!active || active.stopping || !this.connected || this.closed) throw new Error('Unowned request')
     if (method === 'item/tool/call') {
+      if (this.route.backend === 'cursor') throw new Error('Cursor media tools are unavailable')
       const tool = params.tool
       if (tool !== 'send_imessage_file' && tool !== 'send_imessage_voice') throw new Error('Unknown tool')
       const args = object(params.arguments)
@@ -212,7 +215,8 @@ export class CodexRouter {
         return { success: false, contentItems: [{ type: 'inputText', text: 'Media could not be sent. Verify that it is a regular file inside the workspace, within 20 MiB, and that this iMessage turn is still active.' }] }
       }
     }
-    const approval = method === 'item/commandExecution/requestApproval' || method === 'item/fileChange/requestApproval'
+    if (method === 'bridge/requestApproval' && this.route.backend !== 'cursor') throw new Error('Unsupported approval source')
+    const approval = method === 'bridge/requestApproval' || method === 'item/commandExecution/requestApproval' || method === 'item/fileChange/requestApproval'
     const question = method === 'item/tool/requestUserInput'
     if (!approval && !question) throw new Error('Unsupported request; fail closed')
     const questions = question && Array.isArray(params.questions) ? params.questions.map(object) : []
@@ -222,9 +226,11 @@ export class CodexRouter {
     if (method === 'item/commandExecution/requestApproval' && params.kind != null && params.kind !== 'command') throw new Error('Unsupported approval kind')
     const changes = active.changes.get(String(params.itemId))
     if (method === 'item/fileChange/requestApproval' && !changes) throw new Error('File changes unavailable for review')
-    const details = approval
-      ? JSON.stringify({ method, command: params.command, cwd: params.cwd, reason: params.reason, grantRoot: params.grantRoot, network: params.networkApprovalContext, additionalPermissions: params.additionalPermissions, changes })
-      : questions.map(q => `${q.id}: ${q.question}\n${JSON.stringify(q.options ?? [])}`).join('\n')
+    const details = method === 'bridge/requestApproval'
+      ? JSON.stringify(params.details)
+      : approval
+        ? JSON.stringify({ method, command: params.command, cwd: params.cwd, reason: params.reason, grantRoot: params.grantRoot, network: params.networkApprovalContext, additionalPermissions: params.additionalPermissions, changes })
+        : questions.map(q => `${q.id}: ${q.question}\n${JSON.stringify(q.options ?? [])}`).join('\n')
     if (details.length > 2600) throw new Error('Request too large for safe review over iMessage')
     if (approval && Array.isArray(params.availableDecisions) && !params.availableDecisions.includes('accept')) throw new Error('Single-action approval unavailable')
     const id = randomUUID().slice(0, 8)
@@ -250,7 +256,7 @@ export class CodexRouter {
         request.resolve({ answers: Object.fromEntries(request.questions.map(id => [id, { answers: [data[id]] }])) })
       } catch { await this.send(channel, 'Reply with a JSON object containing one text answer for every question id.'); return }
     } else { await this.send(channel, 'That command does not match the pending request.'); return }
-    await this.send(channel, 'Response delivered to Codex.')
+    await this.send(channel, `Response delivered to ${this.agentName}.`)
   }
 
   private cancelPending(): void { for (const entry of [...this.pending.values()]) entry.cancel() }

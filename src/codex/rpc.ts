@@ -14,7 +14,7 @@ export interface Rpc {
 }
 
 /** One private stdio connection per route; raw server errors and stderr never reach iMessage. */
-export class AppServer implements Rpc {
+export class JsonRpcProcess implements Rpc {
   onNotification: Rpc['onNotification'] = () => {}
   onRequest: Rpc['onRequest'] = async () => { throw new Error('Unsupported server request') }
   onClose: Rpc['onClose'] = () => {}
@@ -23,10 +23,10 @@ export class AppServer implements Rpc {
   private nextId = 0
   private closed = false
 
-  constructor(binary = 'codex', cwd = process.cwd(), privateEnvNames: string[] = []) {
+  constructor(binary = 'codex', cwd = process.cwd(), privateEnvNames: string[] = [], private readonly wire: { args: string[]; jsonrpc?: boolean } = { args: ['app-server', '--listen', 'stdio://'] }) {
     const env = { ...process.env }
     for (const name of privateEnvNames) delete env[name]
-    this.child = spawn(binary, ['app-server', '--listen', 'stdio://'], { cwd, env, stdio: 'pipe', shell: false })
+    this.child = spawn(binary, wire.args, { cwd, env, stdio: 'pipe', shell: false })
     this.child.stderr.resume()
     this.child.stdin.on('error', () => this.close())
     this.child.on('error', () => this.close())
@@ -37,22 +37,14 @@ export class AppServer implements Rpc {
     })
   }
 
-  async initialize(): Promise<void> {
-    await this.request('initialize', {
-      clientInfo: { name: 'agent_imessage', title: 'Agent iMessage', version: '0.1.0' },
-      capabilities: { experimentalApi: true },
-    })
-    this.write({ method: 'initialized' })
-  }
-
-  request(method: string, params: ObjectValue): Promise<ObjectValue> {
-    if (this.closed) return Promise.reject(new Error('Codex connection closed'))
+  request(method: string, params: ObjectValue, timeoutMs = 60_000): Promise<ObjectValue> {
+    if (this.closed) return Promise.reject(new Error('Agent connection closed'))
     const id = ++this.nextId
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         // An uncertain turn/start must not leave a detached turn executing.
         this.close()
-      }, 60_000)
+      }, timeoutMs)
       this.pending.set(id, { resolve, reject, timer })
       this.write({ id, method, params })
     })
@@ -63,7 +55,7 @@ export class AppServer implements Rpc {
     this.closed = true
     for (const item of this.pending.values()) {
       clearTimeout(item.timer)
-      item.reject(new Error('Codex connection closed or request timed out'))
+      item.reject(new Error('Agent connection closed or request timed out'))
     }
     this.pending.clear()
     this.child.kill()
@@ -72,8 +64,10 @@ export class AppServer implements Rpc {
     this.onClose()
   }
 
-  private write(value: unknown): void {
-    if (!this.closed) this.child.stdin.write(`${JSON.stringify(value)}\n`)
+  notify(method: string, params: ObjectValue): void { this.write({ method, params }) }
+
+  protected write(value: ObjectValue): void {
+    if (!this.closed) this.child.stdin.write(`${JSON.stringify(this.wire.jsonrpc ? { ...value, jsonrpc: '2.0' } : value)}\n`)
   }
 
   private receive(message: ObjectValue): void {
@@ -94,7 +88,18 @@ export class AppServer implements Rpc {
     if (!pending) return
     clearTimeout(pending.timer)
     this.pending.delete(message.id)
-    if (message.error !== undefined) pending.reject(new Error('Codex rejected the request; check local configuration and account access'))
+    if (message.error !== undefined) pending.reject(new Error('Agent rejected the request; check local configuration and account access'))
     else pending.resolve(object(message.result))
   }
+}
+
+export class AppServer extends JsonRpcProcess {
+  async initialize(): Promise<void> {
+    await this.request('initialize', {
+      clientInfo: { name: 'agent_imessage', title: 'Agent iMessage', version: '0.1.0' },
+      capabilities: { experimentalApi: true },
+    })
+    this.write({ method: 'initialized' })
+  }
+
 }
