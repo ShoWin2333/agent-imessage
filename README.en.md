@@ -1,4 +1,17 @@
-# dsh-imessage: Make DSH genuinely useful from iMessage
+# Agent iMessage: Codex and DSH over iMessage
+
+One repository, two adapters:
+
+| Adapter | Runtime | Setup |
+| --- | --- | --- |
+| **Codex (preview)** | Standalone local Codex App Server bridge; no DSH installation required | [Codex package guide](packages/codex/README.md) |
+| **DSH** | Existing DSH plugin, preserving its configuration and installation identifiers | Below |
+
+The Codex preview supports text tasks, thread resume, approvals, interruption, and workspace file/voice delivery. Real phone acceptance is pending a dedicated Photon route. It does not take over desktop-app threads or use Codex Cloud. Both adapters share the Photon transport and media validation code, with separate route configuration.
+
+This project originated as a fork of `photon-hq/dsh-imessage`, previously named `dsh-imessage`. For compatibility, the DSH package, plugin ID and settings namespace remain `dsh-imessage`; the standalone Codex package is `@showin2333/agent-imessage`. There is no unified settings UI yet. This is an independent community project, not an official OpenAI product or endorsement.
+
+## DSH adapter
 
 [中文](./README.md) | **English**
 
@@ -51,8 +64,8 @@ Native iMessage voice messages may show “Expires in 2 min.” This is Apple's 
 The unqualified `dsh-imessage` package on npm refers to the upstream release and may not contain this fork's enhancements. To use the image, file, voice, and multi-route features from this repository, build and install the fork locally:
 
 ```sh
-git clone https://github.com/ShoWin2333/dsh-imessage.git
-cd dsh-imessage
+git clone https://github.com/ShoWin2333/agent-imessage.git
+cd agent-imessage
 npm ci --legacy-peer-deps
 npm run build
 npm pack
@@ -223,7 +236,7 @@ I do not yet have an established community or experience promoting my work. I ho
 ## Upstream and references
 
 - [Upstream dsh-imessage](https://github.com/photon-hq/dsh-imessage)
-- [This fork](https://github.com/ShoWin2333/dsh-imessage)
+- [This fork](https://github.com/ShoWin2333/agent-imessage)
 - [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)
 - [Photon CLI authentication](https://photon.codes/docs/cli/authentication)
 - [Spectrum TypeScript getting started](https://photon.codes/docs/spectrum-ts/getting-started)

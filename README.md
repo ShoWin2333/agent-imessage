@@ -1,4 +1,17 @@
-# dsh-imessage：让 DSH 真正在 iMessage 里工作
+# Agent iMessage：连接 Codex、DSH 与 iMessage
+
+同一个项目，两种接入方式：
+
+| 接入 | 运行方式 | 安装说明 |
+| --- | --- | --- |
+| **Codex（预览版）** | 独立本机桥接，通过 Codex App Server 工作，无需 DSH | [Codex 中文指南](docs/codex.zh-CN.md) |
+| **DSH** | 原有 DSH 插件，保留现有设置与安装标识 | 本文下方 |
+
+Codex 版本支持文字任务、会话恢复、审批与停止，以及工作区内文件和语音发送；手机端完整验收待配置专用 Photon 路由后进行。它不接管桌面端已有任务，也不是 Codex 云端桥接。两个适配共用 Photon 收发和媒体检查代码，分别配置路由。
+
+本项目由 `photon-hq/dsh-imessage` 衍生，原名 `dsh-imessage`。为兼容现有 DSH 安装，DSH 的包名、插件 ID 和设置命名空间仍为 `dsh-imessage`；Codex 安装包为 `@showin2333/agent-imessage`。两者尚无统一设置界面。项目更名不代表 OpenAI 官方产品或背书。
+
+## DSH 适配
 
 **中文** | [English](./README.en.md)
 
@@ -51,8 +64,8 @@ iMessage 原生语音默认可能显示“2 分钟后过期”。这是 Apple �
 npm 上未带仓库地址的 `dsh-imessage` 指向上游正式包，不保证包含本 fork 的增强。要使用这里的图片、文件、语音和多路由能力，请从本仓库打包安装：
 
 ```sh
-git clone https://github.com/ShoWin2333/dsh-imessage.git
-cd dsh-imessage
+git clone https://github.com/ShoWin2333/agent-imessage.git
+cd agent-imessage
 npm ci --legacy-peer-deps
 npm run build
 npm pack
@@ -223,7 +236,7 @@ DSH_BIN=/path/to/dsh npm run test:profile
 ## 上游与参考资料
 
 - [上游 dsh-imessage](https://github.com/photon-hq/dsh-imessage)
-- [本 fork](https://github.com/ShoWin2333/dsh-imessage)
+- [本 fork](https://github.com/ShoWin2333/agent-imessage)
 - [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)
 - [Photon CLI authentication](https://photon.codes/docs/cli/authentication)
 - [Spectrum TypeScript getting started](https://photon.codes/docs/spectrum-ts/getting-started)

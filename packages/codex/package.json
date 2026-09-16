@@ -1,0 +1,16 @@
+{
+  "name": "@showin2333/agent-imessage",
+  "version": "0.1.0",
+  "description": "Local Codex App Server bridge for iMessage, with workspace-scoped routes and media delivery",
+  "type": "module",
+  "license": "MIT",
+  "engines": { "node": "^22.19.0 || >=24.0.0" },
+  "bin": { "agent-imessage": "dist/agent-imessage.js" },
+  "files": ["dist", "README.md", "LICENSE", "config.example.json"],
+  "repository": { "type": "git", "url": "git+https://github.com/ShoWin2333/agent-imessage.git", "directory": "packages/codex" },
+  "dependencies": {
+    "@spectrum-ts/core": "12.7.0",
+    "@spectrum-ts/imessage": "12.7.0",
+    "zod": "4.4.3"
+  }
+}

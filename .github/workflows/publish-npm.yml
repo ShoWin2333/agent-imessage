@@ -16,6 +16,8 @@ on:
 
 jobs:
   release:
+    # Fork packages are distributed as tarballs until their own publisher is configured.
+    if: github.repository == 'photon-hq/dsh-imessage'
     # BuildSpace v1 predates npm OIDC support. Use the current Photon workflow
     # until that support is included in a new immutable BuildSpace release tag.
     uses: photon-hq/buildspace/.github/workflows/typescript-service-release.yaml@main
