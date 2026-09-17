@@ -5,6 +5,7 @@ export interface SessionOptions {
   cwd: string
   model?: string
   approvalPolicy?: string
+  speed?: string
   effort?: string
   tools: ObjectValue[]
 }

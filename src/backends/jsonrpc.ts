@@ -1,6 +1,8 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { createInterface } from 'node:readline'
 
+export class SessionInUseError extends Error { constructor() { super('Session is in use by another client'); this.name = 'SessionInUseError' } }
+
 export type ObjectValue = Record<string, unknown>
 export function object(value: unknown): ObjectValue {
   return typeof value === 'object' && value !== null && !Array.isArray(value) ? value as ObjectValue : {}
@@ -93,7 +95,7 @@ export class JsonRpcProcess implements Rpc {
     if (!pending) return
     clearTimeout(pending.timer)
     this.pending.delete(message.id)
-    if (message.error !== undefined) pending.reject(new Error('Agent rejected the request; check local configuration and account access'))
+    if (message.error !== undefined) pending.reject(/already has an active writer/.test(String(object(message.error).message ?? '')) ? new SessionInUseError() : new Error('Agent rejected the request; check local configuration and account access'))
     else pending.resolve(object(message.result))
   }
 }

@@ -2,4 +2,6 @@
 .photon-picker { display:flex; flex-wrap:wrap; align-items:end; gap:12px; margin:18px 0; }
 .photon-picker label { flex:1 1 280px; min-width:0; }
 .photon-picker select { width:100%; }
-input[hidden] { display:none; }
+[hidden] { display:none !important; }
+
+select:disabled { background:#f0f2ed; color:#768078; cursor:not-allowed; }

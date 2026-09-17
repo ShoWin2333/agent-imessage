@@ -15,7 +15,7 @@ export const routeSchema = z.object({
   model: z.string().min(1).optional(),
   label: z.string().max(160).optional(),
   enabled: z.boolean().optional(),
-  effort: z.enum(['default', 'low', 'medium', 'high', 'xhigh']).optional(),
+  effort: z.enum(['default', 'none', 'off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']).optional(),
   speed: z.enum(['default', 'fast', 'standard']).optional(),
   cursorApiKeyEnv: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/).optional(),
 

@@ -5,7 +5,7 @@ import { markdownToPlainText } from '../plaintext.js'
 import { loadOutboundMedia, DEFAULT_MAX_OUTBOUND_MEDIA_BYTES } from '../media.js'
 import type { SpectrumInboundMessage } from '../spectrum-runtime.js'
 import type { RouteConfig } from './config.js'
-import { object, type ObjectValue } from '../backends/jsonrpc.js'
+import { object, SessionInUseError, type ObjectValue } from '../backends/jsonrpc.js'
 import type { Backend, BackendEvent, BackendRequest } from '../backends/types.js'
 import type { RouteState } from './state.js'
 
@@ -73,7 +73,12 @@ export class GatewayRouter {
       this.lastActivityAt = Date.now()
       await this.handle(channel)
     })
-    this.incoming = operation.catch(async () => {
+    this.incoming = operation.catch(async error => {
+      if (error instanceof SessionInUseError && !this.active) {
+        this.ready = false
+        await this.send(channel, 'This Codex session is in use by another client. Send /new to start a separate Gateway session, or release the session in the other client and retry.').catch(() => {})
+        return
+      }
       // Do not expose upstream errors, prompts or credentials to the remote channel.
       this.fail()
       await this.send(channel, 'Bridge stopped after an error. Check the local process and restart it; this message will not be replayed automatically.').catch(() => {})
@@ -161,6 +166,7 @@ export class GatewayRouter {
       ...(threadId ? { id: threadId } : {}), tools, cwd: this.route.cwd,
       ...(this.route.approvalPolicy ? {approvalPolicy:this.route.approvalPolicy} : {}),
       ...(this.route.model ? { model: this.route.model } : {}),
+      ...(this.route.speed && this.route.speed !== 'default' ? {speed:this.route.speed} : {}),
       ...(this.route.effort && this.route.effort !== 'default' ? { effort: this.route.effort } : {}),
     })
     if (typeof thread.id !== 'string' || thread.cwd !== this.route.cwd || (threadId && thread.id !== threadId)) throw new Error('Thread workspace mismatch')

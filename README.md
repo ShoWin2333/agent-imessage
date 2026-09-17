@@ -45,7 +45,7 @@ agent-imessage start
 | Backend | 所需运行环境 | 模型参数 | 执行与权限 |
 | --- | --- | --- | --- |
 | Cursor | 本项目安装的 `@cursor/sdk@1.0.31`；在 UI 保存 API key，或设置 `CURSOR_API_KEY` | 模型 ID、effort、speed；`cursorMode` 可在配置中设为 `agent` / `plan` / `ask` | SDK local runtime，默认启用沙箱并加载项目规则；不启动 Cursor CLI |
-| Codex | `codex` CLI 可执行文件；提前完成 `codex login` | `model`、`effort` | 独立 App Server；`workspace-write`；可选择 `untrusted` / `on-request` / `never` 审批策略 |
+| Codex | `codex` CLI 可执行文件；提前完成 `codex login` | `model`、`effort` | 独立 App Server；`workspace-write`；可选择 `on-request` / `never`，并支持 Codex 自动审核 审批策略 |
 | DSH | 安装完整的 DSH CLI（验证版本 `0.1.5-rc.1`），预先配置模型凭据 | ACP 的 model option 值、`effort` | 独立 `dsh --profile acp`；显式 `DSH_PERMISSION_MODE=workspace-write` |
 
 Codex / DSH 是可选的外部 backend：只使用 Cursor 时不需要安装它们。`codexBinary`、`dshBinary` 可以写可执行文件绝对路径，适用于后台服务的 PATH 与交互终端不同的情况。DSH model 值由其 ACP 模型目录决定，可能包含 provider 前缀。
@@ -175,6 +175,12 @@ npm run test:codex:live
 
 每个项目卡片提供“保存并应用此项目”：只保存该项目并重启对应线路，保留其他项目的运行状态和未保存草稿。当前项目正在执行的任务会随线路重启而停止。全局保存仍用于批量修改和共享 Cursor API Key；路由 ID 的修改使用全局保存。
 
-项目卡片可选择审批权限，保存并应用后生效：Cursor 提供沙箱执行、沙箱加自动审核、完全访问（关闭沙箱且不请求审批）；Codex 提供默认不可信操作审批、按需审批、不请求审批（仍受工作区沙箱约束）；DSH 提供 iMessage 人工审批或拒绝额外权限。Cursor 自动审核依赖账户后端支持，不能转交给 `/approve`，也不是保证每个操作都自动放行。
+项目卡片可选择审批权限，保存并应用后生效：Cursor 提供沙箱执行、沙箱加自动审核、完全访问（关闭沙箱且不请求审批）；Codex 默认沙箱内自动执行、额外权限人工审批，也可选择 Codex 自动审核或不请求审批（仍受工作区沙箱约束）；DSH 提供 iMessage 人工审批或拒绝额外权限。Cursor 自动审核依赖账户后端支持，不能转交给 `/approve`，也不是保证每个操作都自动放行。
 
 Cursor 默认 `cursorSettings: "project"`，由 SDK 原生加载项目 `AGENTS.md` 和 `.cursor` 规则/配置；可在 UI 选择增加用户配置，或关闭本地规则加载。加载项目设置也会加载 SDK 支持的项目 hooks/MCP 等配置。规则属于模型指令，不是 OS 权限边界。
+
+推理强度和速度按模型目录动态显示：Cursor 使用 SDK 返回的 `effort`/`fast` 参数，Codex 使用 `supportedReasoningEfforts` 和 `priority` 服务档，DSH 使用所选模型的 ACP `reasoning_effort` 选项。DSH 未提供独立速度控制，界面会禁用它；不支持的已保存参数会明确标记，避免静默丢弃。点击“刷新模型列表”获取当前能力，切换模型后参数回到默认。Fast 可能增加用量。
+
+规则区对所有 backend 显示：Codex 原生读取用户和项目路径中的 AGENTS.md/AGENTS.override.md；DSH 原生读取 DSH_HOME 下的 AGENTS.md 及项目 AGENTS.md/CLAUDE.md 与 local 文件。Gateway 不额外拼接规则或覆盖其原生作用域。只有 Cursor 提供本应用可配置的 settings source 选择。规则是模型指令，并非确定性执行或安全边界。
+
+Codex 的 `auto-review` 映射到 App Server `approvalPolicy: "on-request"` 与 `approvalsReviewer: "auto_review"`；默认和人工审批明确使用 `user` 审核，避免继承用户全局自动审核设置。所有这些模式均保留 workspace-write 沙箱。自动审核可能拒绝操作，并不表示全部允许。
