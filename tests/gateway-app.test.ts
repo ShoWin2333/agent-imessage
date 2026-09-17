@@ -1,0 +1,107 @@
+import { PhotonAccount } from '../src/app/photon.js'
+import { afterEach, expect, it, vi } from 'vitest'
+import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { get } from 'node:http'
+import { join } from 'node:path'
+import { Gateway } from '../src/gateway/app.js'
+import { BaseBackend, type SessionOptions } from '../src/backends/types.js'
+import { appSchema } from '../src/app/config.js'
+import { startServer } from '../src/app/server.js'
+import { GatewayRouter } from '../src/gateway/router.js'
+import type { SpectrumInboundMessage } from '../src/spectrum-runtime.js'
+import type { RouteState } from '../src/gateway/state.js'
+class Backend extends BaseBackend {
+  initialize=vi.fn(async()=>{})
+  openSession=vi.fn(async(o:SessionOptions)=>({id:o.id??'session',cwd:o.cwd}))
+  startTurn=vi.fn(async(sessionId:string,_text:string)=>{this.onEvent({type:'started',sessionId,turnId:'turn'});return 'turn'})
+  cancel=vi.fn(async()=>{})
+  close=vi.fn(async()=>{this.onClose()})
+}
+const cleanup:Array<()=>Promise<unknown>>=[]
+afterEach(async()=>{vi.restoreAllMocks();for(const fn of cleanup.splice(0).reverse())await fn()})
+async function fixture(){const dir=await realpath(await mkdtemp(join(tmpdir(),'gateway-')));cleanup.push(()=>rm(dir,{recursive:true,force:true}));return dir}
+const route={id:'one',cwd:'/workspace',projectId:'p',projectSecretEnv:'SECRET',senderPhoneNumber:'+15551234567',assignedPhoneNumber:'+15557654321'}
+it('isolates failing routes, owns transport lifecycle and releases state locks',async()=>{
+  const dir=await fixture(),config=appSchema.parse({stateDir:dir,routes:[{...route,cwd:dir},{...route,id:'two',projectId:'p2',cwd:join(dir,'missing')},{...route,id:'three',projectId:'p3',cwd:dir}]})
+  const backend=new Backend();let end!:()=>void
+  const gateway=new Gateway(config,{photon:{one:'secret',two:'secret'}},()=>backend,async()=>({messages:{async *[Symbol.asyncIterator](){await new Promise<void>(r=>{end=r})}},stop:async()=>{end()}}))
+  cleanup.push(()=>gateway.stop());await gateway.start()
+  expect(gateway.snapshot().map(r=>r.phase)).toEqual(['listening','failed','failed'])
+  await gateway.stop();expect(backend.close).toHaveBeenCalledTimes(1)
+  await gateway.start();expect(gateway.snapshot()[0]?.phase).toBe('listening')
+})
+it('serves the standalone UI and enforces loopback Host, Origin and CSRF before mutations',async()=>{
+  const dir=await fixture(),file=join(dir,'config.json'),config=appSchema.parse({port:0,stateDir:dir})
+  const gateway=new Gateway(config,{photon:{}})
+  const server=await startServer(file,config,{photon:{}},gateway);cleanup.push(()=>server.close());cleanup.push(()=>gateway.stop())
+  expect((await fetch(server.url)).status).toBe(200)
+  const state=await (await fetch(server.url+'/api/state')).json() as {csrf:string}
+  expect(await new Promise<number | undefined>((resolve,reject)=>{get(server.url+'/api/state',{headers:{Host:'attacker.test'}},response=>{response.resume();resolve(response.statusCode)}).on('error',reject)})).toBe(403)
+  expect((await fetch(server.url+'/api/stop',{method:'POST',headers:{origin:'https://evil.test'}})).status).toBe(403)
+  const headers={origin:server.url,'content-type':'application/json','x-agent-token':state.csrf}
+  expect((await fetch(server.url+'/api/save',{method:'POST',headers,body:JSON.stringify({revision:0,config,cursorApiKey:'private-key'})})).status).toBe(200)
+  expect((await fetch(server.url+'/api/save',{method:'POST',headers,body:JSON.stringify({revision:0,config})})).status).toBe(409)
+  const response=await (await fetch(server.url+'/api/state')).text()
+  expect(response).not.toContain('private-key');expect(response).toContain('"hasCursorKey":true')
+})
+it('keeps session history route-scoped and routes shared questions, files and voice for any backend',async()=>{
+  const dir=await fixture();await writeFile(join(dir,'voice.m4a'),'audio')
+  const backend=new Backend(),store={state:{seen:[]} as RouteState,save:async()=>{}}
+  const router=new GatewayRouter(backend,{...route,cwd:dir,backend:'dsh'},store,1000);cleanup.push(()=>router.close());router.setConnected(true)
+  const send=vi.fn(async(_s:string)=>{}),voice=vi.fn(async()=>{})
+  let seq=0;const channel=(text:string):SpectrumInboundMessage=>({id:String(++seq),text,send,sendVoice:voice,sendFile:async()=>{},responding:fn=>fn()})
+  await router.receive(channel('hello'))
+  const media=await backend.onRequest({kind:'tool',sessionId:'session',turnId:'turn',payload:{tool:'send_imessage_voice',arguments:{path:'voice.m4a'}}})
+  expect(media).toMatchObject({success:true});expect(voice).toHaveBeenCalledTimes(1)
+  const question=backend.onRequest({kind:'tool',sessionId:'session',turnId:'turn',payload:{tool:'ask_imessage_user',arguments:{question:'Which branch?'}}})
+  await expect.poll(()=>send.mock.calls.at(-1)?.[0]).toContain('/answer')
+  const id=send.mock.calls.at(-1)![0].match(/\/answer ([\w-]+)/)![1]
+  await router.receive(channel(`/answer ${id} {"answer":"main"}`));expect(await question).toMatchObject({success:true})
+  backend.onEvent({type:'completed',sessionId:'session',turnId:'turn',status:'completed'})
+  await expect.poll(()=>router.snapshot().busy).toBe(false)
+  await router.receive(channel('/new'));await router.receive(channel('/switch other'));expect(store.state.threadId).toBeUndefined()
+  await router.receive(channel('/switch session'));expect(store.state.threadId).toBe('session')
+})
+
+it('lists Photon projects and saves selected credentials only with their matching project',async()=>{
+  const dir=await fixture(),file=join(dir,'config.json')
+  const config=appSchema.parse({port:0,stateDir:dir,routes:[{...route,cwd:dir,enabled:false}]})
+  const gateway=new Gateway(config,{photon:{one:'old-secret'}})
+  vi.spyOn(PhotonAccount.prototype,'projects').mockResolvedValue([{id:'new-project',name:'Existing project'}])
+  vi.spyOn(PhotonAccount.prototype,'select').mockResolvedValue({projectId:'new-project',secret:'new-private-secret',assignedPhoneNumber:route.assignedPhoneNumber})
+  const server=await startServer(file,config,{photon:{one:'old-secret'}},gateway)
+  cleanup.push(()=>server.close());cleanup.push(()=>gateway.stop())
+  const state=await (await fetch(server.url+'/api/state')).json()
+  const post=(path:string,data:unknown)=>fetch(server.url+path,{method:'POST',headers:{origin:server.url,'content-type':'application/json','x-agent-token':state.csrf},body:JSON.stringify(data)})
+  expect(await (await post('/api/photon/projects',{})).json()).toEqual({projects:[{id:'new-project',name:'Existing project'}]})
+  const selected=await (await post('/api/photon/select',{id:'one',name:'one',sender:route.senderPhoneNumber,projectId:'new-project'})).text()
+  expect(selected).not.toContain('new-private-secret')
+  const next={...config,routes:[{...config.routes[0],projectId:'new-project'}]}
+  expect((await post('/api/save',{revision:0,config:next})).status).toBe(200)
+  const {readFile}=await import('node:fs/promises')
+  expect(JSON.parse(await readFile(file+'.secrets.json','utf8')).photon.one).toBe('new-private-secret')
+})
+it('applies one project without closing another backend or changing its configuration',async()=>{
+  const dir=await fixture()
+  const config=appSchema.parse({port:0,stateDir:dir,routes:[{...route,cwd:dir},{...route,id:'two',projectId:'p2',assignedPhoneNumber:'+15557654322',cwd:dir}]})
+  const backends:Backend[]=[]
+  const secrets={photon:{one:'secret',two:'secret'}}
+  const gateway=new Gateway(config,secrets,()=>{const b=new Backend();backends.push(b);return b},async()=>{
+    let end!:()=>void;const done=new Promise<void>(r=>{end=r})
+    return {messages:{async *[Symbol.asyncIterator](){await done}},stop:async()=>end()}
+  })
+  cleanup.push(()=>gateway.stop());await gateway.start()
+  const file=join(dir,'config.json'),server=await startServer(file,config,secrets,gateway);cleanup.push(()=>server.close())
+  const state=await (await fetch(server.url+'/api/state')).json()
+  const next={...config.routes[0],label:'Updated project'}
+  const response=await fetch(server.url+'/api/save-route',{method:'POST',headers:{origin:server.url,'content-type':'application/json','x-agent-token':state.csrf},body:JSON.stringify({revision:0,id:'one',route:next,photon:{two:'must-not-change'}})})
+  expect(response.status).toBe(200)
+  expect(backends[0]!.close).toHaveBeenCalledTimes(1)
+  expect(backends[1]!.close).not.toHaveBeenCalled()
+  expect(backends).toHaveLength(3)
+  const {readFile}=await import('node:fs/promises')
+  const saved=JSON.parse(await readFile(file,'utf8'))
+  expect(saved.routes[1]).toEqual(config.routes[1])
+  expect(JSON.parse(await readFile(file+'.secrets.json','utf8')).photon.two).toBe('secret')
+})

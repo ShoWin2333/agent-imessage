@@ -1,7 +1,7 @@
 {
-  "name": "dsh-imessage",
-  "version": "0.2.1",
-  "description": "Agent iMessage: DSH adapter and shared transport for DSH and local Codex",
+  "name": "@showin2333/agent-imessage",
+  "version": "1.0.0",
+  "description": "Standalone iMessage Agent Gateway with Cursor SDK, Codex App Server and DSH backends",
   "type": "module",
   "license": "MIT",
   "repository": {
@@ -13,11 +13,13 @@
   },
   "homepage": "https://github.com/ShoWin2333/agent-imessage#readme",
   "keywords": [
-    "deepseek-harness",
-    "dsh",
+    "agent",
+    "gateway",
     "imessage",
     "photon",
-    "spectrum"
+    "cursor",
+    "codex",
+    "dsh"
   ],
   "engines": {
     "node": "^22.19.0 || >=24.0.0"
@@ -25,78 +27,40 @@
   "publishConfig": {
     "access": "public"
   },
-  "main": "./lib/index.js",
+  "main": "./lib/types/index.js",
   "types": "./lib/types/index.d.ts",
   "exports": {
     ".": {
       "types": "./lib/types/index.d.ts",
-      "default": "./lib/index.js"
-    },
-    "./client": {
-      "types": "./lib/types/client/index.d.ts",
-      "default": "./lib/client.js"
-    },
-    "./typert": {
-      "types": "./lib/typert.host.d.ts",
-      "default": "./lib/typert.host.js"
-    },
-    "./remote": {
-      "types": "./lib/typert.remote-client.d.ts",
-      "default": "./lib/typert.remote-client.js"
-    },
-    "./types": {
-      "types": "./lib/types/types.d.ts",
-      "default": "./lib/types/types.js"
+      "default": "./lib/types/index.js"
     },
     "./package.json": "./package.json"
   },
   "files": [
-    "lib/index.js",
-    "lib/client.js",
-    "lib/client.js.map",
-    "lib/types/**/*.d.ts",
-    "lib/types/types.js",
-    "lib/typert.host.js",
-    "lib/typert.host.d.ts",
-    "lib/typert.remote-client.js",
-    "lib/typert.remote-client.d.ts",
-    "lib/typert.remote-client.d.ts.map",
-    "cordis.patch.yml",
+    "lib/types",
+    "public",
     "README.md",
     "README.en.md",
     "SECURITY.md",
     "LICENSE"
   ],
-  "dsh": {
-    "bundle": {
-      "patch": "./cordis.patch.yml"
-    },
-    "client": {
-      "inject": [
-        "@deepseek-ai/dsh-api-gateway",
-        "@deepseek-ai/dsh-client-ui-settings",
-        "@deepseek-ai/dsh-client-ui-renderer"
-      ],
-      "platform": "web"
-    }
-  },
   "scripts": {
     "clean": "node ./scripts/clean.mjs",
-    "build:host": "tsc -p tsconfig.host.json && node ./scripts/generate-typert.mjs && tsdown --config tsdown.host.config.ts",
-    "build:client": "tsc -p tsconfig.client.json && tsdown --config tsdown.client.config.ts",
-    "build": "npm run clean && npm run build:host && npm run build:client",
-    "typecheck": "npm run build:host && tsc -p tsconfig.client.json --noEmit",
+    "build": "npm run clean && tsc -p tsconfig.app.json",
+    "typecheck": "tsc -p tsconfig.app.json --noEmit",
+    "start": "node lib/types/app/cli.js",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:profile": "node ./scripts/profile-smoke.mjs",
     "audit:prod": "npm audit --omit=dev --audit-level=high",
-    "check": "npm run test && npm run build && npm run audit:prod && npm pack --dry-run --ignore-scripts",
+    "check": "npm run typecheck && npm test && npm run build && npm pack --dry-run --ignore-scripts",
     "prepare": "npm run build",
-    "build:codex": "tsdown --config tsdown.codex.config.ts",
-    "test:codex:pack": "node scripts/codex-pack-smoke.mjs",
-    "test:codex:live": "node scripts/codex-smoke.mjs"
+    "test:codex:live": "node scripts/codex-smoke.mjs",
+    "test:cursor:live": "node scripts/cursor-smoke.mjs",
+    "test:package": "node scripts/package-smoke.mjs"
   },
   "dependencies": {
+    "@bufbuild/protobuf": "1.10.0",
+    "@cursor/sdk": "1.0.31",
     "@elysiajs/eden": "1.4.9",
     "@spectrum-ts/core": "12.7.0",
     "@spectrum-ts/imessage": "12.7.0",
@@ -104,71 +68,18 @@
     "elysia": "1.4.28",
     "zod": "4.4.3"
   },
-  "peerDependencies": {
-    "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-agent": "0.1.5-rc.1",
-    "@deepseek-ai/dsh-agent-default-model": "0.1.5-rc.1",
-    "@deepseek-ai/dsh-agent-presets": "0.1.5-rc.1",
-    "@deepseek-ai/dsh-api-gateway": "0.1.5-rc.1",
-    "@deepseek-ai/dsh-api-remotes": "0.1.5-rc.1",
-    "@deepseek-ai/dsh-client-ui-renderer": "0.1.5-rc.1",
-    "@deepseek-ai/dsh-client-ui-settings": "0.1.5-rc.1",
-    "@deepseek-ai/dsh-client-ui-slots": "0.1.5-rc.1",
-    "@deepseek-ai/dsh-credentials": "0.1.5-rc.1",
-    "@deepseek-ai/dsh-llm": "0.1.5-rc.1",
-    "@deepseek-ai/dsh-session": "0.1.5-rc.1",
-    "@deepseek-ai/dsh-session-persistence": "0.1.5-rc.1",
-    "@deepseek-ai/dsh-settings": "0.1.5-rc.1",
-    "@deepseek-ai/dsh-storage-domain": "0.1.5-rc.1",
-    "@deepseek-ai/dsh-tools": "0.1.5-rc.1",
-    "@deepseek-ai/dsh-typert-protocol": "0.1.5-rc.1",
-    "@deepseek-ai/dsh-user-approval": "0.1.5-rc.1",
-    "@deepseek-ai/dsh-user-questions": "0.1.5-rc.1",
-    "@deepseek-ai/schemastery": "^3.18.1",
-    "react": "^18.2.0"
-  },
   "devDependencies": {
-    "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh": "0.1.5-rc.1",
-    "@deepseek-ai/dsh-agent": "0.1.5-rc.1",
-    "@deepseek-ai/dsh-agent-default-model": "0.1.5-rc.1",
-    "@deepseek-ai/dsh-agent-presets": "0.1.5-rc.1",
-    "@deepseek-ai/dsh-api-gateway": "0.1.5-rc.1",
-    "@deepseek-ai/dsh-api-remotes": "0.1.5-rc.1",
-    "@deepseek-ai/dsh-attachment": "0.1.5-rc.1",
-    "@deepseek-ai/dsh-brand": "0.1.5-rc.1",
-    "@deepseek-ai/dsh-client-ui-renderer": "0.1.5-rc.1",
-    "@deepseek-ai/dsh-client-ui-settings": "0.1.5-rc.1",
-    "@deepseek-ai/dsh-client-ui-slots": "0.1.5-rc.1",
-    "@deepseek-ai/dsh-code-runtime": "0.1.5-rc.1",
-    "@deepseek-ai/dsh-credentials": "0.1.5-rc.1",
-    "@deepseek-ai/dsh-invariants": "0.1.5-rc.1",
-    "@deepseek-ai/dsh-llm": "0.1.5-rc.1",
-    "@deepseek-ai/dsh-scope": "0.1.5-rc.1",
-    "@deepseek-ai/dsh-session": "0.1.5-rc.1",
-    "@deepseek-ai/dsh-session-persistence": "0.1.5-rc.1",
-    "@deepseek-ai/dsh-settings": "0.1.5-rc.1",
-    "@deepseek-ai/dsh-storage-domain": "0.1.5-rc.1",
-    "@deepseek-ai/dsh-system-prompt": "0.1.5-rc.1",
-    "@deepseek-ai/dsh-timeout": "0.1.5-rc.1",
-    "@deepseek-ai/dsh-tools": "0.1.5-rc.1",
-    "@deepseek-ai/dsh-typert-generator": "0.1.5-rc.1",
-    "@deepseek-ai/dsh-typert-protocol": "0.1.5-rc.1",
-    "@deepseek-ai/dsh-user-approval": "0.1.5-rc.1",
-    "@deepseek-ai/dsh-user-questions": "0.1.5-rc.1",
-    "@deepseek-ai/schemastery": "^3.18.1",
     "@photon-ai/dashboard-api": "1.6.12",
-    "@testing-library/dom": "^10.4.1",
-    "@testing-library/react": "^16.3.0",
-    "@testing-library/user-event": "^14.6.1",
     "@types/node": "^24.0.0",
-    "@types/react": "~18.3.1",
-    "@types/react-dom": "^18.3.7",
-    "jsdom": "^26.1.0",
-    "react": "^18.2.0",
-    "react-dom": "^18.3.1",
-    "tsdown": "^0.16.5",
     "typescript": "6.0.3",
     "vitest": "^3.2.4"
+  },
+  "bin": {
+    "agent-imessage": "./lib/types/app/cli.js"
+  },
+  "overrides": {
+    "@connectrpc/connect-node": {
+      "undici": "^6.28.0"
+    }
   }
 }

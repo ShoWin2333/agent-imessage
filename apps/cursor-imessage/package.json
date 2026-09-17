@@ -1,0 +1,10 @@
+{
+  "name": "@showin2333/cursor-imessage-app",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Compatibility launcher for the unified Agent iMessage Gateway",
+  "scripts": {
+    "build": "npm --prefix ../.. run build",
+    "start": "node ../../lib/types/app/cli.js"
+  }
+}
