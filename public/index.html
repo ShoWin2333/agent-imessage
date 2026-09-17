@@ -1,0 +1,9 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Agent iMessage</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
+<body><main><header><div class="mark">A↗</div><div><p class="eyebrow">LOCAL AGENT GATEWAY</p><h1>Agent iMessage</h1><p>一个入口，连接你的项目与 Agent。</p></div><span id="connection">正在连接</span></header>
+<section class="toolbar"><div><h2>项目与号码</h2><p>每条线路独立管理会话、任务和审批。</p></div><div class="actions"><button id="start">启动 / 重试</button><button id="stop">停止全部</button></div></section>
+<section class="credentials"><h2>Photon 项目管理</h2><p id="photon-state"></p><a id="photon-link" target="_blank" rel="noreferrer"></a><p><button id="authorize" type="button">授权 Photon</button> <button id="cancel-auth" type="button">取消授权</button></p></section>
+<div id="notice" role="status" aria-live="polite"></div><form id="settings"><div id="routes"></div><button type="button" id="add">＋ 添加项目</button>
+<section class="credentials"><h2>Cursor SDK 凭据</h2><p id="key-state"></p><label>API Key <input id="cursor-key" type="password" autocomplete="new-password" placeholder="留空保留现有凭据"></label><p>凭据仅保存在本机私有目录，不在页面回显。</p></section>
+<footer><p>保存后应用配置并重启线路。正在运行的任务会被取消。</p><button class="primary" type="submit">保存并应用</button></footer></form>
+<aside><h2>从 iMessage 开始</h2><p>给项目号码发送任务；使用 <code>/status</code> 查看状态，<code>/new</code> 创建会话，<code>/stop</code> 停止任务。审批与提问会发回原来的对话。</p><p>Cursor 使用官方 SDK 和沙箱；需要更高权限的操作可能被 SDK 拒绝。Codex 和 DSH 使用本地已配置的账号。</p></aside></main></body></html>

@@ -1,5 +1,5 @@
 import { afterEach, expect, it } from 'vitest'
-import { chmod, mkdtemp, rm } from 'node:fs/promises'
+import { chmod, mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { StateStore } from '../src/codex/state.js'
@@ -33,4 +33,12 @@ it('isolates Cursor sessions by backend and mode while preserving Codex state', 
   expect(ask.state.threadId).toBeUndefined(); await ask.close()
   const original = await StateStore.open(dir, { ...route, backend: 'codex' })
   expect(original.state.threadId).toBe('codex-thread'); await original.close()
+})
+
+it('reclaims a confirmed dead process lock after a service crash', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'agent-state-')); dirs.push(dir)
+  await mkdir(join(dir, 'a.lock'), { mode: 0o700 })
+  await writeFile(join(dir, 'a.lock', 'pid'), '2147483647')
+  const store = await StateStore.open(dir, route)
+  await store.close()
 })

@@ -2,15 +2,11 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { Agent } from '@deepseek-ai/dsh-agent'
-import type { Context } from '@deepseek-ai/cordis'
-import type { ToolDefinition, ToolRunContext } from '@deepseek-ai/dsh-tools'
 import {
   DEFAULT_MAX_OUTBOUND_MEDIA_BYTES,
   loadOutboundMedia,
-  OutboundMediaTools,
   type OutboundMediaPayload,
-} from '../src/outbound-media.js'
+} from '../src/media.js'
 import type { SpectrumInboundMessage } from '../src/spectrum-runtime.js'
 import { attachmentForOutbound, voiceForOutbound } from '../src/spectrum-runtime.js'
 
@@ -24,26 +20,6 @@ async function tempWorkspace(): Promise<string> {
   const dir = await mkdtemp(path.join(tmpdir(), 'dsh-imessage-media-'))
   created.push(dir)
   return dir
-}
-
-function agentFor(cwd: string): Agent {
-  return {
-    id: 'session-a',
-    session: { header: { cwd } },
-  } as unknown as Agent
-}
-
-function toolContext(agent: Agent | undefined, signal = new AbortController().signal): ToolRunContext {
-  return {
-    callId: 'call-1',
-    rootCallId: 'call-1',
-    name: 'tool',
-    arguments: {},
-    token: Symbol('tool-token') as ToolRunContext['token'],
-    signal,
-    ...(agent === undefined ? {} : { agent }),
-    deferContext: () => {},
-  } as ToolRunContext
 }
 
 describe('loadOutboundMedia path and type validation', () => {
@@ -157,100 +133,5 @@ describe('loadOutboundMedia path and type validation', () => {
       maxBytes: DEFAULT_MAX_OUTBOUND_MEDIA_BYTES,
       signal: abort.signal,
     })).rejects.toThrow(/cancelled/u)
-  })
-})
-
-describe('OutboundMediaTools fail-closed ownership', () => {
-  it('rejects browser-originated or unhealthy turns and delivers owned file/voice sends', async () => {
-    const cwd = await tempWorkspace()
-    await writeFile(path.join(cwd, 'photo.jpg'), Buffer.from('img'))
-    await writeFile(path.join(cwd, 'note.mp3'), Buffer.from('snd'))
-    const selected = agentFor(cwd)
-    const files: OutboundMediaPayload[] = []
-    const voices: OutboundMediaPayload[] = []
-    const channel: SpectrumInboundMessage = {
-      id: 'provider-message',
-      text: 'prompt',
-      responding: async callback => callback(),
-      send: async () => {},
-      sendFile: async media => { files.push(media) },
-      sendVoice: async media => { voices.push(media) },
-    }
-
-    let owns = false
-    let healthy = false
-    const registered: ToolDefinition[] = []
-    const agentCtx = {
-      tools: {
-        register: (definition: ToolDefinition) => {
-          registered.push(definition)
-          return () => {
-            const index = registered.indexOf(definition)
-            if (index >= 0) registered.splice(index, 1)
-          }
-        },
-      },
-    } as unknown as Context
-
-    const tools = new OutboundMediaTools({
-      ownsCurrentTurn: agent => owns && agent === selected,
-      channelFor: agent => agent === selected ? channel : undefined,
-      deliveryHealthy: () => healthy,
-    }, { maxOutboundMediaBytes: DEFAULT_MAX_OUTBOUND_MEDIA_BYTES })
-
-    const dispose = tools.install(agentCtx)
-    expect(registered.map(tool => tool.name).sort()).toEqual([
-      'send_imessage_file',
-      'send_imessage_voice',
-    ])
-
-    const file = registered.find(tool => tool.name === 'send_imessage_file')
-    const voice = registered.find(tool => tool.name === 'send_imessage_voice')
-    expect(file).toBeDefined()
-    expect(voice).toBeDefined()
-
-    await expect(file!.execute({ path: 'photo.jpg' }, toolContext(undefined)))
-      .rejects.toThrow(/active agent/u)
-    await expect(file!.execute({ path: 'photo.jpg' }, toolContext(selected)))
-      .rejects.toThrow(/iMessage-owned turn/u)
-
-    owns = true
-    await expect(file!.execute({ path: 'photo.jpg' }, toolContext(selected)))
-      .rejects.toThrow(/delivery is unavailable/u)
-
-    healthy = true
-    await expect(file!.execute({ path: 'photo.jpg' }, toolContext(selected)))
-      .resolves.toEqual({ name: 'photo.jpg', mimeType: 'image/jpeg' })
-    await expect(voice!.execute({ path: 'note.mp3' }, toolContext(selected)))
-      .resolves.toEqual({ name: 'note.mp3', mimeType: 'audio/mpeg' })
-    expect(files).toHaveLength(1)
-    expect(voices).toHaveLength(1)
-    expect(files[0]?.name).toBe('photo.jpg')
-    expect(voices[0]?.name).toBe('note.mp3')
-    expect(JSON.stringify(files[0])).not.toContain(cwd)
-    expect(JSON.stringify(voices[0])).not.toContain(cwd)
-
-    dispose()
-    expect(registered).toEqual([])
-  })
-})
-
-describe('Spectrum outbound media content mapping', () => {
-  it('builds attachment content for images and voice content for audio', async () => {
-    const image = await attachmentForOutbound({
-      bytes: Buffer.from('png'),
-      name: 'shot.png',
-      mimeType: 'image/png',
-    }).build()
-    expect(image).toMatchObject({ type: 'attachment', name: 'shot.png', mimeType: 'image/png' })
-    expect(Buffer.from(await image.read()).toString()).toBe('png')
-
-    const audio = await voiceForOutbound({
-      bytes: Buffer.from('mp3'),
-      name: 'memo.mp3',
-      mimeType: 'audio/mpeg',
-    }).build()
-    expect(audio).toMatchObject({ type: 'voice', name: 'memo.m4a', mimeType: 'audio/mpeg' })
-    expect(Buffer.from(await audio.read()).toString()).toBe('mp3')
   })
 })

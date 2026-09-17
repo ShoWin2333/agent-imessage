@@ -5,3 +5,7 @@ coverage/
 .typert-workspace-*/
 .DS_Store
 packages/codex/dist/
+extensions/agent-imessage/node_modules/
+extensions/agent-imessage/out/
+apps/cursor-imessage/node_modules/
+apps/cursor-imessage/dist/

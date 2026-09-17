@@ -182,7 +182,7 @@ export function createPhotonManagementApi(
 }
 
 /** Idempotently select/create the configured Photon project and ensure iMessage. */
-export async function ensureDshProject(
+export async function ensurePhotonProject(
   api: PhotonManagementApi,
   storedProjectId?: string,
   projectName: string = DEFAULT_PHOTON_PROJECT_NAME,
@@ -387,3 +387,6 @@ function findFailureCode(value: unknown): string | undefined {
 function unavailable(message: string): PluginError {
   return new PluginError('photon-unavailable', message)
 }
+
+/** Compatibility name for exported legacy provisioning helpers. */
+export const ensureDshProject = ensurePhotonProject

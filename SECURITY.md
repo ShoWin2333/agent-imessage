@@ -1,16 +1,21 @@
-# Security policy
+# Security boundaries
 
-Report suspected credential exposure, authorization bypass, cross-user routing, or Photon resource takeover privately to the package maintainers. Do not include access tokens, project secrets, device codes, message text, or raw phone numbers in a public issue.
+Agent iMessage is a local, single-user Gateway. Its Web UI binds only to `127.0.0.1`, validates the exact Host and Origin, requires a per-process CSRF token for writes, sends no CORS permission, limits request bodies, and never returns stored secrets. It is not a multi-user remotely accessible control plane.
 
-The project treats any npm audit finding at **high** or **critical** severity as release-blocking. `better-auth` is pinned to `1.6.30` or newer in this release because the Photon CLI’s older `1.4.18` dependency is affected by unrelated OAuth-provider/server advisories; contract tests verify that the upgraded client still emits Photon’s device-login wire protocol.
+Configuration, Photon credentials and management tokens are private files (`0600`) in a private directory (`0700`). Atomic replacement avoids partial JSON. Invalid files fail closed rather than resetting the configuration. Environment variable names are public configuration; their values are not. Do not place configuration/secrets in an Agent-accessible project or commit them to source control.
 
-As of `0.1.0-alpha.0`, npm reports moderate OpenTelemetry baggage-propagation advisories under Spectrum 12.7’s `@photon-ai/otel` dependency. Spectrum telemetry is explicitly disabled by this plugin, and the vulnerable telemetry packages are not configured as an inbound HTTP baggage processor here. There is no dependency-level fix compatible with the required Spectrum `12.7.x` line yet. Re-evaluate this exception on every Spectrum release and remove it as soon as Photon ships patched OpenTelemetry dependencies.
+Only configured sender/recipient DMs are accepted. Shared-line routing markers are accepted only inside the selected Photon project. Group, outgoing/echo and unsupported inbound-media messages are rejected. Provider message IDs are durably recorded before dispatch. Unknown-outcome tasks are not replayed automatically.
 
-Security invariants enforced by code and tests include:
+Route state binds the route ID, canonical workspace, Photon project, authorized sender, recipient and backend. Cursor SDK sessions cannot inherit old ACP sessions. Route locks prevent duplicate listeners in a state root; dead-PID locks can be reclaimed, while unknown or live owners fail closed. There must also be only one application consuming a Photon project across machines/state roots.
 
-- tokens, project secrets, and device codes remain host-only;
-- Photon fetches reject cross-origin requests/responses and cross-origin redirects; a single same-origin redirect hop is allowed (for example trailing-slash normalization);
-- only the configured sender's inbound iMessage DM route is accepted; dedicated routes verify the exact assigned recipient, while shared routes rely on Photon's project-scoped delivery because Spectrum exposes only its `shared` recipient sentinel;
-- authorization failures and unknown internal failures are converted to stable redacted errors;
-- approvals and questions are claimed only for an exact correlated iMessage turn and fail closed when delivery is unhealthy;
-- disconnect never deletes Photon cloud resources.
+Approvals/questions belong to one active route and turn. Disconnect, stop, completion, timeout and shutdown cancel pending interaction. Only single-action approval is supported; oversized, undisplayable, secret-input, unknown and broad-root-grant requests fail closed. Late results and tool calls cannot send media after cancellation.
+
+Files/images/voice are read through one shared validator: canonical workspace containment, no symlink escape, regular files only, size limit 20 MiB and cancellation checks. Native voice requires an audio type. Custom tools run in the host process, so they always perform these checks regardless of a backend's own sandbox.
+
+Cursor executes through the official SDK in a worker with configured Photon environment variables removed; the SDK local sandbox is enabled by default and project settings are loaded. Local users can explicitly select unrestricted execution (no sandbox), auto-review, or additional user settings. Codex and DSH run in per-route processes with Photon credentials removed. Codex requests workspace-write and configurable untrusted/on-request/never approval; DSH pins the permission-mode environment to workspace-write. Runtime stderr and raw upstream failures are not sent over iMessage.
+
+The backend's own OS sandbox and permission implementation remain part of the trust boundary. Gateway workspace configuration is not itself an OS sandbox. Locally installed DSH composition patches and backend executables are trusted. The Cursor SDK currently does not provide a generic native tool-approval callback; rejected sandbox operations stay rejected. This application never silently falls back to unsandboxed Cursor execution.
+
+The deployment requires one trusted local OS account. Other processes running as that account may access its files and local UI. Do not expose the UI through a tunnel or reverse proxy without adding a separate authenticated control plane.
+
+Report vulnerabilities privately to the repository maintainer. Include a minimal reproduction without real keys, phone numbers or message contents.

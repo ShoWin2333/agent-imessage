@@ -1,244 +1,88 @@
-# Agent iMessage: Codex, Cursor and DSH over iMessage
+# Agent iMessage
 
-One repository, three adapters:
+A standalone local Agent App / Gateway for iMessage. One local Web UI manages multiple projects backed by **Cursor SDK**, **Codex App Server**, or **headless DSH**. No desktop editor or DSH Web process is required.
 
-| Adapter | Runtime | Setup |
-| --- | --- | --- |
-| **Codex (preview)** | Standalone local Codex App Server bridge; no DSH installation required | [Codex package guide](packages/codex/README.md) |
-| **Cursor (preview)** | Local Cursor CLI ACP bridge | [Cursor setup](packages/codex/README.md#cursor-backend) |
-| **DSH** | Existing DSH plugin, preserving its configuration and installation identifiers | Below |
+```text
+iMessage ↔ Photon / Spectrum ↔ Gateway ↔ Backend
+                               │        ├─ Cursor official SDK (local sandbox)
+                               │        ├─ Codex App Server (stdio)
+                               │        └─ DSH ACP (headless process)
+                               └─ routing, sessions, approvals, questions, media,
+                                  configuration, secrets, status and Web UI
+```
 
-The Codex preview supports text tasks, thread resume, approvals, interruption, and workspace file/voice delivery. Real phone acceptance is pending a dedicated Photon route. It does not take over desktop-app threads or use Codex Cloud. All adapters share Photon transport; Codex and DSH also share media validation, with separate route configuration.
+## Run
 
-This project originated as a fork of `photon-hq/dsh-imessage`, previously named `dsh-imessage`. For compatibility, the DSH package, plugin ID and settings namespace remain `dsh-imessage`; the standalone Codex package is `@showin2333/agent-imessage`. There is no unified settings UI yet. This is an independent community project, not an official OpenAI product or endorsement.
-
-## DSH adapter
-
-[中文](./README.md) | **English**
-
-This fork connects DeepSeek Harness (DSH) to iMessage. Beyond remote text conversations, it lets DSH send **images, arbitrary files, and native voice messages** directly back to the active iMessage conversation.
-
-> DSH is no longer limited to returning a text answer. It can deliver charts, documents, archives, and audio from the workspace straight to your phone.
-
-## What this fork adds
-
-These are the main improvements over the upstream [`photon-hq/dsh-imessage`](https://github.com/photon-hq/dsh-imessage), and they are the headline features of this repository.
-
-| Capability | Result |
-|---|---|
-| **Send images** | DSH can send PNG, JPEG, GIF, WebP, HEIC, and other recognized images from the workspace; Messages renders them inline. |
-| **Send arbitrary files** | PDFs, text files, CSV, JSON, ZIP archives, and other regular files can be delivered as iMessage attachments. |
-| **Send native voice messages** | MP3, M4A, WAV, AIFF, AAC, CAF, and OGG audio can be delivered as native iMessage voice bubbles instead of local file paths. |
-| **A separate workspace per route** | Each iMessage number can target an absolute project directory where DSH works and resolves outbound files. |
-| **A separate Photon project per route** | Photon project names are configurable, preventing multiple machines or projects from sharing one cloud project and hosted line. |
-| **Multiple iMessage routes on one computer** | Every route has its own Photon project, workspace, hosted number, listener, and active DSH session. |
-| **More resilient Photon setup** | Safe same-origin redirects and a create-by-name fallback reduce opaque project-listing failures during setup. |
-
-Legacy single-route settings migrate automatically into one default route.
-
-### Use outbound media directly from iMessage
-
-You can ask DSH naturally:
-
-- “Send me `reports/allocation.png`.”
-- “Send me the PDF you just created and the original CSV.”
-- “Send this audio as a voice message.”
-
-During a turn initiated from iMessage, the model can call:
-
-- `send_imessage_file` to send an image or any regular file;
-- `send_imessage_voice` to send a native iMessage voice message.
-
-Media must be inside the route's workspace and is limited to 20 MiB by default. The plugin rejects paths outside the workspace, symlink escapes, directories, and oversized files. Media can only be sent back to the DM that triggered the current turn; a browser-originated turn cannot unexpectedly send an attachment to the phone.
-
-Native iMessage voice messages may show “Expires in 2 min.” This is Apple's audio-message retention policy, not a delivery failure. Tap **Keep**, or choose **Never** under iPhone **Settings → Apps → Messages → Audio Messages → Expire**.
-
-### Current media boundary
-
-- The current release supports outbound **DSH → iMessage** images, files, and voice messages.
-- Inbound media is not implemented yet: images, files, and voice messages sent from the iPhone to DSH are ignored.
-- The plugin sends existing files; it does not itself generate images or synthesize speech. DSH may create a file with another tool before calling the send tool.
-- Final text answers are still converted to iMessage-friendly plain text rather than sending raw Markdown markers.
-
-## Install this fork
-
-The unqualified `dsh-imessage` package on npm refers to the upstream release and may not contain this fork's enhancements. To use the image, file, voice, and multi-route features from this repository, build and install the fork locally:
+Node.js 22.19+ (22.x) or 24+ is required.
 
 ```sh
-git clone https://github.com/ShoWin2333/agent-imessage.git
-cd agent-imessage
-npm ci --legacy-peer-deps
+npm ci --legacy-peer-deps --ignore-scripts
 npm run build
-npm pack
+npm start
+# Optional global installation from this checkout
+npm install -g . --ignore-scripts
+agent-imessage start
 ```
 
-If an upstream package or an older build with the same version is already installed, remove it first so the package manager does not reuse the cached artifact:
+Open **http://127.0.0.1:8787**. Add projects with a backend, absolute workspace path, model/effort settings, Photon project, authorized sender and assigned recipient. Supply a Photon project secret in the UI or an environment variable. You can authorize Photon and provision a shared number from the UI.
+
+Each route requires a unique ID and Photon project; sender/recipient pairs must not overlap. Stop old consumers before connecting the new Gateway to the same project. Photon shared lines require a **phone-number iMessage identity**, not an email identity.
+
+- **Cursor:** the pinned official `@cursor/sdk` and a Cursor API key (UI or `CURSOR_API_KEY`). No Cursor CLI / ACP. Local sandbox enabled by default, with project rules (AGENTS.md and .cursor settings) loaded. The UI also offers auto-review or explicit unrestricted execution, and optional user settings. SDK sandbox refusals are not converted into automatic permission grants; the SDK does not expose a general native approval callback to this app.
+- **Codex:** locally installed `codex`, authenticated with `codex login`. Uses App Server with workspace-write and untrusted approval policy.
+- **DSH:** a complete DSH CLI installation and model credentials; tested with `0.1.5-rc.1`. Runs `dsh --profile acp` with workspace-write. DSH model IDs are the values advertised by ACP and may include a provider prefix.
+
+Only the chosen backend must be installed. Set `codexBinary` or `dshBinary` to an absolute executable path when needed.
+
+## Background operation
 
 ```sh
-dsh plugin --profile web remove dsh-imessage
-dsh plugin --profile web add ./dsh-imessage-*.tgz
-dsh web
+agent-imessage service install /absolute/path/config.json
+agent-imessage service remove
 ```
 
-If DSH runs under launchd or another persistent service, restart that service after installation.
+The built-in installer currently supports macOS launchd. The service is `app.agent-imessage.gateway`, starts at login and restarts on failure. It uses absolute Node/application paths; reinstall after moving the installation. Logs are stored beside the config under `logs/gateway.log`. Other platforms can supervise `agent-imessage start` themselves.
 
-### Compatibility target
+## Configuration and migration
 
-- DeepSeek Harness `0.1.5-rc.1` (current official latest / next)
-- Spectrum `12.7.x` (currently pinned to `12.7.0`)
-- Node.js `22.19+` or `24+`
+Default config: `~/.config/agent-imessage/config.json`. Secrets are stored separately in `config.json.secrets.json`, Photon OAuth in `config.json.photon.json`; files are private (`0600`) and their parent directory must be `0700`. The browser never receives saved secrets. launchd does not inherit interactive shell variables: prefer saved secrets or explicitly configured service environment variables.
 
-## Configure routes
+A version-1 config contains `port`, an absolute `stateDir`, optional backend binary paths, and `routes`. Each route has `id`, `backend`, `cwd`, `projectId`, `projectSecretEnv`, `senderPhoneNumber`, `assignedPhoneNumber`, and optional `label`, `enabled`, `model`, `effort`, `speed`, `cursorMode` and `cursorApiKeyEnv`. See the full [Chinese guide](README.md) for an example.
 
-Open **Settings → iMessage**:
-
-1. Select **Authorize** and complete Photon device authorization.
-2. Add or edit a route and set its local workspace, Photon project name, and sender phone number.
-3. An empty workspace uses the `dsh web` process directory; an empty Photon project name uses `dsh`.
-4. Save the E.164 phone number that will text the hosted line. The same personal number may be reused across routes.
-5. Copy the hosted iMessage number assigned to the route and message it from the configured personal number.
-
-Use a different Photon project name for each route. Photon assigns a separate hosted line to each project, while the local plugin maintains an independent listener and active session for every route.
-
-## Capabilities inherited from upstream
-
-The following foundation comes from the upstream plugin and remains available in this fork:
-
-- receive text through a Photon-hosted iMessage number and enqueue it in DSH;
-- complete Photon device authorization, phone setup, and runtime inspection in DSH Settings;
-- deliver DSH's final answer back to the same iMessage DM;
-- create, list, and switch root sessions in the same workspace;
-- handle DSH approval requests and interactive questions through iMessage;
-- persist replay deduplication, reconnect listeners, and split long Unicode text safely;
-- isolate credentials, routes, and current-turn delivery with fail-closed checks.
-
-## iMessage commands
-
-Ordinary text is queued as a DSH prompt. Prefix a prompt that genuinely starts with `/` using `//`, for example `//review this route`.
-
-| Command | Behavior |
-|---|---|
-| `/help` | Show command help. |
-| `/new` | Create and select a new root session. |
-| `/sessions [page]` | List same-workspace root sessions, five per page by default. |
-| `/switch <index\|session-id>` | Select a session by list index, exact ID, or unique ID prefix. |
-| `/status` | Show the active session and its current state. |
-| `/stop` or `/cancel` | Cancel the running turn and invalidate prompts still waiting in the iMessage FIFO. |
-| `/approve <request-id>` | Approve a request correlated with the current iMessage turn. |
-| `/deny <request-id>` | Reject a correlated request. |
-| `/answer <request-id> <option-or-text>` | Answer a correlated question; commas select multiple numbered choices. |
-
-`/new` and `/switch` fail while an iMessage prompt is queued or running, or while a human interaction is pending. Send `/stop` first.
-
-## Routing and privacy boundaries
-
-An inbound message is accepted only when all of these checks pass:
-
-- the platform is iMessage and the direction is inbound;
-- the conversation is a direct message;
-- the sender equals the E.164 number configured for the route;
-- a dedicated connection's recipient matches the hosted line, or Photon already isolated the message through the project's shared route;
-- when the provider includes a service field, it is iMessage;
-- the inbound content is text.
-
-Unauthorized traffic is ignored without a reply. The plugin does not log message content, raw phone numbers, device codes, access tokens, or project secrets. The host persists only non-secret route settings, one opaque Photon credential object, the active session ID per route, and a bounded inbound-message deduplication window.
-
-Every iMessage prompt is correlated by its exact DSH `UserMessage.id`. Only after DSH claims that message does the turn gain permission to send text, attachments, voice messages, approvals, or questions to that iMessage conversation. Browser-originated turns in the same Agent remain in the browser.
-
-Only the final answer is sent to iMessage. Intermediate reasoning, tool activity, and partial output remain in DSH. Long answers split near paragraph, line, or word boundaries without splitting Unicode grapheme clusters.
-
-## Photon resource behavior
-
-The plugin implements the Photon CLI-compatible RFC 8628 device flow over HTTPS. It does not launch the Photon CLI or read CLI credential files. Project and user management follows these rules:
-
-- reuse an accessible Photon project with the exact configured name, creating a US/iMessage project only when no match exists;
-- report public IDs for ambiguous projects or users instead of choosing arbitrarily;
-- prepare a replacement phone and Spectrum connection before switching the live route, so a failed replacement leaves the old listener working;
-- disconnect locally without deleting Photon cloud projects, users, or hosted lines;
-- allow an existing project secret to continue routing after the management token expires, while requiring reauthorization for project or user changes.
-
-## Host configuration
-
-These host-only options are not exposed in the Settings page:
-
-| Option | Default |
-|---|---:|
-| `photonApiOrigin` | `https://app.photon.codes` |
-| `interactionTimeoutMs` | `600000` (10 minutes) |
-| `maxOutboundChars` | `3500` graphemes |
-| `maxOutboundMediaBytes` | `20971520` (20 MiB) |
-| `sessionsPerPage` | `5` |
-| `dedupeEntries` | `1024` |
-| `reconnectMinMs` | `1000` |
-| `reconnectMaxMs` | `60000` |
-
-Override the bundle row in the web profile's `cordis.patch.yml`. DSH patch overrides replace the entire row, so preserve both `id` and `name`:
-
-```yaml
-- id: dsh-imessage
-  name: dsh-imessage
-  config:
-    interactionTimeoutMs: 900000
-    maxOutboundChars: 3000
-    maxOutboundMediaBytes: 31457280
-```
-
-Non-HTTPS Photon API origins are rejected except for loopback HTTP used in tests.
-
-## Limitations
-
-- One Photon account is used per plugin instance, although multiple iMessage routes are supported.
-- Inbound handling is currently text-only; inbound attachments, voice, reactions, group chats, SMS, and RCS are ignored.
-- Outbound delivery supports final text, regular file/image attachments, and native voice messages, but has no built-in image generation or text-to-speech.
-- The same personal phone number may be reused across routes, but every route still needs its own hosted line.
-- `/sessions` and `/switch` expose only root sessions whose workspace matches exactly; subagents are excluded.
-- Photon cloud resources are not cleaned up automatically.
-
-## Troubleshooting
-
-| Error or symptom | Action |
-|---|---|
-| The image or voice tool is not called | Confirm that the current prompt originated from iMessage rather than the Web session. |
-| The file is outside the workspace | Copy it into the workspace configured for that route before sending. |
-| Voice displays `00:00` | Install a build containing this fork's voice-container fix, removing an older same-version package before reinstalling. |
-| Voice displays “Expires in 2 min” | Tap **Keep**, or set iPhone Audio Messages expiration to **Never**. |
-| `invalid-phone` | Use `+`, a non-zero country-code digit, and at most 15 total digits without spaces or punctuation. |
-| `auth-expired` / `auth-denied` | Start Photon authorization again and complete it before expiry. |
-| `authorization-required` | Reauthorize Photon; current routing may continue while the project secret remains valid. |
-| `project-ambiguous` | Rename duplicate projects until exactly one name matches. |
-| `shared-line-unavailable` | Request Photon shared capacity or configure a dedicated allocation. |
-| `runtime-failed` | Use **Retry listener**; if it repeats, inspect the Photon project's iMessage platform and hosted line. |
-
-## Development and verification
+Legacy bridge JSON can be passed directly to `start`; omitted backends remain Codex, existing Codex state is retained, and obsolete `cursorBinary` is ignored. Old Cursor ACP sessions are not SDK sessions and are kept isolated.
 
 ```sh
-npm ci --legacy-peer-deps
+agent-imessage import ~/.config/cursor-imessage-app/config.json ~/.config/agent-imessage/config.json
+agent-imessage import /private/dsh-settings.json /private/new/config.json /private/dsh-photon-credential.json
+```
+
+Import preserves source files, refuses an existing destination, and migrates all routes or fails validation. The standard Cursor prototype directory also supports dedupe and verified local SDK session migration. DSH flat/multi-route settings and v1/v2 Photon credential exports are supported; old DSH plugin active-session mappings are not automatically migrated. DSH's own historical sessions remain intact.
+
+`apps/cursor-imessage` is now only a launcher. The optional editor extension opens the standalone UI and no longer owns configuration or process lifetime. The old DSH plugin UI and separate Codex distribution are retired.
+
+## Commands and media
+
+`/help`, `/status`, `/new`, `/sessions`, `/switch ID`, `/stop` (`/cancel`), `/approve ID`, `/deny ID`, `/answer ID {"question-id":"answer"}`. Use `//` to escape a leading slash. Busy prompts are rejected rather than invisibly queued. Session switching is restricted to the route's last 100 recorded sessions.
+
+All backends use shared `send_imessage_file`, `send_imessage_voice`, and `ask_imessage_user` tools. Outgoing files/images and native voice are limited to regular in-workspace files up to 20 MiB, with traversal/symlink and turn-ownership checks. Incoming media and speech transcription remain unsupported; the existing inbound path accepts text only.
+
+## Development
+
+`src/app` owns the application, configuration, migration, Web API and service installer. `src/gateway` owns routing, sessions and shared tools. `src/backends/types.ts` defines the typed execution interface. Adapters have no Photon delivery implementation. `src/spectrum-runtime.ts` and the Photon/media modules are the single transport and security implementations.
+
+To add an agent, implement `Backend` and register its factory/config/UI option. No new iMessage or Photon layer is needed.
+
+```sh
+npm run typecheck
 npm test
 npm run build
-npm pack --dry-run
-# With an 0.1.5-rc.1 DSH binary available:
-DSH_BIN=/path/to/dsh npm run test:profile
+npm run audit:prod
+npm run test:package
+npm pack --dry-run --ignore-scripts
+CURSOR_API_KEY_FILE=/private/cursor.api-key npm run test:cursor:live
+npm run test:codex:live
 ```
 
-The test suite covers device-flow backoff and cancellation, secret redaction, Photon project/user idempotency, ingress filters, replay deduplication, reconnects, Unicode chunking, exact turn ownership, approval/question fail-closed behavior, session lifecycle, media path containment, file-size limits, attachment/voice adaptation, and the interactive Settings UI.
+Live SDK/App Server tests use a temporary workspace and a fake recipient. Full acceptance additionally requires sending from the authorized phone through Photon and checking the reply. See [SECURITY.md](SECURITY.md) for the trust boundary.
 
-The repository contains CI workflows for Node 22.19 and Node 24, plus a smoke test that installs the packed artifact into a disposable DSH web profile. Whether those workflows execute in a fork depends on that repository's GitHub Actions settings.
-
-## Publishing note
-
-This fork still uses the upstream npm package name `dsh-imessage`. The inherited release workflow and npm Trusted Publisher were originally bound to `photon-hq/dsh-imessage`; they do not automatically grant the fork permission to publish the upstream npm package. Until the fork has its own package name and publishing configuration, distribute it as a local tarball or through the fork's own GitHub Releases.
-
-## Development background and acknowledgments
-
-This project is part of my early journey into open-source development, where I am learning by building and maintaining it. I am grateful to upstream [photon-hq/dsh-imessage](https://github.com/photon-hq/dsh-imessage) for the foundation, and to Codex for helping me understand the existing code, explore implementation approaches, and gradually turn ideas I could not yet implement on my own into working improvements.
-
-I do not yet have an established community or experience promoting my work. I hope to start with practical needs, share useful improvements publicly, and grow through ongoing maintenance.
-
-## Upstream and references
-
-- [Upstream dsh-imessage](https://github.com/photon-hq/dsh-imessage)
-- [This fork](https://github.com/ShoWin2333/agent-imessage)
-- [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)
-- [Photon CLI authentication](https://photon.codes/docs/cli/authentication)
-- [Spectrum TypeScript getting started](https://photon.codes/docs/spectrum-ts/getting-started)
-- [Spectrum iMessage routing](https://photon.codes/docs/spectrum-ts/providers/imessage/connection-and-routing)
+Each project card supports **Save and apply this project**, restarting only that route while preserving other routes and unsaved form drafts. Photon projects and backend models can be selected from live catalogs. Approval choices reflect each backend's capabilities; Cursor native approvals cannot be answered through `/approve`. Project settings may also load SDK-supported hooks and MCP configuration.

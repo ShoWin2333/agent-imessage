@@ -22,24 +22,9 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
           cache: npm
-      # pnpm/action-setup remains the supported action for the pinned pnpm 10 line.
-      - uses: pnpm/action-setup@v6
-        with:
-          version: 10.33.0
       - run: npm ci --legacy-peer-deps --ignore-scripts
+      - run: npm run typecheck
       - run: npm test
       - run: npm run build
-      - run: npm run build:codex
-      - run: npm run test:codex:pack
       - run: npm run audit:prod
       - run: npm pack --dry-run --ignore-scripts
-      # Match the compatibility target used by this plugin.
-      - name: Install isolated DSH rc.1 smoke CLI
-        run: >-
-          npm install --prefix "$RUNNER_TEMP/dsh-rc1"
-          @deepseek-ai/dsh@0.1.5-rc.1
-          @deepseek-ai/cordis-plugin-group@^1.0.1
-          @deepseek-ai/dsh-invariants@0.1.5-rc.1
-          --legacy-peer-deps --ignore-scripts
-      - name: Install packed plugin into a disposable web profile
-        run: DSH_BIN="$RUNNER_TEMP/dsh-rc1/node_modules/.bin/dsh" npm run test:profile
