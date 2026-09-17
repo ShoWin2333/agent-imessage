@@ -70,6 +70,10 @@ LaunchAgent 名称为 `app.agent-imessage.gateway`。登录后启动，进程失
 
 Linux 可以由 systemd 等进程管理器运行 `agent-imessage start /absolute/path/config.json`；内置 service 安装器目前仅支持 macOS。
 
+macOS 也可使用本地原生窗口包装：`node scripts/macos/build.mjs '/tmp/Agent iMessage.app'`。构建需要 Xcode Command Line Tools 和已生成的服务 plist；可用第二个参数指定 plist 路径。生成的 App 复用本机 Node、当前仓库和配置，不是可分发到其他电脑的独立安装包，当前要求管理端口为 8787。
+
+窗口模式和登录自启动是两种不同的运行方式。切换窗口模式时，应先停止原 launchd 服务，并将 `~/Library/LaunchAgents/app.agent-imessage.gateway.plist` 移出 LaunchAgents 保留备份。App 自行加载内置服务配置，红色关闭按钮只关闭窗口，服务继续运行；点击 Dock 图标可恢复窗口。通过 Dock 菜单“退出”或按 ⌘Q 才会卸载服务并停止正在执行的任务。不要同时启动桌面脚本或另一个后台实例。强制结束 App 可能来不及清理服务，必要时用 `launchctl bootout gui/$(id -u)/app.agent-imessage.gateway` 停止。
+
 ## 配置与迁移
 
 默认配置：`~/.config/agent-imessage/config.json`。凭据保存在旁边的 `config.json.secrets.json`，Photon 管理授权保存在 `config.json.photon.json`，文件权限 `0600`，父目录必须为 `0700`。页面只返回“已配置”，不返回密钥。也支持通过环境变量提供密钥；launchd 不继承交互式 shell 的环境，后台服务优先使用 UI 保存的凭据或明确配置的服务环境。
