@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises'
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { object } from '../backends/jsonrpc.js'
 import { atomicJson, validateConfig, type AppConfig, type Secrets } from './config.js'
+import { PluginError } from '../errors.js'
 import { listModels } from '../backends/catalog.js'
 import { PhotonAccount } from './photon.js'
 import type { Gateway } from '../gateway/app.js'
@@ -50,7 +51,7 @@ export async function startServer(configFile: string, initial: AppConfig, initia
         }
         if (req.url === '/api/models') {
           if (typeof input.backend !== 'string' || !['cursor','codex','dsh'].includes(input.backend)) throw new Error('Invalid backend')
-          try { json(res, 200, {models: await listModels(input.backend, typeof input.cwd === 'string' && input.cwd ? input.cwd : process.cwd(), config, secrets, typeof input.id === 'string' ? input.id : undefined)}) }
+          try { json(res, 200, {models: await listModels(input.backend, typeof input.cwd === 'string' && input.cwd ? input.cwd : process.cwd(), config, secrets, typeof input.id === 'string' ? input.id : undefined, typeof input.model === 'string' ? input.model : undefined)}) }
           catch { json(res, 400, {error:'无法读取模型列表，请检查对应 backend 的登录、密钥和工作目录；也可手动输入模型 ID。'}) }
           return
         }
@@ -97,7 +98,7 @@ export async function startServer(configFile: string, initial: AppConfig, initia
       })
       mutation = work.catch(() => {})
       await work
-    })().catch(() => { if (!res.headersSent) json(res, 400, { error: 'Operation failed. Check fields, private directory permissions and local configuration.' }); else res.end() })
+    })().catch(error => { if (!res.headersSent) json(res, 400, { error: error instanceof PluginError ? error.public().message : '操作失败：请检查号码格式、Photon 管理授权及网络连接。' }); else res.end() })
   })
   await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(config.port, '127.0.0.1', resolve) })
   const address = server.address()

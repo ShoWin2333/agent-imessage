@@ -35,7 +35,9 @@ export class CodexBackend extends BaseBackend {
   async openSession(options: SessionOptions): Promise<{ id: string; cwd: string }> {
     const result = await this.rpc.request(options.id ? 'thread/resume' : 'thread/start', {
       ...(options.id ? { threadId: options.id } : { dynamicTools: options.tools }),
-      cwd: options.cwd, approvalPolicy: options.approvalPolicy === 'on-request' ? 'on-request' : options.approvalPolicy === 'never' ? 'never' : 'untrusted', sandbox: 'workspace-write',
+      cwd: options.cwd, approvalPolicy: options.approvalPolicy === 'never' ? 'never' : 'on-request', sandbox: 'workspace-write',
+      approvalsReviewer: options.approvalPolicy === 'auto-review' ? 'auto_review' : 'user',
+      ...(options.speed === 'fast' ? {serviceTier:'priority'} : options.speed === 'standard' ? {serviceTier:null} : {}),
       ...(options.model ? { model: options.model } : {}),
       ...(options.effort ? { config: { model_reasoning_effort: options.effort } } : {}),
     })

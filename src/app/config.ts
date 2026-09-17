@@ -38,8 +38,9 @@ export async function validateConfig(value: unknown, resolveWorkspaces = true): 
     if (ids.has(route.id) || projects.has(route.projectId) || addresses.has(`${route.senderPhoneNumber}:${route.assignedPhoneNumber}`)) throw new Error('Routes need unique IDs, Photon projects and sender/recipient pairs')
     ids.add(route.id); projects.add(route.projectId); addresses.add(`${route.senderPhoneNumber}:${route.assignedPhoneNumber}`)
     if (route.backend === 'cursor' && !route.model && ((route.effort && route.effort !== 'default') || (route.speed && route.speed !== 'default'))) throw new Error('Specify a Cursor model when overriding effort or speed')
-    const allowed = route.backend === 'cursor' ? ['default','auto-review','unrestricted'] : route.backend === 'dsh' ? ['default','deny'] : ['default','on-request','never']
+    const allowed = route.backend === 'cursor' ? ['default','auto-review','unrestricted'] : route.backend === 'dsh' ? ['default','deny'] : ['default','on-request','auto-review','never']
     if (!allowed.includes(route.approvalPolicy ?? 'default')) throw new Error('Unsupported approval policy for backend')
+    if (route.backend === 'dsh' && route.speed && route.speed !== 'default') throw new Error('DSH does not expose a speed option')
     if (route.cursorMode && route.backend !== 'cursor') throw new Error('cursorMode requires Cursor')
     if (resolveWorkspaces) {
       route.cwd = await realpath(route.cwd)
