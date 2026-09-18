@@ -1,3 +1,4 @@
+import {createHash} from 'node:crypto'
 import {execFileSync} from 'node:child_process'
 import {mkdirSync, writeFileSync, existsSync, readFileSync} from 'node:fs'
 import {homedir} from 'node:os'
@@ -33,9 +34,10 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Deskto
 mkdirSync(join(destination, 'Contents/MacOS'), {recursive:true})
 mkdirSync(join(destination, 'Contents/Resources'), {recursive:true})
 execFileSync('/usr/bin/xcrun', ['swiftc', join(source, 'Main.swift'), '-o', join(destination, `Contents/MacOS/${appName}`), '-framework', 'Cocoa', '-framework', 'WebKit', '-module-cache-path', '/private/tmp/agent-imessage-swift-cache'], {stdio:'inherit'})
+const iconName = 'AppIcon-' + createHash('sha256').update(readFileSync(resolve(source, '../../public/brand.png'))).digest('hex').slice(0,12)
 const iconset = join(destination, 'Contents/Resources/AppIcon.iconset')
-execFileSync('/usr/bin/xcrun', ['swift', '-module-cache-path', '/private/tmp/agent-imessage-swift-cache', join(source, 'Icon.swift'), iconset], {stdio:'inherit'})
-execFileSync('/usr/bin/iconutil', ['-c', 'icns', iconset, '-o', join(destination, 'Contents/Resources/AppIcon.icns')], {stdio:'inherit'})
+execFileSync('/usr/bin/xcrun', ['swift', '-module-cache-path', '/private/tmp/agent-imessage-swift-cache', join(source, 'Icon.swift'), iconset, resolve(source, '../../public/brand.png')], {stdio:'inherit'})
+execFileSync('/usr/bin/iconutil', ['-c', 'icns', iconset, '-o', join(destination, `Contents/Resources/${iconName}.icns`)], {stdio:'inherit'})
 // Do not register this plist in LaunchAgents: the app loads/unloads it itself.
 writeFileSync(join(destination, 'Contents/Resources/gateway.plist'),serviceXml,{mode:0o600})
 writeFileSync(join(destination, 'Contents/Info.plist'), `<?xml version="1.0" encoding="UTF-8"?>
@@ -44,7 +46,7 @@ writeFileSync(join(destination, 'Contents/Info.plist'), `<?xml version="1.0" enc
 <key>CFBundleIdentifier</key><string>${bundleId}</string>
 <key>CFBundleName</key><string>${appName}</string>
 <key>CFBundleExecutable</key><string>${appName}</string>
-<key>CFBundleIconFile</key><string>AppIcon.icns</string>
+<key>CFBundleIconFile</key><string>${iconName}.icns</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleShortVersionString</key><string>1.0.0</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>

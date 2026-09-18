@@ -16,7 +16,7 @@ const publicDir = existsSync(new URL('../../public/index.html', import.meta.url)
 
 async function body(req: IncomingMessage): Promise<unknown> {
   let value = ''
-  for await (const chunk of req) { value += String(chunk); if (Buffer.byteLength(value) > 128_000) throw new Error('Request too large') }
+  for await (const chunk of req) { value += String(chunk); if (Buffer.byteLength(value) > 512_000) throw new Error('Request too large') }
   return JSON.parse(value)
 }
 function json(res: ServerResponse, status: number, value: unknown): void { res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' }).end(JSON.stringify(value)) }
@@ -47,10 +47,10 @@ export async function startServer(configFile: string, initial: AppConfig, initia
       res.setHeader('x-content-type-options', 'nosniff')
       res.setHeader('referrer-policy', 'no-referrer')
       res.setHeader('content-security-policy', "default-src 'self'; img-src 'self' data:; frame-ancestors 'none'; form-action 'self'")
-      if (req.method === 'GET' && (req.url === '/' || req.url === '/app.js' || req.url === '/style.css')) {
+      if (req.method === 'GET' && (req.url === '/' || req.url === '/app.js' || req.url === '/style.css' || req.url === '/brand.png')) {
         const name = req.url === '/' ? 'index.html' : req.url.slice(1)
         const content = await readFile(new URL(name, publicDir))
-        res.writeHead(200, { 'content-type': name.endsWith('html') ? 'text/html; charset=utf-8' : name.endsWith('js') ? 'text/javascript; charset=utf-8' : 'text/css; charset=utf-8', 'cache-control': 'no-store' }).end(content); return
+        res.writeHead(200, { 'content-type': name.endsWith('png') ? 'image/png' : name.endsWith('html') ? 'text/html; charset=utf-8' : name.endsWith('js') ? 'text/javascript; charset=utf-8' : 'text/css; charset=utf-8', 'cache-control': 'no-store' }).end(content); return
       }
       if (req.method === 'GET' && req.url === '/api/state') {
         json(res, 200, { config, revision, weixinLogin:weixinLogin.snapshot(), weixinAccounts:Object.values(secrets.weixin ?? {}).map(c=>({accountId:c.accountId})), authorization: photonAccount.snapshot(), csrf: token, routes: gateway.snapshot(), hasCursorKey: Boolean(secrets.cursorApiKey || process.env.CURSOR_API_KEY), hasPhotonSecret: Object.fromEntries(config.routes.map(r => [r.id, routeChannels(r).some(c=>c.kind === 'imessage' && Boolean(secrets.photon[photonSecretKey(r,c)] || process.env[c.projectSecretEnv]))])) }); return

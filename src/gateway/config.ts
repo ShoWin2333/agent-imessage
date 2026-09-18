@@ -25,6 +25,7 @@ export const routeSchema = z.object({
   cursorMode: z.enum(['agent', 'plan', 'ask']).optional(),
   model: z.string().min(1).optional(),
   label: z.string().max(160).optional(),
+  avatar: z.string().max(16_000).regex(/^data:image\/jpeg;base64,\/9j\/[A-Za-z0-9+/]*={0,2}$/).optional(),
   enabled: z.boolean().optional(),
   effort: z.enum(['default', 'none', 'off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']).optional(),
   speed: z.enum(['default', 'fast', 'standard']).optional(),

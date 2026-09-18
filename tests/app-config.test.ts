@@ -44,3 +44,11 @@ it('atomic config writes enforce a private parent directory',async()=>{
   const dir=await directory(); await mkdir(join(dir,'public'),{mode:0o755})
   await expect(atomicJson(join(dir,'public','config.json'),{})).rejects.toThrow('private')
 })
+
+it('accepts bounded inline JPEG workspace avatars and rejects remote or active image formats',async()=>{
+  const route={id:'avatar',cwd:'/workspace',enabled:false,channels:[],avatar:'data:image/jpeg;base64,/9j/2Q=='}
+  expect((await validateConfig({routes:[route]},false)).routes[0]!.avatar).toBe(route.avatar)
+  for(const avatar of ['https://example.com/a.jpg','data:image/svg+xml;base64,PHN2Zz4=', 'data:image/jpeg;base64,/9j/'+ 'A'.repeat(16000)]) {
+    await expect(validateConfig({routes:[{...route,avatar}]},false)).rejects.toThrow()
+  }
+})
