@@ -18,7 +18,7 @@ export const routeSchema = z.object({
   projectSecretEnv: z.string().default(''),
   senderPhoneNumber: z.string().default(''),
   assignedPhoneNumber: z.string().default(''),
-  channels: z.array(channelSchema).min(1).max(8).optional(),
+  channels: z.array(channelSchema).max(8).optional(),
   backend: z.enum(['codex', 'cursor', 'dsh']).optional(),
   approvalPolicy: z.enum(['default', 'on-request', 'never', 'deny', 'auto-review', 'unrestricted']).optional(),
   cursorSettings: z.enum(['project', 'project-user', 'none']).optional(),
@@ -35,6 +35,8 @@ export const routeSchema = z.object({
     const result = channelSchema.safeParse({kind:'imessage', id:'imessage', projectId:route.projectId,
       projectSecretEnv:route.projectSecretEnv, senderPhoneNumber:route.senderPhoneNumber, assignedPhoneNumber:route.assignedPhoneNumber})
     if (!result.success) ctx.addIssue({code:'custom', message:'Configure an iMessage route or at least one channel'})
+  } else if (!route.channels.length && route.enabled !== false) {
+    ctx.addIssue({code:'custom', message:'A project without channels must be disabled'})
   } else if (new Set(route.channels.map(c => c.id)).size !== route.channels.length) {
     ctx.addIssue({code:'custom', message:'Channel IDs must be unique within a project'})
   }
