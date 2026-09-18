@@ -13,7 +13,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     var target: String { service.target }
     var statusItem: NSStatusItem!
     var statusLine: NSMenuItem!
-    var ownershipLine: NSMenuItem!
     var reconnectItem: NSMenuItem!
     var statusTimer: Timer?
     var checkingStatus = false
@@ -87,7 +86,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         let menu = NSMenu()
         statusLine = menu.addItem(withTitle: "正在启动…", action: nil, keyEquivalent: "")
-        ownershipLine = menu.addItem(withTitle: "", action: nil, keyEquivalent: "")
         menu.addItem(.separator())
         menu.addItem(withTitle: "打开管理界面", action: #selector(showWindow), keyEquivalent: "").target = self
         reconnectItem = menu.addItem(withTitle: "重新连接", action: #selector(reconnect), keyEquivalent: "")
@@ -101,9 +99,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     }
     func setStatus(_ text: String, symbol: String) {
         statusLine.title = text
-        ownershipLine.title = ownsService ? "由本 App 管理 · 退出时停止" : "外部服务 · 退出时保留"
-        statusItem.button?.image = NSImage(systemSymbolName: symbol, accessibilityDescription: "Agent iMessage：" + text)
-        statusItem.button?.image?.isTemplate = true
+        if statusItem.button?.image == nil, let icon = NSApp.applicationIconImage.copy() as? NSImage {
+            icon.size = NSSize(width: 20, height: 20)
+            icon.isTemplate = false
+            statusItem.button?.image = icon
+        }
+        statusLine.image = symbol == "exclamationmark.bubble" ? NSImage(systemSymbolName: "exclamationmark.circle", accessibilityDescription: "需要检查") : nil
         statusItem.button?.toolTip = "Agent iMessage · " + text
         reconnectItem.isEnabled = !starting && !closing
     }
@@ -138,7 +139,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
                 let busy = routes.filter { $0["busy"] as? Bool == true }.count
                 let text = failed > 0 ? "\(failed) 个工作空间需要检查" : busy > 0 ? "\(busy) 个工作空间正在处理" : "服务已连接 · \(routes.count) 个工作空间"
                 self.setStatus(text, symbol: failed > 0 ? "exclamationmark.bubble" : "bubble.left.and.bubble.right")
-                self.window.subtitle = self.ownsService ? "后台运行 · 退出应用时停止" : "已连接外部服务 · 退出应用后继续运行"
+                self.window.subtitle = ""
             }
         }.resume()
     }
@@ -286,7 +287,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             DispatchQueue.main.async {
                 guard !self.closing && generation == self.pollGeneration else { return }
                 if (response as? HTTPURLResponse)?.statusCode == 200 {
-                    self.window.subtitle = self.ownsService ? "本机服务 · 退出应用时停止" : "已连接后台服务 · 退出应用后继续运行"
+                    self.window.subtitle = ""
                     if !self.pageLoaded {
                         self.web.load(URLRequest(url: self.url))
                         self.pageLoaded = true
