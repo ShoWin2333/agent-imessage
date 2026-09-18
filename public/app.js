@@ -22,12 +22,31 @@ function navigation() {
   if (!sections.some(s=>s.dataset.id === selectedProject)) selectedProject = sections[0]?.dataset.id
   $('project-nav').replaceChildren(...sections.map(section=>{
     const b=document.createElement('button'); b.type='button'; b.dataset.project=section.dataset.id
-    const icon=document.createElement('span'); icon.className='project-icon'; icon.textContent='▱'
+    const icon=document.createElement('span'); icon.className='project-icon'; setAvatar(icon,section.avatar)
     const label=document.createElement('span'); label.textContent=section.querySelector('[name=label]').value || section.dataset.id
     b.append(icon,label); b.onclick=()=>showView('project',section.dataset.id); return b
   }))
   $('empty-state').hidden=sections.length>0
   showView(activeView)
+}
+function setAvatar(node, value) {
+  node.replaceChildren()
+  if(value){const image=document.createElement('img');image.src=value;image.alt='';node.append(image)}
+  else node.textContent='▱'
+}
+async function readAvatar(file) {
+  if(!['image/jpeg','image/png','image/webp'].includes(file.type)) throw new Error('请选择 JPG、PNG 或 WebP 图片。')
+  if(file.size>8*1024*1024) throw new Error('图片不能超过 8 MB。')
+  const data=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(new Error('无法读取图片，请重试。'));reader.readAsDataURL(file)})
+  const image=new Image();image.src=data
+  try {await image.decode()} catch {throw new Error('无法识别这张图片，请换一张。')}
+  if(!image.naturalWidth || !image.naturalHeight || image.naturalWidth*image.naturalHeight>40_000_000) throw new Error('图片尺寸过大，请使用较小的图片。')
+  const canvas=document.createElement('canvas');canvas.width=canvas.height=128
+  const ctx=canvas.getContext('2d');ctx.fillStyle='#ffffff';ctx.fillRect(0,0,128,128)
+  const size=Math.min(image.naturalWidth,image.naturalHeight)
+  ctx.drawImage(image,(image.naturalWidth-size)/2,(image.naturalHeight-size)/2,size,size,0,0,128,128)
+  for(const quality of [.85,.65,.45]){const result=canvas.toDataURL('image/jpeg',quality);if(result.length<=16000)return result}
+  throw new Error('图片处理失败，请使用更简单的图片。')
 }
 function revealInvalid(input) {
   const section=input.closest('.route'); if(section) showView('project',section.dataset.id)
@@ -45,6 +64,24 @@ function renderRoute(route) {
   const badge = document.createElement('span'); badge.className = 'badge'; badge.dataset.role = 'status'
   const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = '移除'; remove.onclick = () => { section.remove(); navigation(); notice('项目已从草稿移除。到设置中保存全部配置后生效。') }
   heading.append(title,badge,remove); section.append(heading)
+  section.avatar=route.avatar
+  const avatarEditor=document.createElement('div');avatarEditor.className='avatar-editor'
+  const preview=document.createElement('span');preview.className='avatar-preview';setAvatar(preview,section.avatar)
+  const avatarControls=document.createElement('div');const avatarTitle=document.createElement('h3');avatarTitle.textContent='工作空间头像'
+  const avatarHelp=document.createElement('p');avatarHelp.textContent='JPG、PNG 或 WebP，最大 8 MB。居中裁成方形，保存项目后生效。'
+  const upload=document.createElement('button');upload.type='button';upload.textContent='上传头像'
+  const clear=document.createElement('button');clear.type='button';clear.textContent='移除头像';clear.hidden=!section.avatar
+  const picker=document.createElement('input');picker.type='file';picker.accept='image/jpeg,image/png,image/webp';picker.hidden=true;picker.setAttribute('aria-label','选择工作空间头像')
+  let avatarVersion=0
+  upload.onclick=()=>picker.click()
+  picker.onchange=async()=>{const file=picker.files[0];if(!file)return;const version=++avatarVersion;upload.disabled=true
+    try {const value=await readAvatar(file);if(version!==avatarVersion)return;section.avatar=value;setAvatar(preview,value);clear.hidden=false;navigation();notice('头像已预览，保存项目后生效。')}
+    catch(error){if(version===avatarVersion)notice(error.message)}
+    finally{if(version===avatarVersion)upload.disabled=false;picker.value=''}
+  }
+  clear.onclick=()=>{avatarVersion++;upload.disabled=false;section.avatar=undefined;setAvatar(preview);clear.hidden=true;navigation();notice('头像已移除，保存项目后生效。')}
+  const avatarActions=document.createElement('div');avatarActions.className='actions';avatarActions.append(upload,clear,picker)
+  avatarControls.append(avatarTitle,avatarHelp,avatarActions);avatarEditor.append(preview,avatarControls);section.append(avatarEditor)
   const grid = document.createElement('div'); grid.className = 'grid'; section.append(grid)
   section.addEventListener('input', event => { if (event.target.name === 'label') { title.textContent=event.target.value || section.dataset.id; navigation() } })
   let modelCatalog = []
@@ -354,6 +391,7 @@ async function post(path, value = {}, report = notice) {
 function readRoute(section) {
   const original = state.config.routes.find(r => r.id === section.dataset.id)
   const route = { ...(original || {}) }
+  if(section.avatar)route.avatar=section.avatar;else delete route.avatar
   for (const input of section.querySelectorAll('input,select')) {
     if (!input.name || input.name === 'photonSecret') continue
     if (input.name === 'cursorSettings' && input.disabled) { delete route.cursorSettings; continue }

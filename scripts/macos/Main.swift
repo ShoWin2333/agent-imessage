@@ -1,5 +1,6 @@
 import Cocoa
 import WebKit
+import UniformTypeIdentifiers
 
 // Local desktop wrapper. launchd supervises the service only while this app is open.
 final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate {
@@ -26,7 +27,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Set the running Dock icon explicitly; Launch Services can retain the
         // generic icon when a local app bundle is updated in place.
-        if let iconURL = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
+        if let iconFile = Bundle.main.object(forInfoDictionaryKey: "CFBundleIconFile") as? String,
+           let iconURL = Bundle.main.resourceURL?.appendingPathComponent(iconFile),
            let icon = NSImage(contentsOf: iconURL) {
             NSApp.applicationIconImage = icon
         }
@@ -183,6 +185,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for action: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
         if let destination = action.request.url, ["https", "http"].contains(destination.scheme ?? "") { NSWorkspace.shared.open(destination) }
         return nil
+    }
+    func webView(_ webView: WKWebView, runOpenPanelWith parameters: WKOpenPanelParameters, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping ([URL]?) -> Void) {
+        guard let source = frame.request.url,
+              source.scheme == url.scheme, source.host == url.host, source.port == url.port else {
+            completionHandler(nil)
+            return
+        }
+        let panel = NSOpenPanel()
+        panel.title = "选择工作空间头像"
+        panel.prompt = "选择图片"
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.jpeg, .png, .webP]
+        panel.beginSheetModal(for: webView.window ?? window) { result in
+            completionHandler(result == .OK ? panel.urls : nil)
+        }
     }
     func webView(_ webView: WKWebView, runJavaScriptConfirmPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (Bool) -> Void) {
         let alert = NSAlert()
