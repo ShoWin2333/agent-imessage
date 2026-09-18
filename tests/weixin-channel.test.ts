@@ -88,6 +88,16 @@ class Backend extends BaseBackend {
   cancel=vi.fn(async()=>{})
   close=vi.fn(async()=>{this.onClose()})
 }
+it('keeps stopped WeChat accounts reserved until explicit unbinding, then allows reassignment',async()=>{
+  const one={id:'one',label:'First Agent',cwd:'/workspace',enabled:false,channels:[{kind:'weixin',id:'wechat',accountId:'bot'}]}
+  const two={...one,id:'two',label:'Second Agent'}
+  await expect(validateConfig({routes:[one,two]},false)).rejects.toThrow('First Agent')
+  const config=await validateConfig({routes:[{...one,channels:[]},two]},false)
+  expect(config.routes[0]!.channels).toEqual([])
+  expect(config.routes[1]!.channels).toHaveLength(1)
+  await expect(validateConfig({routes:[{...one,enabled:true,channels:[]}]},false)).rejects.toThrow()
+})
+
 it('preserves legacy iMessage state when adding Weixin and isolates approvals between channels',async()=>{
   const dir=await fixture(), old={...legacy,cwd:dir}, store=await StateStore.open(dir,old)
   store.state.threadId='legacy-session';store.state.sessions=['legacy-session'];await store.save();await store.close()

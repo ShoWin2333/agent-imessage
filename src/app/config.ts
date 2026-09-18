@@ -35,10 +35,16 @@ export async function validateConfig(value: unknown, resolveWorkspaces = true): 
   if (!parsed.success) throw new Error('Invalid config: check fields, absolute paths and E.164 numbers')
   const config = parsed.data
   const ids = new Set(), projects = new Set(), addresses = new Set()
+  const weixinOwners = new Map<string, string>()
   for (const route of config.routes) {
     if (ids.has(route.id)) throw new Error('Routes need unique IDs')
     ids.add(route.id)
     for (const channel of routeChannels(route)) {
+      if (channel.kind === 'weixin') {
+        const owner = weixinOwners.get(channel.accountId)
+        if (owner) throw new Error(`WeChat 机器人必须唯一绑定（unique）：已绑定「${owner}」，请先在原项目解绑并保存，再绑定「${route.label || route.id}」。停止项目不会释放绑定。`)
+        weixinOwners.set(channel.accountId, route.label || route.id)
+      }
       const project = channel.kind === 'imessage' ? `imessage:${channel.projectId}` : `weixin:${channel.accountId}`
       const address = channel.kind === 'imessage' ? `${channel.senderPhoneNumber}:${channel.assignedPhoneNumber}` : project
       if (projects.has(project) || addresses.has(address)) throw new Error('Message accounts and sender/recipient pairs must be unique across projects')
