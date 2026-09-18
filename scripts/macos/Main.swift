@@ -99,9 +99,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     }
     func setStatus(_ text: String, symbol: String) {
         statusLine.title = text
-        if statusItem.button?.image == nil, let icon = NSApp.applicationIconImage.copy() as? NSImage {
-            icon.size = NSSize(width: 20, height: 20)
-            icon.isTemplate = false
+        if statusItem.button?.image == nil {
+            // A single speech-bubble silhouette echoes the app artwork. Template
+            // rendering lets macOS choose white/black for the menu bar material.
+            let icon = NSImage(size: NSSize(width: 20, height: 18), flipped: false) { _ in
+                let bubble = NSBezierPath()
+                bubble.move(to: NSPoint(x: 6, y: 5))
+                bubble.curve(to: NSPoint(x: 1, y: 10), controlPoint1: NSPoint(x: 3, y: 6), controlPoint2: NSPoint(x: 1, y: 7))
+                bubble.curve(to: NSPoint(x: 10, y: 17), controlPoint1: NSPoint(x: 1, y: 14), controlPoint2: NSPoint(x: 5, y: 17))
+                bubble.curve(to: NSPoint(x: 19, y: 10), controlPoint1: NSPoint(x: 15, y: 17), controlPoint2: NSPoint(x: 19, y: 14))
+                bubble.curve(to: NSPoint(x: 10, y: 3), controlPoint1: NSPoint(x: 19, y: 6), controlPoint2: NSPoint(x: 15, y: 3))
+                bubble.curve(to: NSPoint(x: 3, y: 1), controlPoint1: NSPoint(x: 7, y: 3), controlPoint2: NSPoint(x: 5, y: 1))
+                bubble.curve(to: NSPoint(x: 6, y: 5), controlPoint1: NSPoint(x: 4, y: 2), controlPoint2: NSPoint(x: 5, y: 4))
+                bubble.close()
+                NSColor.black.setFill()
+                bubble.fill()
+                return true
+            }
+            icon.isTemplate = true
             statusItem.button?.image = icon
         }
         statusLine.image = symbol == "exclamationmark.bubble" ? NSImage(systemSymbolName: "exclamationmark.circle", accessibilityDescription: "需要检查") : nil
