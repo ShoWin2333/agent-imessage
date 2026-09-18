@@ -2,13 +2,23 @@ import Cocoa
 import WebKit
 import UniformTypeIdentifiers
 
-// Local desktop wrapper. launchd supervises the service only while this app is open.
-final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate {
+// Resident desktop app; the management window is independent of service lifetime.
+final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate, NSWindowDelegate {
     var window: NSWindow!
     var web: WKWebView!
     var ownsService = false
     var closing = false
-    var target: String { "gui/\(getuid())/\(serviceTarget)" }
+    let serviceQueue = DispatchQueue(label: "app.agent-imessage.service")
+    lazy var service = GatewayService(label: serviceTarget, directory: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Agent iMessage/Desktop"))
+    var target: String { service.target }
+    var statusItem: NSStatusItem!
+    var statusLine: NSMenuItem!
+    var ownershipLine: NSMenuItem!
+    var reconnectItem: NSMenuItem!
+    var statusTimer: Timer?
+    var checkingStatus = false
+    var pageLoaded = false
+
     var starting = false
     var pollGeneration = 0
     var serviceTarget: String { Bundle.main.object(forInfoDictionaryKey: "GatewayServiceLabel") as? String ?? "app.agent-imessage.gateway" }
@@ -17,10 +27,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
 
     // Runtime paths are resolved after installation, so moving the bundle is safe.
     // Keep existing user data outside the bundle; never package credentials.
-    func servicePlist() throws -> String {
+    func serviceJob() throws -> [String: Any] {
         let resources = Bundle.main.resourceURL!
         guard Bundle.main.object(forInfoDictionaryKey: "GatewayStandalone") as? Bool == true else {
-            return resources.appendingPathComponent("gateway.plist").path
+            let data = try Data(contentsOf: resources.appendingPathComponent("gateway.plist"))
+            return try PropertyListSerialization.propertyList(from: data, format: nil) as! [String: Any]
         }
         let fm = FileManager.default
         let home = fm.homeDirectoryForCurrentUser
@@ -67,20 +78,69 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             "StandardOutPath": runtime.appendingPathComponent("gateway.log").path,
             "StandardErrorPath": runtime.appendingPathComponent("gateway.log").path
         ]
-        let file = runtime.appendingPathComponent("\(serviceTarget).plist")
-        try PropertyListSerialization.data(fromPropertyList: job, format: .xml, options: 0).write(to: file, options: .atomic)
-        try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
-        return file.path
+        return job
     }
 
-    @discardableResult func launchctl(_ args: [String]) -> Int32 {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-        process.arguments = args
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-        do { try process.run(); process.waitUntilExit(); return process.terminationStatus }
-        catch { return -1 }
+    @discardableResult func launchctl(_ args: [String]) -> Int32 { GatewayService.command(args).0 }
+
+    func setupStatusItem() {
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        let menu = NSMenu()
+        statusLine = menu.addItem(withTitle: "正在启动…", action: nil, keyEquivalent: "")
+        ownershipLine = menu.addItem(withTitle: "", action: nil, keyEquivalent: "")
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "打开管理界面", action: #selector(showWindow), keyEquivalent: "").target = self
+        reconnectItem = menu.addItem(withTitle: "重新连接", action: #selector(reconnect), keyEquivalent: "")
+        reconnectItem.target = self
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "退出 Agent iMessage", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        statusItem.menu = menu
+        setStatus("正在启动…", symbol: "bubble.left.and.bubble.right")
+        statusTimer = Timer(timeInterval: 5, repeats: true) { [weak self] _ in self?.refreshStatus() }
+        RunLoop.main.add(statusTimer!, forMode: .common)
+    }
+    func setStatus(_ text: String, symbol: String) {
+        statusLine.title = text
+        ownershipLine.title = ownsService ? "由本 App 管理 · 退出时停止" : "外部服务 · 退出时保留"
+        statusItem.button?.image = NSImage(systemSymbolName: symbol, accessibilityDescription: "Agent iMessage：" + text)
+        statusItem.button?.image?.isTemplate = true
+        statusItem.button?.toolTip = "Agent iMessage · " + text
+        reconnectItem.isEnabled = !starting && !closing
+    }
+    @objc func showWindow() {
+        guard !closing else { return }
+        NSApp.setActivationPolicy(.regular)
+        window.deminiaturize(nil)
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+    func windowWillClose(_ notification: Notification) {
+        // Keep the menu bar entry while removing the now-empty Dock presence.
+        if !closing { NSApp.setActivationPolicy(.accessory) }
+    }
+    func refreshStatus() {
+        guard !closing && !starting && !checkingStatus else { return }
+        checkingStatus = true
+        var request = URLRequest(url: url.appendingPathComponent("api/state"))
+        request.timeoutInterval = 2
+        URLSession.shared.dataTask(with: request) { data, response, _ in
+            DispatchQueue.main.async {
+                self.checkingStatus = false
+                guard !self.closing && !self.starting else { return }
+                guard (response as? HTTPURLResponse)?.statusCode == 200, let data = data,
+                      let state = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let routes = state["routes"] as? [[String: Any]] else {
+                    self.setStatus("服务未连接 · 可重新连接", symbol: "exclamationmark.bubble")
+                    self.window.subtitle = "服务未连接 · 菜单栏可重新连接"
+                    return
+                }
+                let failed = routes.filter { $0["phase"] as? String == "failed" }.count
+                let busy = routes.filter { $0["busy"] as? Bool == true }.count
+                let text = failed > 0 ? "\(failed) 个工作空间需要检查" : busy > 0 ? "\(busy) 个工作空间正在处理" : "服务已连接 · \(routes.count) 个工作空间"
+                self.setStatus(text, symbol: failed > 0 ? "exclamationmark.bubble" : "bubble.left.and.bubble.right")
+                self.window.subtitle = self.ownsService ? "后台运行 · 退出应用时停止" : "已连接外部服务 · 退出应用后继续运行"
+            }
+        }.resume()
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -114,6 +174,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1120, height: 800), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.title = "Agent iMessage"
         window.isReleasedWhenClosed = false
+        window.delegate = self
         window.minSize = NSSize(width: 620, height: 480)
         window.titlebarAppearsTransparent = true
         window.backgroundColor = .windowBackgroundColor
@@ -134,43 +195,84 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         web.loadHTMLString("<meta charset='utf-8'><p style='font:20px system-ui;padding:40px'>正在启动 Agent iMessage…</p>", baseURL: nil)
+        setupStatusItem()
+        smokeRecord("launched")
         startService()
-        // Exercise the normal window-close lifecycle in a local smoke test.
+        if smokeEnabled && CommandLine.arguments.contains("--smoke-quit-start") {
+            DispatchQueue.main.async { NSApp.terminate(nil) }
+        }
+    }
+
+    var smokeEnabled: Bool { Bundle.main.bundleIdentifier?.hasSuffix(".standalone-test") == true }
+    var smokeEvents: [[String: Any]] = []
+    var smokeScheduled = false
+    func smokeRecord(_ event: String) {
+        guard smokeEnabled, let path = ProcessInfo.processInfo.environment["AGENT_GATEWAY_SMOKE_REPORT"] else { return }
+        smokeEvents.append(["event": event, "pid": ProcessInfo.processInfo.processIdentifier,
+                            "target": target, "owned": ownsService, "visible": window.isVisible,
+                            "accessory": NSApp.activationPolicy() == .accessory,
+                            "menu": statusItem.menu?.items.map { $0.title } ?? []])
+        if let data = try? JSONSerialization.data(withJSONObject: smokeEvents) {
+            try? data.write(to: URL(fileURLWithPath: path), options: .atomic)
+        }
+    }
+    func smokeReady() {
+        guard smokeEnabled && !smokeScheduled else { return }
+        smokeScheduled = true
+        smokeRecord("ready")
         if CommandLine.arguments.contains("--smoke-close") {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 6) { self.window.performClose(nil) }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 9) {
-                precondition(!self.window.isVisible && self.launchctl(["print", self.target]) == 0)
-                _ = self.applicationShouldHandleReopen(NSApp, hasVisibleWindows: false)
-                precondition(self.window.isVisible)
-                print("PASS: close preserves service; reopen restores window")
-                NSApp.terminate(nil)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                self.window.performClose(nil)
+                self.smokeRecord("closed")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    self.showWindow() // same target/action as the menu bar entry
+                    self.smokeRecord("reopened")
+                    NSApp.terminate(nil)
+                }
             }
         }
     }
 
     func startService() {
         guard !starting && !closing else { return }
-        let plist: String
-        do { plist = try servicePlist() }
+        let job: [String: Any]
+        do { job = try serviceJob() }
         catch { showError("无法读取配置或准备本机服务。\(error.localizedDescription)"); return }
         starting = true
+        setStatus("正在连接本机服务…", symbol: "bubble.left.and.bubble.right")
         window.subtitle = "正在连接本机服务…"
-        DispatchQueue.global(qos: .userInitiated).async {
-            let alreadyRunning = self.launchctl(["print", self.target]) == 0
-            let started = !alreadyRunning && self.launchctl(["bootstrap", "gui/\(getuid())", plist]) == 0
-            DispatchQueue.main.async {
-                self.starting = false
-                if self.closing {
-                    DispatchQueue.global().async {
-                        if started { self.launchctl(["bootout", self.target]) }
-                        DispatchQueue.main.async { NSApp.reply(toApplicationShouldTerminate: true) }
+        let endpoint = url.appendingPathComponent("api/state")
+        serviceQueue.async {
+            do {
+                let owned = try self.service.connect(job: job) {
+                    let ready = DispatchSemaphore(value: 0)
+                    var found = false
+                    var request = URLRequest(url: endpoint)
+                    request.timeoutInterval = 1
+                    let task = URLSession.shared.dataTask(with: request) { data, response, _ in
+                        if (response as? HTTPURLResponse)?.statusCode == 200, let data = data,
+                           let state = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                            found = state["routes"] is [Any] && state["config"] is [String: Any]
+                        }
+                        ready.signal()
                     }
-                    return
+                    task.resume()
+                    ready.wait()
+                    return found
                 }
-                guard alreadyRunning || started else { self.showError("无法启动服务。请检查应用是否完整、配置是否有效。可在“显示”菜单重新连接。"); return }
-                self.ownsService = self.ownsService || started
-                self.pollGeneration += 1
-                self.poll(60, generation: self.pollGeneration)
+                RunLoop.main.perform(inModes: [.default, .modalPanel, .eventTracking]) {
+                    self.starting = false
+                    self.ownsService = owned
+                    if self.closing { self.finishTermination(); return }
+                    self.pollGeneration += 1
+                    self.poll(60, generation: self.pollGeneration)
+                }
+            } catch {
+                RunLoop.main.perform(inModes: [.default, .modalPanel, .eventTracking]) {
+                    self.starting = false
+                    if self.closing { self.finishTermination(); return }
+                    self.showError(error.localizedDescription)
+                }
             }
         }
     }
@@ -185,7 +287,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
                 guard !self.closing && generation == self.pollGeneration else { return }
                 if (response as? HTTPURLResponse)?.statusCode == 200 {
                     self.window.subtitle = self.ownsService ? "本机服务 · 退出应用时停止" : "已连接后台服务 · 退出应用后继续运行"
-                    self.web.load(URLRequest(url: self.url))
+                    if !self.pageLoaded {
+                        self.web.load(URLRequest(url: self.url))
+                        self.pageLoaded = true
+                    }
+                    self.refreshStatus()
+                    self.smokeReady()
                 } else if remaining > 0 {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { self.poll(remaining - 1, generation: generation) }
                 } else { self.showError("无法连接本机服务。修复配置后可点击重新连接。") }
@@ -193,7 +300,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         }.resume()
     }
     func showError(_ message: String) {
+        setStatus("连接失败 · 可重新连接", symbol: "exclamationmark.bubble")
         window.subtitle = "连接失败 · 可重试"
+        guard window.isVisible else { return }
         let alert = NSAlert()
         alert.messageText = "暂时无法连接 Agent Gateway"
         alert.informativeText = message
@@ -210,28 +319,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
-        if !closing {
-            window.deminiaturize(nil)
-            window.makeKeyAndOrderFront(nil)
-            sender.activate(ignoringOtherApps: true)
-        }
+        showWindow()
         return true
     }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard !closing else { return .terminateLater }
         closing = true
-        if starting { return .terminateLater }
-        guard ownsService else { return .terminateNow }
-        ownsService = false
-        DispatchQueue.global().async {
-            self.launchctl(["bootout", self.target])
-            // bootout may return before launchd finishes removing the job.
-            for _ in 0..<100 {
-                if self.launchctl(["print", self.target]) != 0 { break }
-                Thread.sleep(forTimeInterval: 0.2)
-            }
-            RunLoop.main.perform(inModes: [.default, .modalPanel, .eventTracking]) { sender.reply(toApplicationShouldTerminate: true) }
-        }
+        pollGeneration += 1
+        setStatus("正在退出…", symbol: "bubble.left.and.bubble.right")
+        if !starting { finishTermination() }
         return .terminateLater
+    }
+    func finishTermination() {
+        smokeRecord("quitting")
+        serviceQueue.async {
+            let stopped = self.service.stop()
+            RunLoop.main.perform(inModes: [.default, .modalPanel, .eventTracking]) {
+                if stopped {
+                    self.smokeRecord("stopped")
+                    self.statusTimer?.invalidate()
+                    NSApp.reply(toApplicationShouldTerminate: true)
+                } else {
+                    self.closing = false
+                    NSApp.reply(toApplicationShouldTerminate: false)
+                    self.showWindow()
+                    self.showError("本机服务尚未停止，应用仍在运行。请重试退出；服务归属记录已保留。")
+                }
+            }
+        }
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
@@ -273,8 +388,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     }
 }
 
-let app = NSApplication.shared
-let delegate = AppDelegate()
-app.delegate = delegate
-app.setActivationPolicy(.regular)
-app.run()
+@main
+struct DesktopApp {
+    static func main() {
+        let app = NSApplication.shared
+        let delegate = AppDelegate()
+        app.delegate = delegate
+        app.setActivationPolicy(.regular)
+        app.run()
+    }
+}

@@ -98,7 +98,7 @@ LaunchAgent 名称为 `app.agent-imessage.gateway`。登录后启动，进程失
 
 Linux 可以由 systemd 等进程管理器运行 `agent-imessage start /absolute/path/config.json`；内置 service 安装器目前仅支持 macOS。
 
-macOS 原生窗口提供窗口位置恢复、编辑快捷键、重新连接和在浏览器打开。关闭窗口保留服务，点击 Dock 图标恢复；退出应用只停止由该应用启动的服务，连接已存在的后台服务时会保留它，并在窗口副标题中提示。
+macOS 原生窗口提供窗口位置恢复、编辑快捷键、重新连接和在浏览器打开。菜单栏常驻入口显示连接状态、工作空间数量、处理状态或失败提示，可打开完整管理界面、重新连接或退出。关闭窗口保留服务并隐藏 Dock 图标，从菜单栏重新打开后恢复 Dock；最小化仍遵循系统行为。正常退出只停止有归属证据的自有服务，外部服务保持运行。重新连接不会重载已经打开的管理页面，避免丢失未保存表单。
 
 开发时可使用 Codex 的 Run 按钮，或执行：
 
@@ -123,10 +123,15 @@ npm run test:macos:package -- '/tmp/Agent iMessage.app'
 
 ```sh
 AGENT_GATEWAY_APP_NAME='Gateway Standalone Test' AGENT_GATEWAY_BUNDLE_ID=app.agent-imessage.standalone-test npm run package:macos -- '/tmp/Gateway Standalone Test.app'
+npm run test:macos:service
 npm run test:macos:native -- '/tmp/Gateway Standalone Test.app'
 ```
 
 将 `.app` 拷贝到“应用程序”即可运行。每次启动按实际安装位置生成服务路径，退出后可以移动 App。沿用 `~/.config/agent-imessage/` 的配置、头像和凭据，以及配置指定的会话目录（默认 `~/.local/state/agent-imessage/`）；不会将构建者的配置、凭据或 LaunchAgent 放进安装包。桌面服务日志和生成的 plist 位于 `~/Library/Application Support/Agent iMessage/Desktop/`。升级时退出旧 App 后替换应用包，用户数据保留。
+
+App 启动的服务使用独立随机 launchd label，并在私有目录中先写入归属记录，再启动服务。App 异常退出后，重新打开时只有配置路径、任务来源和运行中的随机标识都匹配，才重新接管；正常退出前再次核验。旧版无归属记录的服务、手动 LaunchAgent 和直接启动的 Gateway 都视为外部服务，不按端口或进程名停止。若无法停止自有服务，保留 App 和归属记录并提示重试，不假装退出成功。关闭窗口不等于退出，也不会注册开机自启。
+
+生命周期测试仅使用专用测试身份和空配置，覆盖菜单栏入口、关闭/重开、SIGKILL 后接管、移动后的接管、启动中退出、旧记录及外部同名任务替换保护，测试不会连接真实消息渠道。图形测试需要已登录的 macOS 桌面会话。
 
 开发仍使用上面的 Run 脚本，不必每次打独立包。独立 App 支持在启动进程环境中设置 `AGENT_GATEWAY_CONFIG`，固定端口从运行时配置读取。外部 Codex/DSH 工具仍需安装和登录；也会自动识别已安装的 Codex 桌面 App 内的命令；非标准安装位置可在配置中设置 `codexBinary` / `dshBinary` 绝对路径。旧的后台服务若已运行，App 会连接并保留它；要切换到内置服务，先退出旧 App，必要时卸载此前手动安装的后台服务。
 

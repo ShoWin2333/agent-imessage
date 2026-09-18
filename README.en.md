@@ -129,3 +129,25 @@ the lightweight Run script. Release bundles are locally ad-hoc signed; public
 distribution still requires Developer ID signing and notarization. Node and dependency
 licenses are included. Update pinned Node hashes in `scripts/macos/package.mjs` and
 rerun packaging checks when maintaining the bundled runtime.
+
+
+### Resident menu bar and service ownership
+
+The menu bar reports connectivity, workspace count, activity and failures, with
+Open Management, Reconnect and Quit actions. Closing the window hides the Dock
+entry while keeping the app/service running; reopening through the menu bar
+restores the window and Dock. Minimize retains standard macOS behavior. Reconnect
+does not reload an already loaded management page or discard form drafts.
+
+App-started launchd jobs receive unique labels and a persisted random ownership
+marker before bootstrap. Relaunch adopts an orphan only when its config, loaded
+job source and marker match. Quit revalidates ownership before stopping the job.
+Legacy jobs without receipts, manual LaunchAgents and directly started Gateway
+processes stay external. A failed stop cancels Quit and retains the recovery
+receipt. Closing a window does not enable login startup.
+
+`npm run test:macos:service` checks actual isolated launchd ownership/replacement
+behavior. `npm run test:macos:native -- '/tmp/Gateway Standalone Test.app'` uses the
+dedicated test identity and empty config to cover menu/window behavior, SIGKILL
+recovery, relocation, Quit during startup and external-process preservation.
+Native tests require a logged-in macOS desktop session.

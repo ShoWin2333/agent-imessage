@@ -36,7 +36,7 @@ const port = config.port ?? 8787
 if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Desktop wrapper requires a fixed port from 1 to 65535')
 mkdirSync(join(destination, 'Contents/MacOS'), {recursive:true})
 mkdirSync(join(destination, 'Contents/Resources'), {recursive:true})
-execFileSync('/usr/bin/xcrun', ['swiftc', join(source, 'Main.swift'), '-o', join(destination, `Contents/MacOS/${appName}`), '-framework', 'Cocoa', '-framework', 'WebKit', '-module-cache-path', '/private/tmp/agent-imessage-swift-cache'], {stdio:'inherit'})
+execFileSync('/usr/bin/xcrun', ['swiftc', join(source, 'Main.swift'), join(source, 'GatewayService.swift'), '-o', join(destination, `Contents/MacOS/${appName}`), '-framework', 'Cocoa', '-framework', 'WebKit', '-module-cache-path', '/private/tmp/agent-imessage-swift-cache'], {stdio:'inherit'})
 const iconName = 'AppIcon-' + createHash('sha256').update(readFileSync(resolve(source, '../../public/brand.png'))).digest('hex').slice(0,12)
 const iconset = join(destination, 'Contents/Resources/AppIcon.iconset')
 execFileSync('/usr/bin/xcrun', ['swift', '-module-cache-path', '/private/tmp/agent-imessage-swift-cache', join(source, 'Icon.swift'), iconset, resolve(source, '../../public/brand.png')], {stdio:'inherit'})
