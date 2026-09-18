@@ -3,7 +3,7 @@ import { dirname, join, isAbsolute } from 'node:path'
 import { homedir } from 'node:os'
 import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
-import { routeSchema } from '../gateway/config.js'
+import { routeSchema, routeChannels } from '../gateway/config.js'
 import { parsePhotonCredential } from '../credential.js'
 import { StateStore } from '../gateway/state.js'
 import { object, type ObjectValue } from '../backends/jsonrpc.js'
@@ -18,8 +18,9 @@ export const appSchema = z.object({
   routes: z.array(routeSchema).max(16).default([]),
 }).strict()
 export type AppConfig = z.infer<typeof appSchema>
-export interface Secrets { cursorApiKey?: string | undefined; photon: Record<string, string> }
-const secretSchema = z.object({ cursorApiKey: z.string().optional(), photon: z.record(z.string(), z.string()) })
+export interface WeixinCredential { token: string; accountId: string; ownerUserId: string; baseUrl: string }
+export interface Secrets { weixin?: Record<string, WeixinCredential> | undefined; cursorApiKey?: string | undefined; photon: Record<string, string> }
+const secretSchema = z.object({ weixin: z.record(z.string(), z.object({token:z.string().min(1),accountId:z.string().min(1),ownerUserId:z.string().min(1),baseUrl:z.string().url()})).optional(), cursorApiKey: z.string().optional(), photon: z.record(z.string(), z.string()) })
 
 export async function atomicJson(file: string, value: unknown): Promise<void> {
   await mkdir(dirname(file), { recursive: true, mode: 0o700 })
@@ -35,8 +36,14 @@ export async function validateConfig(value: unknown, resolveWorkspaces = true): 
   const config = parsed.data
   const ids = new Set(), projects = new Set(), addresses = new Set()
   for (const route of config.routes) {
-    if (ids.has(route.id) || projects.has(route.projectId) || addresses.has(`${route.senderPhoneNumber}:${route.assignedPhoneNumber}`)) throw new Error('Routes need unique IDs, Photon projects and sender/recipient pairs')
-    ids.add(route.id); projects.add(route.projectId); addresses.add(`${route.senderPhoneNumber}:${route.assignedPhoneNumber}`)
+    if (ids.has(route.id)) throw new Error('Routes need unique IDs')
+    ids.add(route.id)
+    for (const channel of routeChannels(route)) {
+      const project = channel.kind === 'imessage' ? `imessage:${channel.projectId}` : `weixin:${channel.accountId}`
+      const address = channel.kind === 'imessage' ? `${channel.senderPhoneNumber}:${channel.assignedPhoneNumber}` : project
+      if (projects.has(project) || addresses.has(address)) throw new Error('Message accounts and sender/recipient pairs must be unique across projects')
+      projects.add(project); addresses.add(address)
+    }
     if (route.backend === 'cursor' && !route.model && ((route.effort && route.effort !== 'default') || (route.speed && route.speed !== 'default'))) throw new Error('Specify a Cursor model when overriding effort or speed')
     const allowed = route.backend === 'cursor' ? ['default','auto-review','unrestricted'] : route.backend === 'dsh' ? ['default','deny'] : ['default','on-request','auto-review','never']
     if (!allowed.includes(route.approvalPolicy ?? 'default')) throw new Error('Unsupported approval policy for backend')

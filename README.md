@@ -17,7 +17,7 @@ Cursor 不再使用 CLI / ACP。DSH 的 ACP 是 DSH 自身的无界面执行协�
 
 ## 启动
 
-需要 Node.js **22.19+（22 系列）或 24+**、Photon 项目，以及所选 backend 的账号。
+需要 Node.js **22.19+（22 系列）或 24+**，以及所选 backend 的账号。iMessage 需要 Photon 项目；只使用微信无需 Photon。
 
 ```sh
 npm ci --legacy-peer-deps --ignore-scripts
@@ -39,6 +39,34 @@ agent-imessage start
 每条路线需要不同的 ID 和 Photon 项目；同一发送号码 + 接收号码组合不能分给多个项目。不要同时让旧 App、旧插件和 Gateway 消费同一个 Photon 项目。
 
 保存后取消当前任务、重启路线并应用配置。单条路线启动失败不会阻止其他路线和 Web UI；修复账号或配置后使用“启动 / 重试”。Web UI 仅监听 loopback，不提供 LAN 访问。
+
+## 个人微信（iLink）与多个消息入口
+
+在本地设置页点击「微信扫码绑定」，用个人微信扫描二维码并确认；如果微信要求配对码，在页面输入微信显示的配对码。绑定后，在项目中点击「添加微信入口」，选择机器人并保存。只使用微信时，取消勾选「启用 iMessage」，无需填写 Photon 信息。
+
+一个项目选择一个 backend，可以同时绑定 iMessage 和多个微信机器人。每个入口有独立的 backend 实例、会话、消息去重、任务和审批；同一机器人只能绑定一个项目。微信只接受扫码绑定者的私聊，其他发送者不能启动任务或回答审批。不同入口仍共享项目目录，因此并行修改同一文件时需要自行协调。
+
+微信目前支持文字任务、`/new`、`/status`、`/stop`、会话切换、审批与提问，以及工作目录内文件回传（20 MiB 上限，仍受微信平台限制）。图片和音频可以作为文件回传；暂不支持原生语音发送，也不处理图片、语音或文件输入，会提示改用文字，不执行不完整的附件提示。
+
+扫码凭据仅保存在本机 `config.json.secrets.json`（0600），不返回页面；二维码由本机生成，不使用外部二维码服务。接收使用主动长轮询，无需公网回调。微信登录失效会在入口状态显示，重新扫码即可更新绑定。真实账号可用性以扫码和实际收发结果为准。
+
+新增配置可使用 `channels`，旧版扁平 iMessage 配置仍可直接读取：
+
+```json
+{
+  "id": "my-project",
+  "cwd": "/absolute/project",
+  "backend": "codex",
+  "channels": [
+    { "id": "wechat", "kind": "weixin", "accountId": "扫码后返回的机器人 ID" },
+    { "id": "imessage", "kind": "imessage", "projectId": "photon-project-id",
+      "projectSecretEnv": "MY_PHOTON_SECRET", "senderPhoneNumber": "+15551234567",
+      "assignedPhoneNumber": "+15557654321" }
+  ]
+}
+```
+
+将旧项目在 UI 添加微信入口时，原有 iMessage 身份字段会保留，继续使用原来的会话状态。手动迁移时，也应保留这些字段以及 `imessage` 入口 ID，以保留旧会话。新的入口不会继承其他入口的会话。协议参考和许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
 ## Backend 准备
 
@@ -70,9 +98,17 @@ LaunchAgent 名称为 `app.agent-imessage.gateway`。登录后启动，进程失
 
 Linux 可以由 systemd 等进程管理器运行 `agent-imessage start /absolute/path/config.json`；内置 service 安装器目前仅支持 macOS。
 
-macOS 也可使用本地原生窗口包装：`node scripts/macos/build.mjs '/tmp/Agent iMessage.app'`。构建需要 Xcode Command Line Tools 和已生成的服务 plist；可用第二个参数指定 plist 路径。生成的 App 复用本机 Node、当前仓库和配置，不是可分发到其他电脑的独立安装包，当前要求管理端口为 8787。
+macOS 原生窗口提供窗口位置恢复、编辑快捷键、重新连接和在浏览器打开。关闭窗口保留服务，点击 Dock 图标恢复；退出应用只停止由该应用启动的服务，连接已存在的后台服务时会保留它，并在窗口副标题中提示。
 
-窗口模式和登录自启动是两种不同的运行方式。切换窗口模式时，应先停止原 launchd 服务，并将 `~/Library/LaunchAgents/app.agent-imessage.gateway.plist` 移出 LaunchAgents 保留备份。App 自行加载内置服务配置，红色关闭按钮只关闭窗口，服务继续运行；点击 Dock 图标可恢复窗口。通过 Dock 菜单“退出”或按 ⌘Q 才会卸载服务并停止正在执行的任务。不要同时启动桌面脚本或另一个后台实例。强制结束 App 可能来不及清理服务，必要时用 `launchctl bootout gui/$(id -u)/app.agent-imessage.gateway` 停止。
+开发时可使用 Codex 的 Run 按钮，或执行：
+
+```sh
+./script/build_and_run.sh --verify
+```
+
+脚本会优雅退出已有窗口、构建并打开新的 `.app`。需要 Xcode Command Line Tools。已有 LaunchAgent 配置会被复用；没有时会生成仅在 App 内使用的服务 plist，不注册登录启动。支持配置中的固定端口，不能使用 `port: 0`。可用 `AGENT_GATEWAY_CONFIG` 指定首次构建时的配置路径，或用 `AGENT_GATEWAY_SERVICE_PLIST` 指定已有 plist。
+
+也可只构建：`node scripts/macos/build.mjs '/tmp/Agent iMessage.app'`。这是依赖本机 Node 和当前仓库的本地 App，不是可分发的独立安装包。
 
 ## 配置与迁移
 
