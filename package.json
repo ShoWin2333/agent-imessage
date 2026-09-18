@@ -42,7 +42,8 @@
     "README.md",
     "README.en.md",
     "SECURITY.md",
-    "LICENSE"
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md"
   ],
   "scripts": {
     "clean": "node ./scripts/clean.mjs",
@@ -66,11 +67,13 @@
     "@spectrum-ts/imessage": "12.7.0",
     "better-auth": "1.6.30",
     "elysia": "1.4.28",
+    "qrcode": "^1.5.4",
     "zod": "4.4.3"
   },
   "devDependencies": {
     "@photon-ai/dashboard-api": "1.6.12",
     "@types/node": "^24.0.0",
+    "@types/qrcode": "^1.5.6",
     "typescript": "6.0.3",
     "vitest": "^3.2.4"
   },

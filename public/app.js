@@ -1,20 +1,52 @@
 let state, csrf, formRevision, busy = false
 const $ = id => document.getElementById(id)
 const fields = [
-  ['label','项目名称'], ['backend','Agent backend',['cursor','codex','dsh']], ['id','路由 ID'],
+  ['label','项目名称'], ['backend','Agent',['cursor','codex','dsh']], ['id','路由 ID'],
   ['cwd','工作目录（绝对路径）'], ['approvalPolicy','审批权限',['default']], ['cursorSettings','项目规则',['project','project-user','none']], ['model','模型'], ['effort','推理强度',['default','none','off','minimal','low','medium','high','xhigh','max','ultra']],
   ['speed','速度',['default','fast','standard']], ['projectId','Photon 项目 ID'], ['projectSecretEnv','Photon 环境变量（可选）'],
   ['senderPhoneNumber','你的 iMessage 号码'], ['assignedPhoneNumber','Photon 分配的号码'], ['photonSecret','Photon Project Secret'],
 ]
+let selectedProject, activeView = 'project'
+function showView(view = 'project', id = selectedProject) {
+  activeView = view; selectedProject = id
+  for (const name of ['project','channels','preferences','help']) $(name+'-view').hidden = name !== view
+  for (const section of $('routes').children) section.hidden = view !== 'project' || section.dataset.id !== id
+  const selected = [...$('routes').children].find(s=>s.dataset.id === id)
+  $('page-title').textContent = view === 'project' ? selected?.querySelector('[name=label]').value || id || '项目' : ({channels:'消息渠道',preferences:'设置',help:'使用说明'}[view])
+  $('page-caption').textContent = view === 'project' ? '工作空间 / 项目' : 'AGENT GATEWAY'
+  document.querySelectorAll('[data-view]').forEach(b=>b.setAttribute('aria-current',String(b.dataset.view === view)))
+  document.querySelectorAll('[data-project]').forEach(b=>b.setAttribute('aria-current',String(view === 'project' && b.dataset.project === id)))
+}
+function navigation() {
+  const sections = [...$('routes').children]
+  if (!sections.some(s=>s.dataset.id === selectedProject)) selectedProject = sections[0]?.dataset.id
+  $('project-nav').replaceChildren(...sections.map(section=>{
+    const b=document.createElement('button'); b.type='button'; b.dataset.project=section.dataset.id
+    const icon=document.createElement('span'); icon.className='project-icon'; icon.textContent='▱'
+    const label=document.createElement('span'); label.textContent=section.querySelector('[name=label]').value || section.dataset.id
+    b.append(icon,label); b.onclick=()=>showView('project',section.dataset.id); return b
+  }))
+  $('empty-state').hidden=sections.length>0
+  showView(activeView)
+}
+function revealInvalid(input) {
+  const section=input.closest('.route'); if(section) showView('project',section.dataset.id)
+  for(let p=input.parentElement;p;p=p.parentElement) if(p.tagName==='DETAILS') p.open=true
+}
+$('settings').addEventListener('invalid',event=>revealInvalid(event.target),true)
+document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>showView(b.dataset.view))
 function notice(message) { $('notice').textContent = message }
 function renderRoute(route) {
+  const initialIMessage = route.channels?.find(c => c.kind === 'imessage')
+  if (initialIMessage) route = {...route,...Object.fromEntries(Object.entries(initialIMessage).filter(([key]) => !['id','kind'].includes(key)))}
   const section = document.createElement('section'); section.className = 'route'; section.dataset.id = route.id
   const heading = document.createElement('div'); heading.className = 'route-head'
   const title = document.createElement('h2'); title.textContent = route.label || route.id
   const badge = document.createElement('span'); badge.className = 'badge'; badge.dataset.role = 'status'
-  const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = '移除'; remove.onclick = () => section.remove()
+  const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = '移除'; remove.onclick = () => { section.remove(); navigation(); notice('项目已从草稿移除。到设置中保存全部配置后生效。') }
   heading.append(title,badge,remove); section.append(heading)
   const grid = document.createElement('div'); grid.className = 'grid'
+  section.addEventListener('input', event => { if (event.target.name === 'label') { title.textContent=event.target.value || section.dataset.id; navigation() } })
   let modelCatalog = []
   const updateParameters = (reset = false) => {
     const backend = grid.querySelector('[name=backend]').value
@@ -42,7 +74,7 @@ function renderRoute(route) {
     wrap.append(input)
     if (key === 'model') {
       const select = document.createElement('select'); select.dataset.role = 'models'
-      select.append(new Option('使用 backend 默认模型', ''), new Option('手动输入模型 ID…', '__custom__'))
+      select.append(new Option('使用 Agent 默认模型', ''), new Option('手动输入模型 ID…', '__custom__'))
       if (input.value) { select.append(new Option(input.value, input.value)); select.value = input.value }
       input.hidden = true; input.placeholder = '输入模型 ID'
       select.onchange = () => { input.hidden = select.value !== '__custom__'; if (select.value !== '__custom__') input.value = select.value; updateParameters(true); if (grid.querySelector('[name=backend]').value === 'dsh' && input.value) load.click() }
@@ -53,7 +85,7 @@ function renderRoute(route) {
         if (!result || section.querySelector('[name=backend]').value !== backend || input.value !== requestedModel) return
         modelCatalog = result.models
         const current = input.value
-        select.replaceChildren(new Option('使用 backend 默认模型', ''))
+        select.replaceChildren(new Option('使用 Agent 默认模型', ''))
         for (const model of result.models) select.append(new Option(model.name, model.id))
         if (current && !result.models.some(m => m.id === current)) select.append(new Option(current + '（当前配置）', current))
         select.append(new Option('手动输入模型 ID…', '__custom__')); select.value = current
@@ -70,7 +102,7 @@ function renderRoute(route) {
     const backend = grid.querySelector('[name=backend]').value, policy = grid.querySelector('[name=approvalPolicy]')
     const current = reset ? 'default' : route.approvalPolicy || 'default'
     const choices = backend === 'cursor' ? [['default','沙箱内执行（默认）'],['auto-review','沙箱 + Cursor 自动审核'],['unrestricted','完全访问（关闭沙箱，不请求审批）']]
-      : backend === 'dsh' ? [['default','需要权限时通过 iMessage 审批'],['deny','拒绝所有额外权限请求']]
+      : backend === 'dsh' ? [['default','需要权限时通过原对话审批'],['deny','拒绝所有额外权限请求']]
       : [['default','沙箱内自动执行，额外权限人工审批（默认）'],['on-request','按需人工审批'],['auto-review','沙箱 + Codex 自动审核'],['never','不请求审批，超出沙箱则拒绝']]
     policy.replaceChildren(...choices.map(([value,label])=>new Option(label,value))); policy.value = choices.some(([value])=>value===current) ? current : 'default'
     const settings = grid.querySelector('[name=cursorSettings]')
@@ -95,7 +127,7 @@ function renderRoute(route) {
     modelCatalog = []
     const input = section.querySelector('[name=model]'), select = section.querySelector('[data-role=models]')
     input.value = ''; input.hidden = true
-    select.replaceChildren(new Option('使用 backend 默认模型', ''), new Option('手动输入模型 ID…', '__custom__'))
+    select.replaceChildren(new Option('使用 Agent 默认模型', ''), new Option('手动输入模型 ID…', '__custom__'))
     section.querySelector('[name=effort]').value = 'default'
     section.querySelector('[name=speed]').value = 'default'
     updateParameters(true)
@@ -110,7 +142,7 @@ function renderRoute(route) {
     const id = section.querySelector('[name=id]').value.trim(), sender = section.querySelector('[name=senderPhoneNumber]').value.trim()
     if (!/^[a-zA-Z0-9_-]{1,64}$/.test(id)) { provisionNotice('请填写有效的路由 ID（字母、数字、下划线或短横线）。'); section.querySelector('[name=id]').focus(); return }
     if (!/^\+[1-9]\d{6,14}$/.test(sender)) { provisionNotice('请先填写你的 iMessage 号码，包含国家区号，例如 +8613800000000。'); section.querySelector('[name=senderPhoneNumber]').focus(); return }
-    if (state.authorization.phase !== 'authorized') { provisionNotice('请先在页面上方完成 Photon 项目管理授权。'); return }
+    if (state.authorization.phase !== 'authorized') { provisionNotice('请先在“消息渠道”中完成 Photon 项目管理授权。'); return }
     const name = id
     const label = provision.textContent; provision.textContent = '正在获取 Photon 号码…'
     let result
@@ -163,7 +195,42 @@ function renderRoute(route) {
     if (projectSelect.value) void useProject.onclick()
   })
   photonBox.append(photonLabel,loadProjects,useProject)
-  section.append(grid,rules,photonBox,provision,provisionStatus)
+  const channelsBox = document.createElement('div'); channelsBox.className = 'channels'
+  const channelsTitle = document.createElement('h3'); channelsTitle.textContent = '消息入口'
+  const channelsHelp = document.createElement('p'); channelsHelp.textContent = '同一项目可绑定多个入口。每个入口的会话、任务和审批独立。微信仅响应扫码绑定者。'
+  const iMessageLabel = document.createElement('label'); iMessageLabel.className = 'channel-toggle'
+  const iMessageEnabled = document.createElement('input'); iMessageEnabled.type='checkbox'; iMessageEnabled.dataset.role='imessage-enabled'
+  iMessageEnabled.checked = !route.channels || Boolean(initialIMessage)
+  iMessageLabel.append(iMessageEnabled,document.createTextNode('启用 iMessage'))
+  const weixinRows = document.createElement('div'); weixinRows.dataset.role='weixin-bindings'
+  const addBinding = (binding = {}) => {
+    const row = document.createElement('div'); row.className='channel-binding'; row.dataset.bindingId=binding.id || 'weixin-'+crypto.randomUUID().slice(0,8)
+    const label = document.createElement('label'); label.textContent='微信机器人'
+    const select = document.createElement('select'); select.dataset.role='weixin-account'; select.required=true
+    select.append(new Option('选择已扫码绑定的机器人',''))
+    for (const account of state.weixinAccounts || []) select.append(new Option(account.accountId,account.accountId))
+    if (binding.accountId && ![...select.options].some(o=>o.value===binding.accountId)) select.append(new Option(binding.accountId+'（需重新扫码）',binding.accountId))
+    select.value=binding.accountId || ''
+    const remove = document.createElement('button'); remove.type='button'; remove.textContent='移除此入口'; remove.onclick=()=>row.remove()
+    label.append(select); row.append(label,remove); weixinRows.append(row)
+  }
+  for (const binding of route.channels || []) if (binding.kind==='weixin') addBinding(binding)
+  section.readBindings = () => [...weixinRows.children].map(row=>({kind:'weixin',id:row.dataset.bindingId,accountId:row.querySelector('select').value}))
+  // Preserve additional iMessage bindings authored in the config file.
+  section.extraBindings = (route.channels || []).filter(c=>c.kind==='imessage' && c !== initialIMessage)
+  section.iMessageId = initialIMessage?.id || 'imessage'
+  const addWeixin = document.createElement('button'); addWeixin.type='button'; addWeixin.textContent='＋ 添加微信入口'; addWeixin.onclick=()=>addBinding()
+  const updateChannels = () => {
+    for (const key of ['projectId','projectSecretEnv','senderPhoneNumber','assignedPhoneNumber','photonSecret']) {
+      const input=grid.querySelector('[name='+key+']'); input.parentElement.hidden=!iMessageEnabled.checked; input.disabled=!iMessageEnabled.checked
+      input.required=iMessageEnabled.checked && ['projectId','senderPhoneNumber','assignedPhoneNumber'].includes(key)
+    }
+    photonBox.hidden=provision.hidden=provisionStatus.hidden=!iMessageEnabled.checked
+  }
+  iMessageEnabled.onchange=updateChannels
+  channelsBox.append(channelsTitle,channelsHelp,iMessageLabel,weixinRows,addWeixin)
+  section.append(grid,channelsBox,rules,photonBox,provision,provisionStatus)
+  updateChannels()
   const save = document.createElement('button'); save.type = 'button'; save.textContent = '保存并应用此项目'
   save.onclick = async () => {
     for (const input of section.querySelectorAll('input,select')) if (!input.reportValidity()) return
@@ -174,18 +241,35 @@ function renderRoute(route) {
       formRevision = state.revision; section.dataset.id = value.id
       section.querySelector('[name=photonSecret]').value = ''
       section.querySelector('[name=photonSecret]').placeholder = state.hasPhotonSecret[value.id] ? '已保存；留空保留' : '或使用环境变量'
-      statuses(); notice('此项目已保存并应用，其他项目未重启。')
+      navigation(); statuses(); notice('此项目已保存并应用，其他项目未重启。')
     }
   }
+  save.className='primary project-save'
   section.append(save)
   const runtime = document.createElement('p'); runtime.className = 'runtime'; runtime.dataset.role = 'runtime'; section.append(runtime)
+  const advanced=document.createElement('details'); advanced.className='advanced'
+  const summary=document.createElement('summary'); summary.textContent='高级配置'; advanced.append(summary)
+  const advancedGrid=document.createElement('div'); advancedGrid.className='grid'; advanced.append(advancedGrid)
+  for(const key of ['id','approvalPolicy','cursorSettings','effort','speed']) advancedGrid.append(grid.querySelector('[name='+key+']').parentElement)
+  grid.append(advanced); advanced.append(rules)
+  const imessage=document.createElement('details'); imessage.className='imessage-config'
+  const imessageTitle=document.createElement('summary'); imessageTitle.textContent='iMessage 号码与连接配置'; imessage.append(imessageTitle)
+  const imessageGrid=document.createElement('div'); imessageGrid.className='grid'; imessage.append(imessageGrid)
+  for(const key of ['projectId','projectSecretEnv','senderPhoneNumber','assignedPhoneNumber','photonSecret']) imessageGrid.append(grid.querySelector('[name='+key+']').parentElement)
+  grid.append(imessage); imessage.append(photonBox,provision,provisionStatus)
+  const originalChannelChange=iMessageEnabled.onchange
+  iMessageEnabled.onchange=()=>{originalChannelChange();imessage.hidden=!iMessageEnabled.checked}
+  imessage.hidden=!iMessageEnabled.checked
+  const manage=document.createElement('button');manage.type='button';manage.className='text-button';manage.textContent='管理消息账号 →';manage.onclick=()=>showView('channels');channelsBox.append(manage)
   $('routes').append(section)
+  navigation()
 }
+const phaseLabel = phase => ({listening:'运行中',stopped:'已停止',starting:'启动中',connecting:'连接中',error:'连接异常',failed:'连接失败',reconnecting:'重新连接中'}[phase] || phase)
 function statuses() {
   for (const section of $('routes').children) {
     const status = state.routes.find(r => r.id === section.dataset.id)
-    const badge = section.querySelector('[data-role=status]'); badge.textContent = status?.phase || '未保存'; badge.classList.toggle('live', status?.phase === 'listening')
-    section.querySelector('[data-role=runtime]').textContent = status?.error || (status ? `${status.busy ? '任务运行中' : '空闲'} · 会话 ${status.sessionId || '尚未开始'} · 待处理 ${status.pending || 0} · 已接收 ${status.receivedCount || 0} · 最近结果 ${status.lastTurnStatus || '—'}` : '')
+    const badge = section.querySelector('[data-role=status]'); badge.textContent = status ? phaseLabel(status.phase) : '未保存'; badge.classList.toggle('live', status?.phase === 'listening')
+    section.querySelector('[data-role=runtime]').textContent = status?.channels?.map(c=>`${c.kind === 'weixin' ? '微信' : 'iMessage'} · ${phaseLabel(c.phase)} · ${c.error || (c.busy ? '任务运行中' : '空闲')} · 待处理 ${c.pending || 0} · 已接收 ${c.receivedCount || 0}`).join('\n') || status?.error || (status ? `${status.busy ? '任务运行中' : '空闲'} · 会话 ${status.sessionId || '尚未开始'} · 待处理 ${status.pending || 0} · 已接收 ${status.receivedCount || 0} · 最近结果 ${status.lastTurnStatus || '—'}` : '')
   }
 }
 async function refresh(initial = false) {
@@ -193,7 +277,7 @@ async function refresh(initial = false) {
   state = await response.json(); csrf = state.csrf
   $('connection').textContent = '● 本机服务已连接'
   $('key-state').textContent = state.hasCursorKey ? '已配置 Cursor API Key' : '尚未配置；也可以使用 CURSOR_API_KEY 环境变量'
-  if (initial) { formRevision = state.revision; $('routes').replaceChildren(); state.config.routes.forEach(renderRoute) }
+  if (initial) { formRevision = state.revision; $('routes').replaceChildren(); state.config.routes.forEach(renderRoute); navigation() }
   const auth = state.authorization
   $('photon-state').textContent = auth.phase === 'pending' ? `输入验证码 ${auth.userCode}` : ({ authorized:'已授权，可以创建项目和获取号码。', disconnected:'尚未授权项目管理；不影响已配置线路的消息收发。', 'reauthorization-required':'管理授权已过期；已有线路继续运行。', failed:'管理授权失败，请重试。' }[auth.phase] || auth.phase)
   const link = $('photon-link'); link.textContent = ''; link.removeAttribute('href')
@@ -201,7 +285,19 @@ async function refresh(initial = false) {
     const url = new URL(auth.verificationUriComplete || auth.verificationUri)
     if (url.protocol === 'https:') { link.href = url.href; link.textContent = '打开 Photon 授权页面' }
   }
+  renderWeixinState()
   statuses()
+}
+function renderWeixinState() {
+  const login=state.weixinLogin || {phase:'idle'}
+  $('weixin-state').textContent=login.error || ({idle:'用个人微信扫码绑定，然后在项目中添加微信入口。',pending:'请用微信扫描二维码。',scanned:'已扫码，请在微信确认。',needs_verification:'请填写微信显示的配对码。',connected:'绑定成功，请在项目中选择机器人并保存。',expired:'二维码已过期，请重新生成。',failed:'绑定失败，请重试。',cancelled:'已取消绑定。'}[login.phase] || login.phase)
+  const qr=$('weixin-qr'); qr.hidden=!login.qr
+  if (login.qr && qr.getAttribute('src')!==login.qr) qr.src=login.qr
+  if (!login.qr) qr.removeAttribute('src')
+  $('weixin-verification').hidden=login.phase!=='needs_verification'
+  for (const select of document.querySelectorAll('[data-role=weixin-account]')) {
+    for (const account of state.weixinAccounts || []) if (![...select.options].some(o=>o.value===account.accountId)) select.append(new Option(account.accountId,account.accountId))
+  }
 }
 async function post(path, value = {}, report = notice) {
   if (busy) { report('另一项操作正在进行，请稍后重试。'); return }
@@ -210,7 +306,7 @@ async function post(path, value = {}, report = notice) {
     const response = await fetch(path, { method:'POST', headers:{'content-type':'application/json','x-agent-token':csrf}, body:JSON.stringify(value), signal:AbortSignal.timeout(90_000) })
     const data = await response.json(); if (!response.ok) throw new Error(data.error)
     await refresh(path === '/api/save'); if (path === '/api/save') $('cursor-key').value = ''; report('已应用。'); return data
-  } catch(error) { report(error.name === 'TimeoutError' ? '请求超时，服务器可能仍在处理。请先加载已有 Photon 项目确认结果，避免重复创建。' : error.message) }
+  } catch(error) { report(error.name === 'TimeoutError' ? '请求超时，服务器可能仍在处理。请先检查当前绑定或项目状态，避免重复操作。' : error.message) }
   finally { busy = false; document.querySelectorAll('button').forEach(b => b.disabled = false) }
 }
 function readRoute(section) {
@@ -224,10 +320,18 @@ function readRoute(section) {
     else delete route[input.name]
   }
   route.projectSecretEnv ||= 'AGENT_PHOTON_' + route.id.replaceAll('-', '_')
+  const bindings = [...section.extraBindings,...section.readBindings()]
+  const imessage = section.querySelector('[data-role=imessage-enabled]').checked
+  // Keep untouched legacy routes unchanged; explicit channels are needed only for new bindings.
+  if (bindings.length || original?.channels || !imessage) {
+    route.channels = [...(imessage ? [{kind:'imessage',id:section.iMessageId,projectId:route.projectId,projectSecretEnv:route.projectSecretEnv,senderPhoneNumber:route.senderPhoneNumber,assignedPhoneNumber:route.assignedPhoneNumber}] : []),...bindings]
+  }
+  if (!imessage) for (const key of ['projectId','projectSecretEnv','senderPhoneNumber','assignedPhoneNumber']) delete route[key]
   return route
 }
 $('settings').onsubmit = event => {
   event.preventDefault()
+  for(const input of $('settings').querySelectorAll('input,select')) if(!input.reportValidity()) return
   const photon = {}, routes = []
   for (const section of $('routes').children) {
     const route = readRoute(section)
@@ -236,7 +340,7 @@ $('settings').onsubmit = event => {
   }
   void post('/api/save', { revision:formRevision, config:{...state.config,routes}, photon, cursorApiKey:$('cursor-key').value })
 }
-$('add').onclick = () => { renderRoute({id:'project-'+crypto.randomUUID().slice(0,8),backend:'cursor'}); statuses() }
+$('add').onclick = () => { const id='project-'+crypto.randomUUID().slice(0,8); renderRoute({id,backend:'codex'}); showView('project',id); statuses(); $('routes').lastElementChild.querySelector('[name=label]').focus() }
 $('start').onclick = () => post('/api/start')
 $('stop').onclick = () => post('/api/stop')
 refresh(true).catch(error => notice(error.message))
@@ -244,3 +348,7 @@ setInterval(() => { if (!busy) refresh().catch(() => { $('connection').textConte
 
 $('authorize').onclick = () => post('/api/photon/authorize')
 $('cancel-auth').onclick = () => post('/api/photon/cancel')
+
+$('weixin-begin').onclick=()=>post('/api/weixin/begin')
+$('weixin-cancel').onclick=()=>post('/api/weixin/cancel')
+$('weixin-verify').onclick=()=>post('/api/weixin/verify',{id:state.weixinLogin.id,code:$('weixin-code').value.trim()})

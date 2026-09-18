@@ -86,3 +86,23 @@ npm run test:codex:live
 Live SDK/App Server tests use a temporary workspace and a fake recipient. Full acceptance additionally requires sending from the authorized phone through Photon and checking the reply. See [SECURITY.md](SECURITY.md) for the trust boundary.
 
 Each project card supports **Save and apply this project**, restarting only that route while preserving other routes and unsaved form drafts. Photon projects and backend models can be selected from live catalogs. Approval choices reflect each backend's capabilities; Cursor native approvals cannot be answered through `/approve`. Project settings may also load SDK-supported hooks and MCP configuration.
+
+## Weixin iLink and channel adapters
+
+The local UI now supports personal Weixin bot QR binding through iLink. Bind a bot,
+add a Weixin entry to a project, and save. Disable iMessage for Weixin-only projects;
+Photon is not required for those projects. Each `channels` entry has its own backend
+instance, session, dedupe state and approvals. Only the bound Weixin owner is allowed.
+Text commands, approvals, questions and workspace file delivery are supported;
+inbound attachments and native voice sending are not yet supported. Existing
+flat iMessage configurations remain supported. Preserve the legacy identity fields
+and the `imessage` channel ID when migrating by hand to retain its existing session.
+
+Credentials stay in the private local secrets file, and QR images are generated
+locally. Long polling needs no public callback. See [protocol attribution](THIRD_PARTY_NOTICES.md).
+
+For the local macOS wrapper, run `./script/build_and_run.sh --verify` or the Codex
+Run action. The wrapper restores window placement, supports editing shortcuts and
+reconnect controls, and leaves pre-existing background services running on quit.
+It supports fixed custom ports and creates a bundled service plist if no installed
+LaunchAgent exists. It still depends on this checkout and the local Node runtime.

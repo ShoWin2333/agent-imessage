@@ -8,3 +8,8 @@ export { BaseBackend } from './backends/types.js'
 export { loadAppConfig, validateConfig, importConfig } from './app/config.js'
 export type { AppConfig, Secrets } from './app/config.js'
 export { startServer } from './app/server.js'
+
+export type { ChannelAdapter, ChannelMessage, ChannelConnection, ChannelFactory } from './channels/types.js'
+export type { ChannelConfig } from './gateway/config.js'
+export { IMessageAdapter } from './channels/imessage.js'
+export { WeixinAdapter } from './channels/weixin.js'

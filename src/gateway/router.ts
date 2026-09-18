@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { chunkText } from '../chunks.js'
 import { markdownToPlainText } from '../plaintext.js'
 import { loadOutboundMedia, DEFAULT_MAX_OUTBOUND_MEDIA_BYTES } from '../media.js'
-import type { SpectrumInboundMessage } from '../spectrum-runtime.js'
+import type { ChannelMessage } from '../channels/types.js'
 import type { RouteConfig } from './config.js'
 import { object, SessionInUseError, type ObjectValue } from '../backends/jsonrpc.js'
 import type { Backend, BackendEvent, BackendRequest } from '../backends/types.js'
@@ -11,7 +11,7 @@ import type { RouteState } from './state.js'
 
 interface Store { state: RouteState; save(): Promise<void> }
 interface Active {
-  channel: SpectrumInboundMessage
+  channel: ChannelMessage
   turnId?: string
   stopping: boolean
   abort: AbortController
@@ -63,7 +63,7 @@ export class GatewayRouter {
     }
   }
 
-  receive(channel: SpectrumInboundMessage): Promise<void> {
+  receive(channel: ChannelMessage): Promise<void> {
     const operation = this.incoming.then(async () => {
       if (this.closed || !this.connected || this.store.state.seen.includes(channel.id)) return
       this.store.state.seen.push(channel.id)
@@ -96,7 +96,7 @@ export class GatewayRouter {
     this.closing ??= this.backend.close().catch(() => {})
   }
 
-  private async handle(channel: SpectrumInboundMessage): Promise<void> {
+  private async handle(channel: ChannelMessage): Promise<void> {
     const text = channel.text.trim()
     if (!text) return
     const [command, ...args] = text.split(/\s+/)
@@ -145,7 +145,7 @@ export class GatewayRouter {
       return
     }
     if (text.startsWith('/') && !text.startsWith('//')) { await this.send(channel, 'Unknown command. Send /help.'); return }
-    await this.ensureThread()
+    await this.ensureThread(channel)
     const active: Active = { channel, stopping: false, abort: new AbortController(), answers: new Map(), changes: new Map() }
     this.active = active
     void channel.responding(() => new Promise<void>(resolve => {
@@ -159,11 +159,11 @@ export class GatewayRouter {
     if (active.stopping || !this.connected) await this.backend.cancel(this.store.state.threadId!, id)
   }
 
-  private async ensureThread(): Promise<void> {
+  private async ensureThread(channel: ChannelMessage): Promise<void> {
     if (this.ready) return
     const threadId = this.store.state.threadId
     const thread = await this.backend.openSession({
-      ...(threadId ? { id: threadId } : {}), tools, cwd: this.route.cwd,
+      ...(threadId ? { id: threadId } : {}), tools:channel.nativeVoice === false ? tools.filter(t=>t.name !== 'send_imessage_voice') : tools, cwd: this.route.cwd,
       ...(this.route.approvalPolicy ? {approvalPolicy:this.route.approvalPolicy} : {}),
       ...(this.route.model ? { model: this.route.model } : {}),
       ...(this.route.speed && this.route.speed !== 'default' ? {speed:this.route.speed} : {}),
@@ -236,7 +236,7 @@ export class GatewayRouter {
         else await active.channel.sendFile(media)
         return { success: true, contentItems: [{ type: 'inputText', text: `Sent ${media.name}` }] }
       } catch {
-        return { success: false, contentItems: [{ type: 'inputText', text: 'Media could not be sent. Verify that it is a regular file inside the workspace, within 20 MiB, and that this iMessage turn is still active.' }] }
+        return { success: false, contentItems: [{ type: 'inputText', text: 'Media could not be sent. Verify that it is a regular file inside the workspace, within 20 MiB, and that this channel turn is still active.' }] }
       }
     }
     const approval = method === 'bridge/requestApproval' || method === 'item/commandExecution/requestApproval' || method === 'item/fileChange/requestApproval'
@@ -255,7 +255,7 @@ export class GatewayRouter {
       : approval
         ? JSON.stringify({ method, command: params.command, cwd: params.cwd, reason: params.reason, grantRoot: params.grantRoot, network: params.networkApprovalContext, additionalPermissions: params.additionalPermissions, changes })
         : questions.map(q => `${q.id}: ${q.question}\n${JSON.stringify(q.options ?? [])}`).join('\n')
-    if (details.length > 2600) throw new Error('Request too large for safe review over iMessage')
+    if (details.length > 2600) throw new Error('Request too large for safe review over the channel')
     if (approval && Array.isArray(params.availableDecisions) && !params.availableDecisions.includes('accept')) throw new Error('Single-action approval unavailable')
     const id = randomUUID().slice(0, 8)
     return new Promise((resolve, reject) => {
@@ -268,7 +268,7 @@ export class GatewayRouter {
     })
   }
 
-  private async answer(channel: SpectrumInboundMessage, command: string, args: string[]): Promise<void> {
+  private async answer(channel: ChannelMessage, command: string, args: string[]): Promise<void> {
     const request = this.pending.get(args[0] ?? '')
     if (!request || !this.active || this.active.stopping) { await this.send(channel, 'Request expired or does not belong to this route.'); return }
     if (request.kind === 'approval' && (command === '/approve' || command === '/deny') && args.length === 1) {
@@ -284,7 +284,7 @@ export class GatewayRouter {
   }
 
   private cancelPending(): void { for (const entry of [...this.pending.values()]) entry.cancel() }
-  private async send(channel: SpectrumInboundMessage, text: string, raw = false): Promise<void> {
+  private async send(channel: ChannelMessage, text: string, raw = false): Promise<void> {
     for (const part of chunkText(raw ? text : markdownToPlainText(text), 3500)) await channel.send(part)
   }
 }

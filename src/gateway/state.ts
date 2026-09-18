@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import type { RouteConfig } from './config.js'
 
 export interface RouteState {
+  channelCursor?: string
   threadId?: string
   seen: string[]
   sessions?: string[]
@@ -14,11 +15,11 @@ export class StateStore {
   private tail: Promise<void> = Promise.resolve()
   private constructor(private readonly file: string, private readonly lock: string) {}
 
-  static async open(dir: string, route: RouteConfig): Promise<StateStore> {
+  static async open(dir: string, route: RouteConfig, channelIdentity?: string): Promise<StateStore> {
     await mkdir(dir, { recursive: true, mode: 0o700 })
     const info = await lstat(dir)
     if (!info.isDirectory() || info.isSymbolicLink() || (info.mode & 0o077)) throw new Error('State directory must be a private directory (chmod 700)')
-    const key = createHash('sha256').update(JSON.stringify([route.id, route.cwd, route.projectId, route.senderPhoneNumber, route.assignedPhoneNumber, ...(route.backend === 'cursor' ? ['cursor-sdk', route.cursorMode ?? 'agent'] : route.backend === 'dsh' ? ['dsh'] : [])])).digest('hex')
+    const key = createHash('sha256').update(JSON.stringify([route.id, route.cwd, route.projectId, route.senderPhoneNumber, route.assignedPhoneNumber, ...(channelIdentity ? [channelIdentity] : []), ...(route.backend === 'cursor' ? ['cursor-sdk', route.cursorMode ?? 'agent'] : route.backend === 'dsh' ? ['dsh'] : [])])).digest('hex')
     // Lock the route id as well as its state, preventing duplicate listeners after config edits.
     const lock = join(dir, `${route.id}.lock`)
     try { await mkdir(lock, { mode: 0o700 }) }
@@ -46,6 +47,7 @@ export class StateStore {
           if (!Array.isArray(value.sessions) || !value.sessions.every(id => typeof id === 'string')) throw new Error('Invalid sessions')
           store.state.sessions = value.sessions.slice(-100)
         }
+        if (typeof value.channelCursor === 'string') store.state.channelCursor = value.channelCursor
         if (typeof value.threadId === 'string') store.state.threadId = value.threadId
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
