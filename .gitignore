@@ -9,3 +9,4 @@ extensions/agent-imessage/node_modules/
 extensions/agent-imessage/out/
 apps/cursor-imessage/node_modules/
 apps/cursor-imessage/dist/
+dist/

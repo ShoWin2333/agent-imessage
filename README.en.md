@@ -106,3 +106,26 @@ Run action. The wrapper restores window placement, supports editing shortcuts an
 reconnect controls, and leaves pre-existing background services running on quit.
 It supports fixed custom ports and creates a bundled service plist if no installed
 LaunchAgent exists. It still depends on this checkout and the local Node runtime.
+
+
+Build a self-contained macOS app with `npm run package:macos -- '/tmp/Agent iMessage.app'`.
+Validate relocation and isolated startup with `npm run test:macos:package -- '/tmp/Agent iMessage.app'`.
+The release bundle includes checksum-pinned official Node 22.23.2, locked production
+dependencies, Gateway and web assets. Building requires network access, npm and Xcode
+Command Line Tools; running requires neither Node nor the checkout. Builds target the
+host architecture (arm64 or x64). Existing output paths are never overwritten.
+
+Quit the old app and copy the new bundle into Applications. Runtime service paths
+are generated from the installed location. Existing config/secrets/avatars in
+`~/.config/agent-imessage/` and the configured state directory are preserved outside
+the bundle. No builder credentials or LaunchAgent are included. Desktop logs and the
+generated plist live in `~/Library/Application Support/Agent iMessage/Desktop/`.
+`AGENT_GATEWAY_CONFIG` can override the config at launch; the configured port must be
+fixed. External Agent tools still need installation/login; an installed Codex desktop app
+is discovered automatically through Launch Services. Configure absolute
+`codexBinary`/`dshBinary` paths for nonstandard installs. Stop any pre-existing
+background service before switching to the bundled service. Development still uses
+the lightweight Run script. Release bundles are locally ad-hoc signed; public
+distribution still requires Developer ID signing and notarization. Node and dependency
+licenses are included. Update pinned Node hashes in `scripts/macos/package.mjs` and
+rerun packaging checks when maintaining the bundled runtime.

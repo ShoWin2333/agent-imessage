@@ -108,7 +108,29 @@ macOS 原生窗口提供窗口位置恢复、编辑快捷键、重新连接和�
 
 脚本会优雅退出已有窗口、构建并打开新的 `.app`。需要 Xcode Command Line Tools。已有 LaunchAgent 配置会被复用；没有时会生成仅在 App 内使用的服务 plist，不注册登录启动。支持配置中的固定端口，不能使用 `port: 0`。可用 `AGENT_GATEWAY_CONFIG` 指定首次构建时的配置路径，或用 `AGENT_GATEWAY_SERVICE_PLIST` 指定已有 plist。
 
-也可只构建：`node scripts/macos/build.mjs '/tmp/Agent iMessage.app'`。这是依赖本机 Node 和当前仓库的本地 App，不是可分发的独立安装包。
+也可只构建：`node scripts/macos/build.mjs '/tmp/Agent iMessage.app'`。这是依赖本机 Node 和当前仓库的开发 App。
+
+### 独立 macOS App
+
+```sh
+npm run package:macos -- '/tmp/Agent iMessage.app'
+npm run test:macos:package -- '/tmp/Agent iMessage.app'
+```
+
+发布构建内置官方 Node 22.23.2（下载后验证固定 SHA-256）、锁文件中的生产依赖、Gateway 和网页资源。需要联网、npm 和 Xcode Command Line Tools 来构建；运行 App 不需要安装 Node，也不依赖源码目录。按构建机器架构生成 Apple Silicon 或 Intel 包，不是通用二进制。输出路径已存在时拒绝覆盖。
+
+原生窗口生命周期测试使用专用身份和空配置，避免连接真实渠道：
+
+```sh
+AGENT_GATEWAY_APP_NAME='Gateway Standalone Test' AGENT_GATEWAY_BUNDLE_ID=app.agent-imessage.standalone-test npm run package:macos -- '/tmp/Gateway Standalone Test.app'
+npm run test:macos:native -- '/tmp/Gateway Standalone Test.app'
+```
+
+将 `.app` 拷贝到“应用程序”即可运行。每次启动按实际安装位置生成服务路径，退出后可以移动 App。沿用 `~/.config/agent-imessage/` 的配置、头像和凭据，以及配置指定的会话目录（默认 `~/.local/state/agent-imessage/`）；不会将构建者的配置、凭据或 LaunchAgent 放进安装包。桌面服务日志和生成的 plist 位于 `~/Library/Application Support/Agent iMessage/Desktop/`。升级时退出旧 App 后替换应用包，用户数据保留。
+
+开发仍使用上面的 Run 脚本，不必每次打独立包。独立 App 支持在启动进程环境中设置 `AGENT_GATEWAY_CONFIG`，固定端口从运行时配置读取。外部 Codex/DSH 工具仍需安装和登录；也会自动识别已安装的 Codex 桌面 App 内的命令；非标准安装位置可在配置中设置 `codexBinary` / `dshBinary` 绝对路径。旧的后台服务若已运行，App 会连接并保留它；要切换到内置服务，先退出旧 App，必要时卸载此前手动安装的后台服务。
+
+当前包使用本机 ad-hoc 签名，已包含 Node 和依赖许可证；面向其他用户正式分发前还需 Developer ID 签名和公证。Node 版本及校验值在 `scripts/macos/package.mjs` 中固定，升级运行时后需重跑打包冒烟测试。
 
 ## 配置与迁移
 

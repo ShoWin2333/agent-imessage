@@ -12,7 +12,66 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     var starting = false
     var pollGeneration = 0
     var serviceTarget: String { Bundle.main.object(forInfoDictionaryKey: "GatewayServiceLabel") as? String ?? "app.agent-imessage.gateway" }
-    var url: URL { URL(string: Bundle.main.object(forInfoDictionaryKey: "GatewayURL") as? String ?? "http://127.0.0.1:8787/")! }
+    var standaloneURL: URL?
+    var url: URL { if let resolved = standaloneURL { return resolved }; return URL(string: Bundle.main.object(forInfoDictionaryKey: "GatewayURL") as? String ?? "http://127.0.0.1:8787/")! }
+
+    // Runtime paths are resolved after installation, so moving the bundle is safe.
+    // Keep existing user data outside the bundle; never package credentials.
+    func servicePlist() throws -> String {
+        let resources = Bundle.main.resourceURL!
+        guard Bundle.main.object(forInfoDictionaryKey: "GatewayStandalone") as? Bool == true else {
+            return resources.appendingPathComponent("gateway.plist").path
+        }
+        let fm = FileManager.default
+        let home = fm.homeDirectoryForCurrentUser
+        let config = ProcessInfo.processInfo.environment["AGENT_GATEWAY_CONFIG"].map { URL(fileURLWithPath: $0) }
+            ?? home.appendingPathComponent(".config/agent-imessage/config.json")
+        var port = 8787
+        if fm.fileExists(atPath: config.path) {
+            let json = try JSONSerialization.jsonObject(with: Data(contentsOf: config)) as? [String: Any]
+            if let configured = json?["port"] {
+                guard let number = configured as? NSNumber,
+                      CFGetTypeID(number) != CFBooleanGetTypeID(),
+                      number.doubleValue == Double(number.intValue), (1...65535).contains(number.intValue) else {
+                    throw NSError(domain: "Gateway", code: 1, userInfo: [NSLocalizedDescriptionKey: "配置中的端口必须是 1–65535 的固定端口。"])
+                }
+                port = number.intValue
+            }
+        }
+        standaloneURL = URL(string: "http://127.0.0.1:\(port)/")!
+        let runtime = home.appendingPathComponent("Library/Application Support/Agent iMessage/Desktop")
+        try fm.createDirectory(at: runtime, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        try fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: runtime.path)
+        let helpers = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers")
+        let payload = resources.appendingPathComponent("gateway")
+        var searchPaths = [helpers.path, home.appendingPathComponent(".local/bin").path,
+                           home.appendingPathComponent(".npm-global/bin").path,
+                           "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"]
+        // Finder launches do not inherit a shell PATH. Codex may be installed
+        // as a desktop app only; discover its actual location through Launch Services.
+        if let codexApp = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.openai.codex") {
+            let directory = codexApp.appendingPathComponent("Contents/Resources")
+            if fm.isExecutableFile(atPath: directory.appendingPathComponent("codex").path) {
+                searchPaths.append(directory.path)
+            }
+        }
+        let environment = [
+            "HOME": home.path,
+            "PATH": searchPaths.joined(separator: ":")
+        ]
+        let job: [String: Any] = [
+            "Label": serviceTarget,
+            "ProgramArguments": [helpers.appendingPathComponent("node").path, payload.appendingPathComponent("lib/types/app/cli.js").path, "start", config.path],
+            "WorkingDirectory": home.path, "EnvironmentVariables": environment,
+            "RunAtLoad": true, "KeepAlive": true, "ThrottleInterval": 10,
+            "StandardOutPath": runtime.appendingPathComponent("gateway.log").path,
+            "StandardErrorPath": runtime.appendingPathComponent("gateway.log").path
+        ]
+        let file = runtime.appendingPathComponent("\(serviceTarget).plist")
+        try PropertyListSerialization.data(fromPropertyList: job, format: .xml, options: 0).write(to: file, options: .atomic)
+        try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+        return file.path
+    }
 
     @discardableResult func launchctl(_ args: [String]) -> Int32 {
         let process = Process()
@@ -91,11 +150,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
 
     func startService() {
         guard !starting && !closing else { return }
+        let plist: String
+        do { plist = try servicePlist() }
+        catch { showError("无法读取配置或准备本机服务。\(error.localizedDescription)"); return }
         starting = true
         window.subtitle = "正在连接本机服务…"
         DispatchQueue.global(qos: .userInitiated).async {
             let alreadyRunning = self.launchctl(["print", self.target]) == 0
-            let plist = Bundle.main.resourceURL!.appendingPathComponent("gateway.plist").path
             let started = !alreadyRunning && self.launchctl(["bootstrap", "gui/\(getuid())", plist]) == 0
             DispatchQueue.main.async {
                 self.starting = false
@@ -106,7 +167,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
                     }
                     return
                 }
-                guard alreadyRunning || started else { self.showError("无法启动服务。请检查 Node、项目目录和配置。可在“显示”菜单重新连接。"); return }
+                guard alreadyRunning || started else { self.showError("无法启动服务。请检查应用是否完整、配置是否有效。可在“显示”菜单重新连接。"); return }
                 self.ownsService = self.ownsService || started
                 self.pollGeneration += 1
                 self.poll(60, generation: self.pollGeneration)
