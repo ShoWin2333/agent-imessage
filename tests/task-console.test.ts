@@ -134,3 +134,16 @@ it('does not let a slow result delivery block the next task or desktop approval'
   await expect(request).resolves.toEqual({decision:'accept'})
   release();await expect.poll(()=>store.state.tasks?.[0]?.delivery).toBe('sent')
 })
+it('delivers an oversized completed result before archiving it',async()=>{
+  const dir=await mkdtemp(join(tmpdir(),'large-task-'));cleanup.push(()=>rm(dir,{recursive:true,force:true}))
+  const store=await StateStore.open(dir,route);cleanup.push(()=>store.close())
+  const backend=new Backend(),router=new GatewayRouter(backend,route,store);cleanup.push(()=>router.close());router.setConnected(true)
+  const channel=message('large'),result='x'.repeat(8*1024*1024+1)
+  await router.receive(channel);backend.complete(result)
+  await expect.poll(()=>store.archivedCount,{timeout:10000}).toBe(1)
+  expect(vi.mocked(channel.send).mock.calls.map(call=>call[0]).join('')).toBe(result)
+  await expect.poll(()=>store.archivedCount,{timeout:10000}).toBe(1)
+  const page=await store.archivedTasks(),archived=page.tasks[0]!
+  expect(archived.delivery).toBe('sent');expect(await store.task(archived.id,archived.archiveKey)).toMatchObject({result})
+  expect(backend.startTurn).toHaveBeenCalledTimes(1)
+},15000)

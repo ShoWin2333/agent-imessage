@@ -1,6 +1,7 @@
-import { createHash, randomUUID } from 'node:crypto'
-import { mkdir, readFile, rename, writeFile, rm, lstat } from 'node:fs/promises'
-import { join } from 'node:path'
+import { TaskArchive, atomicStateFile, partitionTasks } from './task-history.js'
+import { createHash } from 'node:crypto'
+import { mkdir, readFile, writeFile, rm, lstat } from 'node:fs/promises'
+import { join, dirname, basename } from 'node:path'
 import type { RouteConfig } from './config.js'
 
 export interface TaskRecord {
@@ -24,7 +25,36 @@ export interface RouteState {
 export class StateStore {
   readonly state: RouteState = { seen: [] }
   private tail: Promise<void> = Promise.resolve()
-  private constructor(private readonly file: string, private readonly lock: string) {}
+  private readonly pinned = new Map<string,number>()
+  pinTask(id: string): () => void {
+    this.pinned.set(id,(this.pinned.get(id) ?? 0)+1)
+    return () => {
+      const count=(this.pinned.get(id) ?? 1)-1
+      if (count) this.pinned.set(id,count); else this.pinned.delete(id)
+      void this.save().catch(() => {})
+    }
+  }
+  private readonly archive: TaskArchive
+  get archivedCount(): number { return this.archive.count }
+  private constructor(private readonly file: string, private readonly lock: string) { this.archive=new TaskArchive(join(dirname(file),'archives',basename(file,'.json'))) }
+  async archivedTasks(cursor?: string) { await this.tail; return this.archive.page(cursor,(this.state.tasks ?? []).map(t=>t.id)) }
+  async task(id: string, archiveKey?: string): Promise<TaskRecord> {
+    await this.tail
+    const hot=this.state.tasks?.find(t=>t.id===id)
+    if (hot) return hot
+    if (!archiveKey) throw new Error('Task not found')
+    const task=await this.archive.read(archiveKey)
+    if (task.id!==id) throw new Error('Task identity mismatch')
+    return task
+  }
+  async restoreTask(id: string, archiveKey?: string): Promise<TaskRecord> {
+    const task=await this.task(id,archiveKey)
+    this.state.tasks ??= []
+    const existing=this.state.tasks.find(t=>t.id===id)
+    if (existing) return existing
+    this.state.tasks.push(task)
+    return task
+  }
 
   static async open(dir: string, route: RouteConfig, channelIdentity?: string): Promise<StateStore> {
     await mkdir(dir, { recursive: true, mode: 0o700 })
@@ -74,18 +104,30 @@ export class StateStore {
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
       }
+      await store.archive.load()
+      // Migrate old unbounded state before exposing it to polling clients.
+      if (partitionTasks(store.state.tasks ?? []).archive.length) await store.save()
       return store
     } catch (error) { await store.close(); throw error }
   }
 
   save(): Promise<void> {
-    const snapshot = JSON.stringify(this.state)
+    // Capture before queuing: later mutations must never change this transaction.
+    const snapshot = JSON.parse(JSON.stringify(this.state)) as RouteState
+    const {hot,archive}=partitionTasks(snapshot.tasks ?? [],new Set(this.pinned.keys()))
+    if (snapshot.tasks) snapshot.tasks=hot
     const operation = this.tail.then(async () => {
-      const temp = `${this.file}.${randomUUID()}.tmp`
-      try {
-        await writeFile(temp, snapshot, { mode: 0o600, flag: 'wx' })
-        await rename(temp, this.file)
-      } finally { await rm(temp, { force: true }) }
+      // Archive first. A crash/failure can leave duplicates, never lost task contents.
+      for (let offset=0;offset<archive.length;offset+=16) {
+        const results=await Promise.allSettled(archive.slice(offset,offset+16).map(task=>this.archive.write(task)))
+        const failure=results.find(r=>r.status==='rejected')
+        if (failure?.status==='rejected') throw failure.reason
+      }
+      await atomicStateFile(this.file,JSON.stringify(snapshot))
+      if (archive.length) {
+        const removed=new Map(archive.map(t=>[t.id,JSON.stringify(t)]))
+        this.state.tasks=this.state.tasks?.filter(t=>removed.get(t.id)!==JSON.stringify(t)) ?? []
+      }
     })
     this.tail = operation.catch(() => {})
     return operation
