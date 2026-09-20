@@ -31,6 +31,7 @@ interface Runtime { routeId: string; channelId: string; router: GatewayRouter; a
 /** Sole owner of listeners, route state, adapters and shutdown. Operations are serialized. */
 export class Gateway {
   private readonly runtimes = new Map<string, Runtime>()
+  private readonly historyStores = new Map<string,StateStore>()
   private readonly history = new Map<string,ReturnType<GatewayRouter['snapshot']>>()
   private readonly errors = new Map<string, string>()
   private operation = Promise.resolve()
@@ -93,7 +94,9 @@ export class Gateway {
           await runtime.adapter.stop(); await runtime.router.close(); await runtime.store.close()
           this.runtimes.delete(key)
           this.history.delete(key)
+          this.historyStores.delete(key)
         }
+        for (const key of this.historyStores.keys()) if (key === old.id || key.startsWith(`${old.id}:`)) { this.historyStores.delete(key); this.history.delete(key) }
         for (const key of this.errors.keys()) if (key === old.id || key.startsWith(`${old.id}:`)) this.errors.delete(key)
       }
       this.config = config; this.secrets = secrets
@@ -102,17 +105,28 @@ export class Gateway {
     })
   }
   replaceRoute(_id: string, config: AppConfig, secrets: Secrets): Promise<void> { return this.replace(config,secrets) }
-  async control(routeId: string, channelId: string, taskId: string, action: string, requestId?: string, answers?: Record<string,string>): Promise<void> {
+  async control(routeId: string, channelId: string, taskId: string, action: string, requestId?: string, answers?: Record<string,string>, archiveKey?: string): Promise<void> {
     const runtime = [...this.runtimes.values()].find(r => r.routeId === routeId && r.channelId === channelId)
     if (!runtime || this.updating.has(routeId)) throw new PluginError('busy','入口不可用或正在更新，请稍后重试。')
     if (action === 'resend') {
-      const task = runtime.store.state.tasks?.find(t => t.id === taskId)
+      const task = await runtime.store.task(taskId,archiveKey)
       if (!task || !runtime.adapter.scheduledMessage || runtime.adapter.state.phase !== 'listening') throw new Error('结果或发送入口不可用')
       const channel = await runtime.adapter.scheduledMessage(`resend:${task.id}`,task.input)
       if (![...this.runtimes.values()].includes(runtime) || this.updating.has(routeId)) throw new PluginError('busy','入口已更新，请刷新后重试。')
-      await runtime.router.deliver(task,channel)
+      const restored=await runtime.store.restoreTask(taskId,archiveKey)
+      if (![...this.runtimes.values()].includes(runtime) || this.updating.has(routeId)) throw new PluginError('busy','入口已更新，请刷新后重试。')
+      await runtime.router.deliver(restored,channel)
     } else await runtime.router.control(taskId,action,requestId,answers)
   }
+  private taskStore(routeId: string, channelId: string): StateStore {
+    const route=this.config.routes.find(r=>r.id===routeId)
+    if (!route || !routeChannels(route).some(c=>c.id===channelId)) throw new Error('Unknown task scope')
+    const key=this.key(route,channelId), store=this.runtimes.get(key)?.store ?? this.historyStores.get(key)
+    if (!store) throw new PluginError('runtime-failed','请先连接该入口以读取任务历史。')
+    return store
+  }
+  async taskHistory(routeId: string, channelId: string, cursor?: string) { return this.taskStore(routeId,channelId).archivedTasks(cursor) }
+  async taskDetail(routeId: string, channelId: string, taskId: string, archiveKey?: string) { return this.taskStore(routeId,channelId).task(taskId,archiveKey) }
   async runSchedule(routeId: string, scheduleId: string): Promise<void> {
     const route = this.config.routes.find(r => r.id === routeId)
     const task = route?.schedules?.find(s => s.id === scheduleId)
@@ -160,6 +174,7 @@ export class Gateway {
           const identity = route.channels && !legacyIdentity ? JSON.stringify([channel.kind,channel.id,channel.kind === 'weixin' ? [channel.accountId,credential!.ownerUserId] : []]) : undefined
           stage = '私有状态存储'
           store = await StateStore.open(this.config.stateDir,isolated,identity)
+          this.historyStores.set(key,store)
           stage = 'Agent 后端'
           backend = this.backendFactory(isolated,this.config,this.secrets)
           router = new GatewayRouter(backend,isolated,store,600_000,20_000,() => {

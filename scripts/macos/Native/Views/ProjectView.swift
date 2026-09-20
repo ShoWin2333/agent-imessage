@@ -19,7 +19,7 @@ struct NativeProjectView: View {
                 }
                 Spacer()
                 Picker("项目页面",selection:$tab) {
-                    Text("对话与活动").tag("activity")
+                    Text("任务").tag("activity")
                     Text("定时任务").tag("schedules")
                     Text("项目配置").tag("config")
                 }.pickerStyle(.segmented).frame(width:340)

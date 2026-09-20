@@ -1,3 +1,5 @@
+import {requestId, interactionPresentation} from './interaction.js'
+import { taskSummary } from './task-history.js'
 import { PluginError } from '../errors.js'
 import type { ScheduledTask } from './cron.js'
 import { failureText } from '../backends/failure.js'
@@ -12,7 +14,7 @@ import { object, SessionInUseError, type ObjectValue } from '../backends/jsonrpc
 import type { Backend, BackendEvent, BackendRequest } from '../backends/types.js'
 import type { TaskRecord, RouteState } from './state.js'
 
-interface Store { state: RouteState; save(): Promise<void> }
+interface Store { pinTask?(id: string): () => void; archivedCount?: number; state: RouteState; save(): Promise<void> }
 interface Active {
   task: TaskRecord
   release(): void
@@ -31,6 +33,7 @@ interface Active {
   changes: Map<string, unknown>
 }
 interface Pending {
+  presentation: ReturnType<typeof interactionPresentation>
   details: string
   expiresAt: number
   kind: 'approval' | 'question'
@@ -93,7 +96,7 @@ export class GatewayRouter {
 
   private get agentName(): string { return this.route.backend === 'cursor' ? 'Cursor' : this.route.backend === 'dsh' ? 'DSH' : 'Codex' }
 
-  snapshot() { return { tasks: this.store.state.tasks ?? [], requests: [...this.pending].map(([id,p]) => ({id,kind:p.kind,details:p.details,expiresAt:p.expiresAt,questions:p.questions})), busy: Boolean(this.active), current: this.active ? {taskId:this.active.task.id, messageId:this.active.channel.id, startedAt:this.active.startedAt, phase:this.active.phase, phaseAt:this.active.phaseAt, runId:this.active.runId} : undefined, sessionId: this.store.state.threadId, pending: this.pending.size, closed: this.closed, receivedCount: this.receivedCount, lastActivityAt: this.lastActivityAt, lastTurnStatus: this.lastTurnStatus, activity: this.activity.map(entry => ({...entry})) } }
+  snapshot() { return { archivedCount:this.store.archivedCount ?? 0, tasks: (this.store.state.tasks ?? []).map(taskSummary), requests: [...this.pending].map(([id,p]) => ({id,presentation:p.presentation,kind:p.kind,details:p.details,expiresAt:p.expiresAt,questions:p.questions})), busy: Boolean(this.active), current: this.active ? {taskId:this.active.task.id, messageId:this.active.channel.id, startedAt:this.active.startedAt, phase:this.active.phase, phaseAt:this.active.phaseAt, runId:this.active.runId} : undefined, sessionId: this.store.state.threadId, pending: this.pending.size, closed: this.closed, receivedCount: this.receivedCount, lastActivityAt: this.lastActivityAt, lastTurnStatus: this.lastTurnStatus, activity: this.activity.map(entry => ({...entry})) } }
 
   setConnected(value: boolean): void {
     if (this.connected !== value) this.record(value ? 'connected' : 'disconnected', this.active?.channel)
@@ -291,6 +294,7 @@ export class GatewayRouter {
     const active = this.owns({ threadId: event.sessionId, turnId: event.turnId })
     if (!active) return
     if (event.type === 'completed') {
+      const unpin=this.store.pinTask?.(active.task.id)
       this.record(event.status, active.channel, `总耗时 ${this.duration(active.startedAt)}；${active.firstActivityAt ? `首个活动 ${((active.firstActivityAt-active.startedAt)/1000).toFixed(1)} 秒` : '未收到模型或工具活动'}；${active.firstTextAt ? `首段文本 ${((active.firstTextAt-active.startedAt)/1000).toFixed(1)} 秒` : '未收到回复文本'}。${active.runId ? `\nRun: ${active.runId}` : ''}${event.status === 'failed' ? '\n' + failureText[event.failure ?? 'unknown'] : ''}`)
       this.lastTurnStatus = event.status
       this.lastActivityAt = Date.now()
@@ -298,8 +302,10 @@ export class GatewayRouter {
       active.task.result = active.stopping || event.status === 'interrupted' ? 'Task stopped.' : event.status === 'failed' ? `${this.agentName} 任务失败。${failureText[event.failure ?? 'unknown']}` : [...active.answers.values()].join('\n\n') || 'Task completed without a text response.'
       this.endActive(event.status)
       this.active = undefined
-      await this.store.save()
-      if (this.connected) void this.deliver(active.task, active.channel).catch(() => this.record('send-failed',active.channel,'结果已保存，但回传状态无法落盘；请检查本机存储。'))
+      try {
+        await this.store.save()
+        if (this.connected) void this.deliver(active.task, active.channel).catch(() => this.record('send-failed',active.channel,'结果已保存，但回传状态无法落盘；请检查本机存储。'))
+      } finally { unpin?.() }
       return
     }
     if (active.stopping || !this.connected) return
@@ -382,7 +388,7 @@ export class GatewayRouter {
         : questions.map(q => `${q.id}: ${q.question}\n${JSON.stringify(q.options ?? [])}`).join('\n')
     if (details.length > 2600) throw new Error('Request too large for safe review over the channel')
     if (approval && Array.isArray(params.availableDecisions) && !params.availableDecisions.includes('accept')) throw new Error('Single-action approval unavailable')
-    const id = randomUUID()
+    const id = requestId(this.pending)
     this.progress(active, approval ? '等待你的审批' : '等待你的回答')
     this.record(approval ? 'waiting-approval' : 'waiting-answer', active.channel)
     return new Promise((resolve, reject) => {
@@ -390,7 +396,7 @@ export class GatewayRouter {
       const finish = (value: unknown) => { if (settled) return; settled = true; this.record('interaction-resolved', active.channel); clearTimeout(timer); this.pending.delete(id); this.progress(active, '等待后端继续执行'); resolve(value) }
       const cancel = () => { if (settled) return; settled = true; this.record('interaction-cancelled', active.channel); clearTimeout(timer); this.pending.delete(id); if (approval) resolve({ decision: 'cancel' }); else reject(new Error('Question cancelled')) }
       const timer = setTimeout(cancel, this.interactionTimeoutMs)
-      this.pending.set(id, { details, expiresAt:Date.now() + this.interactionTimeoutMs, kind: approval ? 'approval' : 'question', resolve: finish, cancel, questions: questions.map(q => String(q.id)) })
+      this.pending.set(id, { presentation:interactionPresentation(this.agentName,method,params,changes), details, expiresAt:Date.now() + this.interactionTimeoutMs, kind: approval ? 'approval' : 'question', resolve: finish, cancel, questions: questions.map(q => String(q.id)) })
       const hint = approval ? `/approve ${id} or /deny ${id}` : `/answer ${id} {"question-id":"answer"}`
       void this.send(active.channel, `${approval ? 'Approval requested' : 'Input requested'}\n${details}\n${hint}\nExpires in ${Math.ceil(this.interactionTimeoutMs / 60000)} minutes.`, true).catch(cancel)
     })
@@ -419,9 +425,10 @@ export class GatewayRouter {
     void this.store.save().catch(() => {})
   }
   deliver(task: TaskRecord, channel: ChannelMessage): Promise<void> {
+    const unpin=this.store.pinTask?.(task.id)
     const work = this.deliverResult(task,channel)
     this.deliveries.add(work)
-    void work.then(() => this.deliveries.delete(work), () => this.deliveries.delete(work))
+    void work.then(() => {this.deliveries.delete(work);unpin?.()}, () => {this.deliveries.delete(work);unpin?.()})
     return work
   }
   private async deliverResult(task: TaskRecord, channel: ChannelMessage): Promise<void> {

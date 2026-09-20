@@ -10,7 +10,7 @@ struct NativeActivityView: View {
     var body: some View {
         VStack(alignment:.leading,spacing:12) {
             HStack {
-                Text("对话与活动").font(.title2.bold())
+                Text("任务").font(.title2.bold())
                 Spacer()
                 Toggle("诊断记录",isOn:$diagnostics).toggleStyle(.switch).controlSize(.small)
                 Picker("入口",selection:$channelFilter) {
@@ -18,7 +18,7 @@ struct NativeActivityView: View {
                     ForEach(store.runtime(projectID).objects("channels").map{$0.text("id")},id:\.self) { Text($0).tag($0) }
                 }.frame(maxWidth:220)
             }
-            TextField("搜索对话或执行步骤",text:$search).textFieldStyle(.roundedBorder)
+            TextField(diagnostics ? "搜索诊断记录" : "搜索最近任务摘要",text:$search).textFieldStyle(.roundedBorder)
             Text("任务与结果持久保存 · 每 3 秒刷新 · 诊断保留最近 200 条活动。发送成功不代表已读。")
                 .font(.caption).foregroundStyle(.secondary)
             if diagnostics {

@@ -65,8 +65,14 @@ export async function startServer(configFile: string, initial: AppConfig, initia
         await work
         return
       }
+      if (req.url === '/api/tasks/history') {
+        json(res,200,await gateway.taskHistory(String(input.routeId),String(input.channelId),typeof input.cursor === 'string' ? input.cursor : undefined)); return
+      }
+      if (req.url === '/api/tasks/detail') {
+        json(res,200,{task:await gateway.taskDetail(String(input.routeId),String(input.channelId),String(input.taskId),typeof input.archiveKey === 'string' ? input.archiveKey : undefined)}); return
+      }
       if (req.url === '/api/tasks/control') {
-        await gateway.control(String(input.routeId),String(input.channelId),String(input.taskId),String(input.action),typeof input.requestId === 'string' ? input.requestId : undefined,input.answers as Record<string,string> | undefined)
+        await gateway.control(String(input.routeId),String(input.channelId),String(input.taskId),String(input.action),typeof input.requestId === 'string' ? input.requestId : undefined,input.answers as Record<string,string> | undefined,typeof input.archiveKey === 'string' ? input.archiveKey : undefined)
         json(res,200,{ok:true}); return
       }
       const work = mutation.then(async () => {

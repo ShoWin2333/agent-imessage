@@ -51,7 +51,7 @@ struct NativeSchedulesView: View {
                     draft.value["schedules"] = rows; draft.dirty = true
                 }.disabled(tasks.count >= 16 || draft.channels.isEmpty)
                 Button("保存并应用项目") { Task { await store.save(draft) } }.buttonStyle(.borderedProminent)
-                Text("任务默认停用。填写任务并启用后保存；计划保存不会打断运行中的任务。执行结果和跳过原因可在「对话与活动」查看。").font(.caption).foregroundStyle(.secondary)
+                Text("任务默认停用。填写任务并启用后保存；计划保存不会打断运行中的任务。执行结果和跳过原因可在「任务」查看。").font(.caption).foregroundStyle(.secondary)
             }
         }.formStyle(.grouped).disabled(store.busy || !store.connected)
     }
