@@ -1,11 +1,11 @@
 import Cocoa
-import WebKit
-import UniformTypeIdentifiers
+import SwiftUI
 
 // Resident desktop app; the management window is independent of service lifetime.
-final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate, NSWindowDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var window: NSWindow!
-    var web: WKWebView!
+    @MainActor lazy var gatewayStore = GatewayStore(url: url)
+    var settingsWindow: NSWindow?
     var ownsService = false
     var closing = false
     let serviceQueue = DispatchQueue(label: "app.agent-imessage.service")
@@ -16,7 +16,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     var reconnectItem: NSMenuItem!
     var statusTimer: Timer?
     var checkingStatus = false
-    var pageLoaded = false
 
     var starting = false
     var pollGeneration = 0
@@ -171,6 +170,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         let item = NSMenuItem()
         menu.addItem(item)
         let appMenu = NSMenu()
+        appMenu.addItem(withTitle: "设置…", action: #selector(showSettings), keyEquivalent: ",").target = self
+        appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "退出 Agent iMessage", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         item.submenu = appMenu
         let editItem = NSMenuItem(); editItem.title = "编辑"; menu.addItem(editItem)
@@ -194,10 +195,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         window.minSize = NSSize(width: 620, height: 480)
         window.titlebarAppearsTransparent = true
         window.backgroundColor = .windowBackgroundColor
-        web = WKWebView()
-        web.navigationDelegate = self
-        web.uiDelegate = self
-        window.contentView = web
+        window.contentView = NSHostingView(rootView: GatewayRootView(store: gatewayStore))
         window.center()
         window.setFrameAutosaveName("AgentGatewayMainWindow")
         if let screen = window.screen ?? NSScreen.main {
@@ -210,7 +208,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         }
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
-        web.loadHTMLString("<meta charset='utf-8'><p style='font:20px system-ui;padding:40px'>正在启动 Agent iMessage…</p>", baseURL: nil)
         setupStatusItem()
         smokeRecord("launched")
         startService()
@@ -296,17 +293,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     @objc func openBrowser() { NSWorkspace.shared.open(url) }
     func poll(_ remaining: Int, generation: Int) {
         guard !closing && generation == pollGeneration else { return }
-        var request = URLRequest(url: url)
+        var request = URLRequest(url: url.appendingPathComponent("api/state"))
         request.timeoutInterval = 1
         URLSession.shared.dataTask(with: request) { _, response, _ in
             DispatchQueue.main.async {
                 guard !self.closing && generation == self.pollGeneration else { return }
                 if (response as? HTTPURLResponse)?.statusCode == 200 {
                     self.window.subtitle = ""
-                    if !self.pageLoaded {
-                        self.web.load(URLRequest(url: self.url))
-                        self.pageLoaded = true
-                    }
+                    self.gatewayStore.start(url: self.url)
                     self.refreshStatus()
                     self.smokeReady()
                 } else if remaining > 0 {
@@ -328,11 +322,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             if response == .alertFirstButtonReturn { self.reconnect() }
         }
     }
-    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-        if (error as NSError).code != NSURLErrorCancelled { window.subtitle = "页面加载失败 · 点击重新连接" }
-    }
-    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) { webView.reload() }
-
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
         showWindow()
@@ -354,6 +343,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
                 if stopped {
                     self.smokeRecord("stopped")
                     self.statusTimer?.invalidate()
+                    Task { @MainActor in self.gatewayStore.stop() }
                     NSApp.reply(toApplicationShouldTerminate: true)
                 } else {
                     self.closing = false
@@ -365,43 +355,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         }
     }
 
-    func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-        guard let destination = action.request.url else { decisionHandler(.cancel); return }
-        if destination.scheme == "about" || (destination.scheme == url.scheme && destination.host == url.host && destination.port == url.port) {
-            decisionHandler(.allow)
-        } else {
-            if ["https", "http"].contains(destination.scheme ?? "") { NSWorkspace.shared.open(destination) }
-            decisionHandler(.cancel)
+    @MainActor @objc func showSettings() {
+        if settingsWindow == nil {
+            let panel = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 540, height: 380), styleMask: [.titled, .closable], backing: .buffered, defer: false)
+            panel.title = "设置"
+            panel.isReleasedWhenClosed = false
+            panel.contentView = NSHostingView(rootView: NativeSettingsView(store: gatewayStore))
+            panel.center()
+            settingsWindow = panel
         }
+        NSApp.setActivationPolicy(.regular)
+        settingsWindow?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
-    func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for action: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
-        if let destination = action.request.url, ["https", "http"].contains(destination.scheme ?? "") { NSWorkspace.shared.open(destination) }
-        return nil
-    }
-    func webView(_ webView: WKWebView, runOpenPanelWith parameters: WKOpenPanelParameters, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping ([URL]?) -> Void) {
-        guard let source = frame.request.url,
-              source.scheme == url.scheme, source.host == url.host, source.port == url.port else {
-            completionHandler(nil)
-            return
-        }
-        let panel = NSOpenPanel()
-        panel.title = "选择工作空间头像"
-        panel.prompt = "选择图片"
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = false
-        panel.allowsMultipleSelection = false
-        panel.allowedContentTypes = [.jpeg, .png, .webP]
-        panel.beginSheetModal(for: webView.window ?? window) { result in
-            completionHandler(result == .OK ? panel.urls : nil)
-        }
-    }
-    func webView(_ webView: WKWebView, runJavaScriptConfirmPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (Bool) -> Void) {
-        let alert = NSAlert()
-        alert.messageText = message
-        alert.addButton(withTitle: "确定")
-        alert.addButton(withTitle: "取消")
-        alert.beginSheetModal(for: window) { result in completionHandler(result == .alertFirstButtonReturn) }
-    }
+
 }
 
 @main

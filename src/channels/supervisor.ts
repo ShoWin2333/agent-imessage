@@ -49,6 +49,14 @@ export class ChannelSupervisor<Config extends object> {
     return this.stateValue.phase === 'listening'
   }
 
+  async scheduledMessage(id: string, text: string): Promise<ChannelMessage> {
+    const connection = this.connection
+    if (!this.healthy || !connection?.scheduledMessage) throw new Error('Channel cannot deliver scheduled messages')
+    const message = await connection.scheduledMessage(id, text)
+    if (connection !== this.connection || !this.healthy) throw new Error('Channel changed')
+    return message
+  }
+
   /** Open and validate a replacement connection without disturbing the active listener. */
   prepare(config: Config): Promise<ChannelConnection> {
     return this.factory({ ...config })

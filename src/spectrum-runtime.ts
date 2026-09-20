@@ -4,6 +4,7 @@ import {
   voice,
   type PlatformProviderConfig,
   type SpectrumInstance,
+  type Space,
 } from '@spectrum-ts/core'
 import { imessage } from '@spectrum-ts/imessage'
 import { extname } from 'node:path'
@@ -31,6 +32,7 @@ export type SpectrumInboundMessage = ChannelMessage
 /** Running Spectrum connection behind an injectable adapter seam. */
 export interface SpectrumConnection {
   /** Accepted inbound text-only messages. */
+  scheduledMessage?(id: string, text: string): Promise<ChannelMessage>
   messages: AsyncIterable<SpectrumInboundMessage>
   /** Stop and release provider resources. */
   stop(): Promise<void>
@@ -107,6 +109,14 @@ function adaptSpectrum(
 ): SpectrumConnection {
   return {
     messages: mapMessages(app, config),
+    scheduledMessage: async (id, text) => {
+      // Same package declaration workaround as provider config, isolated at this boundary.
+      const platform = (imessage as unknown as (app: SpectrumInstance) => {space:{create(user:string,params:{phone:string}):Promise<Space & {type:string;phone:string}>}})(app)
+      const space = await platform.space.create(config.senderPhoneNumber,{phone:config.assignedPhoneNumber})
+      if (space.type !== 'dm' || ![config.assignedPhoneNumber,SPECTRUM_SHARED_PHONE].includes(space.phone)) throw new Error('Outbound scope mismatch')
+      return {id,text,responding:callback=>space.responding(callback),send:async value=>{await space.send(value)},
+        sendFile:async media=>{await space.send(attachmentForOutbound(media))},sendVoice:async media=>{await space.send(voiceForOutbound(media))}}
+    },
     stop: () => app.stop(),
   }
 }

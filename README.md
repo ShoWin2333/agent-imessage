@@ -1,6 +1,6 @@
 # Agent iMessage
 
-独立运行的本地 Agent App / Gateway。用 iMessage 操作本地项目，在同一个 Web UI 中管理 Cursor、Codex 和 DSH。无需启动 Cursor Desktop、Codex Desktop 或 DSH Web。
+独立运行的本地 Agent App / Gateway。用 iMessage 操作本地项目，在 macOS SwiftUI 原生界面或本机 Web UI 中管理 Cursor、Codex 和 DSH。无需启动 Cursor Desktop、Codex Desktop 或 DSH Web。
 
 ```text
 iMessage ↔ Photon / Spectrum ↔ Gateway
@@ -68,6 +68,12 @@ agent-imessage start
 
 将旧项目在 UI 添加微信入口时，原有 iMessage 身份字段会保留，继续使用原来的会话状态。手动迁移时，也应保留这些字段以及 `imessage` 入口 ID，以保留旧会话。新的入口不会继承其他入口的会话。协议参考和许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
+## 实时对话与活动
+
+每个项目默认打开聊天式「对话与活动」，每 3 秒刷新。每条消息下方展示回复和可展开的执行步骤；运行时显示当前阶段及耗时，方便区分“网关尚未收到”“等待后端活动”和“回复发送失败”。
+
+每个入口最近 200 条活动保存在本机私有状态文件中，重启后可回看；文本长度有限，具体保留范围见下文「聊天式监看与定时任务」。监看只覆盖通过渠道授权过滤、进入网关的消息及后端实际提供的事件，不包含模型内部推理。渠道接口返回成功不表示对方已读，分段发送失败时可能已有部分消息发出。
+
 ## Backend 准备
 
 | Backend | 所需运行环境 | 模型参数 | 执行与权限 |
@@ -98,7 +104,9 @@ LaunchAgent 名称为 `app.agent-imessage.gateway`。登录后启动，进程失
 
 Linux 可以由 systemd 等进程管理器运行 `agent-imessage start /absolute/path/config.json`；内置 service 安装器目前仅支持 macOS。
 
-macOS 原生窗口提供窗口位置恢复、编辑快捷键、重新连接和在浏览器打开。菜单栏常驻入口显示连接状态、工作空间数量、处理状态或失败提示，可打开完整管理界面、重新连接或退出。关闭窗口保留服务并隐藏 Dock 图标，从菜单栏重新打开后恢复 Dock；最小化仍遵循系统行为。正常退出只停止有归属证据的自有服务，外部服务保持运行。重新连接不会重载已经打开的管理页面，避免丢失未保存表单。
+macOS 主界面使用 SwiftUI（不再内嵌 WKWebView），通过本机 API 连接现有 Node.js Gateway。项目默认打开「对话与活动」，支持展开、搜索和按渠道筛选；「项目配置」提供模型、权限、头像和消息入口编辑。「消息渠道」提供微信扫码与 Photon 授权；`⌘,` 打开独立设置窗口。轮询不会覆盖未保存的项目草稿，配置版本冲突会保留编辑并提示重新载入。Web UI 继续作为浏览器入口。
+
+原生窗口提供窗口位置恢复、编辑快捷键、重新连接和在浏览器打开。菜单栏常驻入口显示连接状态、工作空间数量、处理状态或失败提示，可打开完整管理界面、重新连接或退出。关闭窗口保留服务并隐藏 Dock 图标，从菜单栏重新打开后恢复 Dock；最小化仍遵循系统行为。正常退出只停止有归属证据的自有服务，外部服务保持运行。重新连接不会重载已经打开的管理页面，避免丢失未保存表单。
 
 开发时可使用 Codex 的 Run 按钮，或执行：
 
@@ -106,7 +114,7 @@ macOS 原生窗口提供窗口位置恢复、编辑快捷键、重新连接和�
 ./script/build_and_run.sh --verify
 ```
 
-脚本会优雅退出已有窗口、构建并打开新的 `.app`。需要 Xcode Command Line Tools。已有 LaunchAgent 配置会被复用；没有时会生成仅在 App 内使用的服务 plist，不注册登录启动。支持配置中的固定端口，不能使用 `port: 0`。可用 `AGENT_GATEWAY_CONFIG` 指定首次构建时的配置路径，或用 `AGENT_GATEWAY_SERVICE_PLIST` 指定已有 plist。
+脚本会优雅退出已有窗口、构建并打开新的 `.app`。需要支持 macOS 14+ 的 Swift 工具链；新版本 SwiftUI SDK 的编译器插件需要完整 Xcode。若系统选择的是 Command Line Tools，构建脚本会优先使用 `/Applications/Xcode.app`（不修改系统选择，显式 `DEVELOPER_DIR` 优先）。已有 LaunchAgent 配置会被复用；没有时会生成仅在 App 内使用的服务 plist，不注册登录启动。支持配置中的固定端口，不能使用 `port: 0`。可用 `AGENT_GATEWAY_CONFIG` 指定首次构建时的配置路径，或用 `AGENT_GATEWAY_SERVICE_PLIST` 指定已有 plist。
 
 也可只构建：`node scripts/macos/build.mjs '/tmp/Agent iMessage.app'`。这是依赖本机 Node 和当前仓库的开发 App。
 
@@ -124,6 +132,7 @@ npm run test:macos:package -- '/tmp/Agent iMessage.app'
 ```sh
 AGENT_GATEWAY_APP_NAME='Gateway Standalone Test' AGENT_GATEWAY_BUNDLE_ID=app.agent-imessage.standalone-test npm run package:macos -- '/tmp/Gateway Standalone Test.app'
 npm run test:macos:service
+npm run test:macos:store
 npm run test:macos:native -- '/tmp/Gateway Standalone Test.app'
 ```
 
@@ -251,3 +260,18 @@ Cursor 默认 `cursorSettings: "project"`，由 SDK 原生加载项目 `AGENTS.m
 规则区对所有 backend 显示：Codex 原生读取用户和项目路径中的 AGENTS.md/AGENTS.override.md；DSH 原生读取 DSH_HOME 下的 AGENTS.md 及项目 AGENTS.md/CLAUDE.md 与 local 文件。Gateway 不额外拼接规则或覆盖其原生作用域。只有 Cursor 提供本应用可配置的 settings source 选择。规则是模型指令，并非确定性执行或安全边界。
 
 Codex 的 `auto-review` 映射到 App Server `approvalPolicy: "on-request"` 与 `approvalsReviewer: "auto_review"`；默认和人工审批明确使用 `user` 审核，避免继承用户全局自动审核设置。所有这些模式均保留 workspace-write 沙箱。自动审核可能拒绝操作，并不表示全部允许。
+
+
+## 聊天式监看与定时任务
+
+原生项目页默认以聊天结构显示每条入站消息、回复片段、最终回复，以及可展开的执行步骤。公共网关计时覆盖接收、会话准备、提交、首个模型／工具活动、首段文本、完成与渠道发送。Cursor、Codex、DSH 共用此链路；具体活动只展示后端实际提供的事件。Cursor 和 DSH 支持回复片段预览，片段不会作为最终消息回传。工具步骤只显示固定类别，不记录内部思考文本或原始工具参数／结果。
+
+超过 20 秒尚未完成时，原对话最多收到一次进度提示；等待审批时不另发提示。`/status` 可查询阶段、耗时和可用的运行 ID。中断、明确超时、连接错误、限流、认证失败分别报告；没有证据时不会把 aborted 当作超时，也不会自动重试可能产生副作用的任务。
+
+每个入口最近 200 条活动保存在本机原有私有状态文件中（消息文本每条最多约 8 KB，片段保留尾部）。后台合并写入，正常退出会落盘；进程意外退出可能丢失最后约 1 秒活动。记录包含对话内容，不是永久审计日志。
+
+在项目的「定时任务」页添加名称、任务正文、回复入口、五段 Cron 和 IANA 时区，例如 `0 9 * * 1-5` 配合 `Asia/Shanghai` 表示工作日 09:00。支持数字、`*`、逗号、范围、步长；周日为 0 或 7，日期和星期同时受限时按传统 Cron 的 OR 规则。每个项目最多 16 个任务，新任务默认停用，启用并保存后生效。Web 项目卡片也可配置。
+
+定时任务使用所选入口的当前会话、项目 Agent 和审批策略，最终结果主动回到该入口。调度器每 5 秒检查当前分钟，先持久化认领再执行；同一任务同一 UTC 分钟最多执行一次。项目忙碌、入口不可用时跳过并记下原因；不排队、不重试，不补跑关机／睡眠时错过的分钟。服务重启后若仍在到期分钟且尚未认领，可执行该分钟。夏令时重复的本地分钟对应不同 UTC 分钟，会分别执行。
+
+电脑需保持唤醒、Gateway 运行。关闭窗口可继续后台运行，退出 App 会停止其管理的服务。iMessage 使用配置的授权收件人；微信仅使用已绑定所有者最近一次有效入站消息的会话凭据，该凭据私有保存且不在 UI 回显。微信凭据过期可能拒绝主动发送，此时先给机器人重新发一条消息。渠道返回成功不等于用户已读。

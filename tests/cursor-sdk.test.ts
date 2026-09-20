@@ -74,3 +74,35 @@ describe('Cursor SDK adapter', () => {
     await f.backend.close()
   })
 })
+
+it('exposes useful activity before completion without leaking thinking or tool payloads',async()=>{
+  const f=fixture()
+  let release!:()=>void
+  const gate=new Promise<void>(r=>{release=r})
+  f.run.stream=async function*(){
+    yield {type:'thinking',text:'private reasoning'} as never
+    yield {type:'tool_call',call_id:'call',status:'running',name:'shell',args:{secret:'private-tool-secret'}} as never
+    yield {type:'assistant',message:{content:[{type:'text',text:'partial'}]}}
+    await gate
+  }
+  await f.backend.openSession({cwd:route.cwd,tools:[]});await f.backend.startTurn('session','hi')
+  await expect.poll(()=>f.events.some(e=>e.type==='preview')).toBe(true)
+  expect(f.events.filter(e=>e.type==='progress').map(e=>e.phase)).toEqual(['run-created','model-active','tool-running','generating'])
+  expect(f.events.some(e=>e.type==='completed')).toBe(false)
+  expect(JSON.stringify(f.events)).not.toMatch(/private reasoning|private-tool-secret/)
+  release();f.finish({id:'run',status:'finished',result:'final'})
+  await expect.poll(()=>f.events.at(-1)?.type).toBe('completed')
+  expect(f.events.filter(e=>e.type==='message')).toHaveLength(1)
+  await f.backend.close()
+})
+it('distinguishes explicit timeouts, network failures and upstream aborts from user cancellation',async()=>{
+  expect(cursorFailure({message:'This operation was aborted',code:'[unknown] [canceled]'})).toBe('aborted')
+  expect(cursorFailure(new Error('outer',{cause:{code:'ETIMEDOUT'}}))).toBe('timeout')
+  expect(cursorFailure({cause:{code:'ECONNRESET'}})).toBe('network')
+  expect(cursorFailure({code:'resource_exhausted'})).toBe('rate-limit')
+  const f=fixture();await f.backend.openSession({cwd:route.cwd,tools:[]})
+  await f.backend.startTurn('session','hi');f.finish({id:'run',status:'cancelled'})
+  await expect.poll(()=>f.events.at(-1)).toMatchObject({type:'completed',status:'failed',failure:'aborted'})
+  expect(f.events.some(e=>e.type==='message')).toBe(false)
+  await f.backend.close()
+})

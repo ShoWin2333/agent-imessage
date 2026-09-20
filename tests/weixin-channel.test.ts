@@ -192,3 +192,18 @@ it('bounds emoji replies without breaking grapheme clusters',()=>{
   expect(parts.every(part=>part.length<=1800 && part.length%family.length===0)).toBe(true)
   expect(parts.join('')).toBe(text)
 })
+
+it('uses only the bound owner and persisted private context for proactive replies',async()=>{
+  const api=new WeixinApi(),state:RouteState={seen:[],weixinContext:'persisted-private-context'}
+  vi.spyOn(api,'updates').mockResolvedValue({msgs:[],get_updates_buf:'next'})
+  const send=vi.spyOn(api,'send').mockResolvedValue({ret:0})
+  const adapter=new WeixinAdapter(credential,{state,save:async()=>{}},async()=>{},()=>{},api);cleanup.push(()=>adapter.stop())
+  await adapter.start();await expect.poll(()=>adapter.state.phase).toBe('listening')
+  const scheduled=await adapter.scheduledMessage('cron:daily:1','check')
+  expect(JSON.stringify(scheduled)).not.toContain('persisted-private-context')
+  await scheduled.send('result')
+  expect(send).toHaveBeenCalledWith(credential,credential.ownerUserId,'persisted-private-context','result',expect.any(AbortSignal))
+  delete state.weixinContext
+  await expect(adapter.scheduledMessage('cron:daily:2','check')).rejects.toThrow()
+  await adapter.stop();await expect(adapter.scheduledMessage('cron:daily:3','check')).rejects.toThrow()
+})

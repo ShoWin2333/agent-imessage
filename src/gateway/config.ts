@@ -1,4 +1,5 @@
 import { isAbsolute } from 'node:path'
+import { scheduleSchema } from './cron.js'
 import { z } from 'zod'
 
 const identifier = z.string().regex(/^[a-zA-Z0-9_-]{1,64}$/)
@@ -18,6 +19,7 @@ export const routeSchema = z.object({
   projectSecretEnv: z.string().default(''),
   senderPhoneNumber: z.string().default(''),
   assignedPhoneNumber: z.string().default(''),
+  schedules: z.array(scheduleSchema).max(16).optional(),
   channels: z.array(channelSchema).max(8).optional(),
   backend: z.enum(['codex', 'cursor', 'dsh']).optional(),
   approvalPolicy: z.enum(['default', 'on-request', 'never', 'deny', 'auto-review', 'unrestricted']).optional(),
@@ -32,6 +34,10 @@ export const routeSchema = z.object({
   cursorApiKeyEnv: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/).optional(),
 
 }).strict().superRefine((route, ctx) => {
+  const schedules = route.schedules ?? []
+  if (new Set(schedules.map(s => s.id)).size !== schedules.length) ctx.addIssue({code:'custom',path:['schedules'],message:'Schedule IDs must be unique'})
+  const channelIds = route.channels?.map(c => c.id) ?? ['imessage']
+  if (schedules.some(s => !channelIds.includes(s.channelId))) ctx.addIssue({code:'custom',path:['schedules'],message:'Schedule must target an existing project channel'})
   if (!route.channels) {
     const result = channelSchema.safeParse({kind:'imessage', id:'imessage', projectId:route.projectId,
       projectSecretEnv:route.projectSecretEnv, senderPhoneNumber:route.senderPhoneNumber, assignedPhoneNumber:route.assignedPhoneNumber})

@@ -1,3 +1,5 @@
+import { toolCategory } from './progress.js'
+import { backendFailure } from './failure.js'
 import { JsonRpcProcess, object, type Rpc } from './jsonrpc.js'
 import { BaseBackend, type BackendRequest, type SessionOptions } from './types.js'
 
@@ -11,8 +13,13 @@ export class CodexBackend extends BaseBackend {
       const turn = object(params.turn)
       const turnId = String(params.turnId ?? turn.id ?? '')
       if (method === 'turn/started') this.onEvent({ type: 'started', sessionId, turnId })
-      if (method === 'turn/completed') this.onEvent({ type: 'completed', sessionId, turnId, status: turn.status === 'completed' ? 'completed' : turn.status === 'interrupted' ? 'interrupted' : 'failed' })
+      if (method === 'turn/completed') this.onEvent({ type: 'completed', sessionId, turnId, status: turn.status === 'completed' ? 'completed' : turn.status === 'interrupted' ? 'interrupted' : 'failed', ...(turn.status === 'failed' ? {failure:backendFailure(turn.error)} : {}) })
       const item = object(params.item)
+      if (method === 'item/started') {
+        const phase = item.type === 'agentMessage' ? 'generating' : item.type === 'reasoning' ? 'model-active' : ['commandExecution','fileChange','mcpToolCall','dynamicToolCall','webSearch'].includes(String(item.type)) ? 'tool-running' : undefined
+        if (phase) this.onEvent({type:'progress',sessionId,turnId,phase,...(phase === 'tool-running' ? {detail:toolCategory(item.type)} : {})})
+      }
+      if (method === 'item/completed' && ['commandExecution','mcpToolCall','dynamicToolCall'].includes(String(item.type))) this.onEvent({type:'progress',sessionId,turnId,phase:item.status === 'failed' ? 'tool-failed' : 'tool-completed'})
       if (method === 'item/started' && item.type === 'fileChange') this.onEvent({ type: 'changes', sessionId, turnId, id: String(item.id), changes: item.changes })
       if (method === 'item/completed' && item.type === 'agentMessage' && (item.phase === 'final_answer' || item.phase == null) && typeof item.text === 'string') this.onEvent({ type: 'message', sessionId, turnId, id: String(item.id), text: item.text })
     }

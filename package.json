@@ -61,7 +61,8 @@
     "package:macos": "node scripts/macos/package.mjs",
     "test:macos:package": "node scripts/macos/package-smoke.mjs",
     "test:macos:native": "node scripts/macos/native-smoke.mjs",
-    "test:macos:service": "node scripts/macos/service-tests.mjs"
+    "test:macos:service": "node scripts/macos/service-tests.mjs",
+    "test:macos:store": "node scripts/macos/native-store-tests.mjs"
   },
   "dependencies": {
     "@bufbuild/protobuf": "1.10.0",
