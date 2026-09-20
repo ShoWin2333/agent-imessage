@@ -5,23 +5,29 @@ struct NativeChannelsView: View {
     @State private var verificationCode = ""
     var body: some View {
         Form {
+            TelegramChannelsView(store: store)
             Section("WeChat · 个人微信") {
                 let login = store.state.object("weixinLogin")
                 Text(login.text("error",loginStatus(login.text("phase"))))
-                ForEach(store.state.objects("weixinAccounts").map{$0.text("accountId")},id:\.self) { Text($0).font(.caption).textSelection(.enabled) }
+                ForEach(store.state.objects("weixinAccounts").map{$0.text("accountId")},id:\.self) { id in
+                    VStack(alignment:.leading,spacing:6) {
+                        Text(id).font(.caption).textSelection(.enabled)
+                        ChannelAccountBinding(store:store,kind:"weixin",accountID:id)
+                    }
+                }
                 if let image = nativeImage(login.text("qr")) {
                     Image(nsImage:image).interpolation(.none).resizable().scaledToFit().frame(width:240,height:240)
                         .accessibilityLabel("使用个人微信扫描此二维码绑定机器人")
                 }
                 HStack {
-                    Button("微信扫码绑定") { Task { await store.perform("api/weixin/begin") } }
-                    Button("取消绑定") { Task { await store.perform("api/weixin/cancel") } }
+                    Button("添加微信机器人（扫码）") { Task { await store.perform("api/weixin/begin") } }
+                    Button("取消扫码") { Task { await store.perform("api/weixin/cancel") } }
                 }
                 if login.text("phase") == "needs_verification" {
                     TextField("微信配对码",text:$verificationCode)
                     Button("提交配对码") { Task { if await store.perform("api/weixin/verify",["id":login.text("id"),"code":verificationCode]) != nil { verificationCode = "" } } }
                 }
-                Text("绑定成功后，在项目配置中添加微信入口。只接受绑定者的私聊消息。").foregroundStyle(.secondary)
+                Text("扫码添加账号后，在 Agent 的消息入口中选择绑定。只接受扫码者的私聊消息。").foregroundStyle(.secondary)
             }
             Section("iMessage · Photon") {
                 let authorization = store.state.object("authorization")
@@ -36,12 +42,12 @@ struct NativeChannelsView: View {
                     Button("授权 Photon") { Task { await store.perform("api/photon/authorize") } }
                     Button("取消授权") { Task { await store.perform("api/photon/cancel") } }
                 }
-                Text("完成授权后，可在项目配置中创建号码或选择已有 Photon 项目。").foregroundStyle(.secondary)
+                PhotonChannelsView(store:store)
             }
         }.formStyle(.grouped).navigationTitle("消息渠道").disabled(store.busy || !store.connected)
     }
     private func loginStatus(_ phase: String) -> String {
-        ["idle":"用个人微信扫码绑定机器人。","pending":"请用微信扫描二维码。","scanned":"已扫码，请在微信确认。","needs_verification":"请填写微信显示的配对码。","connected":"绑定成功，请在项目中选择机器人并保存。","expired":"二维码已过期，请重新生成。","failed":"绑定失败，请重试。","cancelled":"已取消绑定。"][phase] ?? phase
+        ["idle":"用个人微信扫码添加机器人。","pending":"请用微信扫描二维码。","scanned":"已扫码，请在微信确认。","needs_verification":"请填写微信显示的配对码。","connected":"账号已添加，请在 Agent 的消息入口选择机器人并保存。","expired":"二维码已过期，请重新生成。","failed":"绑定失败，请重试。","cancelled":"已取消扫码。"][phase] ?? phase
     }
     private func photonStatus(_ phase: String) -> String {
         ["authorized":"已授权，可以管理项目号码。","pending":"请打开授权页面并输入验证码。","disconnected":"尚未授权项目管理；不影响已有线路收发。","reauthorization-required":"管理授权已过期，请重新授权。","failed":"授权失败，请重试。"][phase] ?? phase

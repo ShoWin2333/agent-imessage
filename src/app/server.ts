@@ -4,6 +4,8 @@ import { object } from '../backends/jsonrpc.js'
 import { atomicJson, validateConfig, type AppConfig, type Secrets } from './config.js'
 import { PluginError } from '../errors.js'
 import { listModels } from '../backends/catalog.js'
+import { photonAccounts, publicPhotonAccounts } from './channel-accounts.js'
+import { telegramAccounts, updateTelegram } from './telegram.js'
 import { WeixinLogin } from './weixin.js'
 import { WeixinError } from '../channels/weixin-api.js'
 import { routeChannels, photonSecretKey } from '../gateway/config.js'
@@ -43,7 +45,7 @@ export async function startServer(configFile: string, initial: AppConfig, initia
       res.setHeader('referrer-policy', 'no-referrer')
       res.setHeader('content-security-policy', "default-src 'self'; img-src 'self' data:; frame-ancestors 'none'; form-action 'self'")
       if (req.method === 'GET' && req.url === '/api/state') {
-        const state = { config, revision, weixinLogin:weixinLogin.snapshot(), weixinAccounts:Object.values(secrets.weixin ?? {}).map(c=>({accountId:c.accountId})), authorization: photonAccount.snapshot(), csrf: token, routes: gateway.snapshot(), hasCursorKey: Boolean(secrets.cursorApiKey || process.env.CURSOR_API_KEY), hasPhotonSecret: Object.fromEntries(config.routes.map(r => [r.id, routeChannels(r).some(c=>c.kind === 'imessage' && Boolean(secrets.photon[photonSecretKey(r,c)] || process.env[c.projectSecretEnv]))])) }
+        const state = { config, revision, telegramAccounts:telegramAccounts(config,secrets), photonAccounts:publicPhotonAccounts(config,secrets), weixinLogin:weixinLogin.snapshot(), weixinAccounts:Object.values(secrets.weixin ?? {}).map(c=>({accountId:c.accountId})), authorization: photonAccount.snapshot(), csrf: token, routes: gateway.snapshot(), hasCursorKey: Boolean(secrets.cursorApiKey || process.env.CURSOR_API_KEY), hasPhotonSecret: Object.fromEntries(config.routes.map(r => [r.id, routeChannels(r).some(c=>c.kind === 'imessage' && Boolean(secrets.photon[photonSecretKey(r,c)] || process.env[c.projectSecretEnv]))])) }
         const payload = JSON.stringify(state)
         const etag = '"' + createHash('sha256').update(payload).digest('hex') + '"'
         res.setHeader('etag',etag)
@@ -76,12 +78,33 @@ export async function startServer(configFile: string, initial: AppConfig, initia
         json(res,200,{ok:true}); return
       }
       const work = mutation.then(async () => {
+        if (req.url === '/api/telegram/save') {
+          if (input.revision !== revision) { json(res,409,{error:'Configuration changed. Reload before saving.'}); return }
+          if ('routeId' in input) throw new PluginError('invalid-command','请在 Agent 的消息入口中管理绑定。')
+          const next = await updateTelegram(config,secrets,input)
+          await gateway.replace(next.config,next.secrets,async()=>{
+            await atomicJson(`${configFile}.secrets.json`,next.secrets)
+            await atomicJson(configFile,next.config)
+          })
+          config=next.config; secrets=next.secrets; revision++
+          json(res,200,{ok:true,botId:next.botId}); return
+        }
         if (req.url === '/api/schedules/preview') {
           const task = scheduleSchema.parse(input.schedule)
           json(res,200,{runs:nextRuns(task.cron,task.timeZone)}); return
         }
         if (req.url === '/api/schedules/run') {
           await gateway.runSchedule(String(input.routeId),String(input.scheduleId))
+          json(res,200,{ok:true}); return
+        }
+        if (req.url === '/api/photon/account') {
+          if (input.revision !== revision) { json(res,409,{error:'Configuration changed'}); return }
+          if (typeof input.sender !== 'string' || !/^\+[1-9]\d{6,14}$/.test(input.sender) || typeof input.name !== 'string' || !input.name.trim()) throw new PluginError('invalid-command','请填写项目名称和含国家区号的手机号。')
+          if (input.projectId && config.routes.some(r=>routeChannels(r).some(c=>c.kind==='imessage' && c.projectId===input.projectId))) throw new PluginError('invalid-command','该 Photon 项目已绑定 Agent，请先在 Agent 页解绑。')
+          const resource = input.projectId ? await photonAccount.select(String(input.projectId),input.sender) : await photonAccount.provision(input.name,input.sender)
+          const nextSecrets: Secrets = {...secrets,photonAccounts:{...photonAccounts(config,secrets),[resource.projectId]:{secret:resource.secret,assignedPhoneNumber:resource.assignedPhoneNumber,senderPhoneNumber:input.sender}}}
+          await atomicJson(`${configFile}.secrets.json`,nextSecrets)
+          secrets=nextSecrets; revision++
           json(res,200,{ok:true}); return
         }
         if (req.url === '/api/photon/projects') {
@@ -105,12 +128,23 @@ export async function startServer(configFile: string, initial: AppConfig, initia
             ? config.routes.map(r => r.id === input.id ? routeInput : r)
             : [...config.routes, routeInput]} : input.config, !single)
           if (next.port !== config.port || next.stateDir !== config.stateDir || next.codexBinary !== config.codexBinary || next.dshBinary !== config.dshBinary) throw new Error('Change startup fields in the config file and restart')
-          const nextSecrets: Secrets = { ...secrets, photon: { ...secrets.photon } }
+          const nextSecrets: Secrets = { ...secrets, telegramAccounts:Object.fromEntries(telegramAccounts(config,secrets).filter(a=>a.ownerUserId).map(a=>[a.botId,{ownerUserId:a.ownerUserId,username:a.username}])), telegram: { ...secrets.telegram }, photonAccounts:photonAccounts(config,secrets), photon: { ...secrets.photon } }
           if (!single && typeof input.cursorApiKey === 'string' && input.cursorApiKey.trim()) nextSecrets.cursorApiKey = input.cursorApiKey.trim()
           const photon = object(input.photon)
           for (const route of next.routes) {
             if (single && route.id !== input.id) continue
             for (const channel of routeChannels(route)) {
+              if (channel.kind === 'telegram') {
+                const token = object(input.telegram)[`${route.id}:${channel.id}`]
+                if (typeof token === 'string' && token.trim()) {
+                  if (!/^[1-9]\d*:[A-Za-z0-9_-]+$/.test(token.trim()) || token.trim().split(':')[0] !== channel.botId) throw new Error('Telegram token must match the bot ID')
+                  nextSecrets.telegram![channel.botId] = token.trim()
+                }
+                if (!nextSecrets.telegram?.[channel.botId]) throw new Error('Provide a Telegram Bot Token')
+                const account = nextSecrets.telegramAccounts?.[channel.botId]
+                if (account && account.ownerUserId !== channel.ownerUserId) throw new PluginError('invalid-command','请在消息渠道中修改 Telegram 允许操作的用户。')
+                continue
+              }
               if (channel.kind === 'weixin') {
                 if (!Object.hasOwn(secrets.weixin ?? {},channel.accountId)) throw new Error('Bind Weixin first')
                 continue
@@ -119,6 +153,7 @@ export async function startServer(configFile: string, initial: AppConfig, initia
               const priorChannel = prior && routeChannels(prior).find(c=>c.kind === 'imessage' && c.id === channel.id && c.projectId === channel.projectId)
               const inputSecret = photon[key] ?? (channel.id === 'imessage' ? photon[route.id] : undefined)
               if (typeof inputSecret === 'string' && inputSecret.trim()) nextSecrets.photon[key] = inputSecret.trim()
+              else if (nextSecrets.photonAccounts?.[channel.projectId]) nextSecrets.photon[key] = nextSecrets.photonAccounts[channel.projectId]!.secret
               else if (selectedSecrets.get(route.id)?.projectId === channel.projectId) nextSecrets.photon[key] = selectedSecrets.get(route.id)!.secret
               else if (prior && priorChannel) {
                 const old = secrets.photon[photonSecretKey(prior,priorChannel)]

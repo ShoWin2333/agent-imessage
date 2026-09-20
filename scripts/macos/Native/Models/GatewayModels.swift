@@ -57,3 +57,15 @@ func phaseName(_ value: String) -> String {
     ["listening":"已连接", "stopped":"已停止", "starting":"启动中", "connecting":"连接中", "failed":"连接失败",
      "retrying":"正在重试", "reconnecting":"重新连接中"][value] ?? value
 }
+
+/// Validate owner identity before a token-bearing network request is submitted.
+enum TelegramFormValidation {
+    static func ownerError(_ input: String) -> String? {
+        let value = input.trimmingCharacters(in:.whitespacesAndNewlines)
+        guard value.range(of:"^[1-9][0-9]{0,15}$",options:.regularExpression) != nil,
+              let number = UInt64(value), number <= 9_007_199_254_740_991 else {
+            return "请填写你本人的纯数字 Telegram 用户 ID，例如 123456789；不能填写 @用户名、手机号或 Bot ID。"
+        }
+        return nil
+    }
+}

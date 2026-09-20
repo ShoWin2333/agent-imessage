@@ -156,3 +156,15 @@ Native tests require a logged-in macOS desktop session.
 The browser UI and editor browser launcher have been removed. `npm start` runs the loopback API only; use the macOS app (`./script/build_and_run.sh` for development). Tasks persist independently of the 200-event diagnostic buffer, with separate execution and delivery states. Desktop controls stop tasks, resolve pending requests, and resend stored text results without repeating execution. Interrupted tasks never replay automatically after restart.
 
 Canonical workspaces admit one task at a time within the Gateway. Labels, avatars and schedules apply without restart; model parameters apply on the next task; changing workspace, permissions, bindings or credentials requires affected tasks to be stopped first. Scheduled tasks default to independent sessions, offer common time selectors, previews and a manual trial, and record skipped slots without catch-up.
+
+### Telegram channel
+
+All three transports use the same workflow: **消息渠道** manages accounts and credentials; **Agent → 项目配置 → 消息入口** manages bindings. Add and verify Telegram bots, scan WeChat accounts, or authorize Photon and prepare iMessage numbers on the channels page. This page shows the owning Agent and links to its settings but does not assign Agents.
+
+In Agent settings choose **绑定 iMessage / 微信 / Telegram**, select an existing account, and save. Occupied accounts show their owner and are disabled. Unbind and save in the old Agent before reassigning; credentials remain available. Adjust schedules before detaching a referenced channel. Disabled Agents still reserve their accounts. For Telegram, Bot ID and username are discovered from the Bot Token; send `/start` from the configured owner after binding.
+
+The adapter uses [Bot API long polling](https://core.telegram.org/bots/api#getupdates), requiring outbound access to `api.telegram.org` but no public port. Each bot belongs to exactly one channel, including disabled projects. Stop other pollers and remove any existing webhook before using it here.
+
+Only the configured owner's private text messages execute tasks. Groups, other users, bots and edited messages are ignored; incoming attachments and captions are not executed. Replies, typing indicators, chunked text, file delivery, isolated sessions, approval commands and scheduled tasks use the existing gateway. Audio is delivered as a file; incoming media and native voice delivery are not supported yet. Start a conversation with the bot before scheduling messages.
+
+Tokens are stored separately in `config.json.secrets.json` with mode `0600`, never in public status responses. Leave the token field blank to keep the saved credential. For manual configuration, add `{"id":"telegram","kind":"telegram","botId":"123456789","ownerUserId":"987654321"}` to a route's `channels`, and add `"telegram":{"123456789":"123456789:YOUR_BOT_TOKEN"}` to the secrets file, preserving other fields such as `photon`.

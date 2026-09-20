@@ -6,6 +6,8 @@ import SwiftUI
     @Published var connected = false
     @Published var busy = false
     @Published var notice = "正在连接本机服务…"
+    @Published var channelSettingsRequest: String?
+    func openChannelSettings(_ id: String) { channelSettingsRequest = id; selection = "project:" + id }
     @Published var selection: String? = nil
     private(set) var baseURL: URL
     private var stateTag: String?
@@ -83,7 +85,8 @@ import SwiftUI
         return result
     }
     @discardableResult func perform(_ path: String, _ body: JSONObject = [:]) async -> JSONObject? {
-        guard !busy, connected else { return nil }
+        guard !busy else { notice = "另一个操作正在进行，请稍后重试。"; return nil }
+        guard connected else { notice = "本机服务未连接，请先重新连接后重试。"; return nil }
         busy = true
         defer { busy = false }
         do {
@@ -93,9 +96,27 @@ import SwiftUI
             return result
         } catch { notice = (error as? GatewayFailure)?.message ?? "请求失败，请检查本机服务连接。"; return nil }
     }
+    func saveChannelAccount(_ path: String, _ input: JSONObject) async -> Bool {
+        var body = input
+        body["revision"] = state["revision"]
+        guard await perform(path, body) != nil else { return false }
+        // Keep unsaved project edits; their revision remains stale to prevent overwrites.
+        let hasEdits = drafts.contains { $0.dirty }
+        for route in state.object("config").objects("routes") {
+            if let index = drafts.firstIndex(where: { $0.id == route.text("id") }), !drafts[index].dirty {
+                drafts[index] = ProjectDraft(route)
+            }
+        }
+        if !hasEdits { editorRevision = state["revision"] as? Int }
+        notice = hasEdits ? "Bot 已保存。项目还有未保存的编辑，继续保存项目前请保留内容并重新载入配置。" : "渠道账号已保存；请在 Agent 的消息入口中管理绑定"
+        return true
+    }
     func save(_ draft: ProjectDraft) async {
         guard let revision = editorRevision else { return }
-        let body: JSONObject = ["revision":revision,"id":draft.id,"route":draft.value,"photon":draft.secrets]
+        let telegramKeys = Set(draft.channels.filter { $0.text("kind") == "telegram" }.map { draft.id + ":" + $0.text("id") })
+        let body: JSONObject = ["revision":revision,"id":draft.id,"route":draft.value,
+            "photon":draft.secrets.filter { !telegramKeys.contains($0.key) },
+            "telegram":draft.secrets.filter { telegramKeys.contains($0.key) }]
         if await perform("api/save-route",body) != nil {
             editorRevision = revision + 1
             draft.secrets = [:]; draft.dirty = false

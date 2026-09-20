@@ -13,3 +13,5 @@ export type { ChannelAdapter, ChannelMessage, ChannelConnection, ChannelFactory 
 export type { ChannelConfig } from './gateway/config.js'
 export { IMessageAdapter } from './channels/imessage.js'
 export { WeixinAdapter } from './channels/weixin.js'
+
+export { TelegramAdapter } from './channels/telegram.js'
