@@ -7,6 +7,7 @@ struct NativeProjectView: View {
     @State private var tab = "activity"
     @State private var models: [JSONObject] = []
     @State private var removeConfirmation = false
+    @State private var unrestrictedConfirmation = false
     @State private var chooseAvatar = false
     @State private var chooseDirectory = false
     var body: some View {
@@ -30,8 +31,11 @@ struct NativeProjectView: View {
         }
         .navigationTitle(draft.name)
         .onAppear { if draft.dirty && draft.value.text("cwd").isEmpty { tab = "config" } }
-        .confirmationDialog("移除项目将停止它的任务；保存移除操作也会重启其他路线。",isPresented:$removeConfirmation) {
+        .confirmationDialog("移除项目不会影响其他项目。若本项目正在执行，请先停止任务。",isPresented:$removeConfirmation) {
             Button("移除项目",role:.destructive) { Task { await store.remove(draft) } }
+        }
+        .confirmationDialog("完全访问会关闭 Cursor 沙箱，执行时不再请求审批。确认允许访问当前用户可访问的文件和网络？",isPresented:$unrestrictedConfirmation) {
+            Button("允许完全访问",role:.destructive) { draft.set("approvalPolicy","unrestricted") }
         }
         .fileImporter(isPresented:$chooseDirectory,allowedContentTypes:[.folder]) { result in
             if case .success(let url) = result { draft.set("cwd",url.path) }
@@ -64,7 +68,7 @@ struct NativeProjectView: View {
                 Picker("Agent",selection:Binding(get:{draft.value.text("backend","codex")},set:{ value in
                     draft.set("backend",value); draft.set("model",""); draft.set("effort","default"); draft.set("speed","default"); draft.set("approvalPolicy","default"); models = []
                 })) { Text("Codex").tag("codex"); Text("Cursor").tag("cursor"); Text("DSH").tag("dsh") }
-                Toggle("自动启动",isOn:Binding(get:{draft.value["enabled"] as? Bool ?? true},set:{draft.value["enabled"] = $0; draft.dirty = true}))
+                Toggle("随服务启用项目",isOn:Binding(get:{draft.value["enabled"] as? Bool ?? true},set:{draft.value["enabled"] = $0; draft.dirty = true}))
                     .disabled(draft.channels.isEmpty)
             }
             Section("模型与执行") {
@@ -83,13 +87,14 @@ struct NativeProjectView: View {
                         }
                     }
                 }
+                Text("只显示模型已确认支持的选项。未读取能力时使用后端默认值。").font(.caption).foregroundStyle(.secondary)
                 Picker("推理强度",selection:text("effort",fallback:"default")) {
-                    ForEach(parameterChoices("efforts",fallback:["none","off","minimal","low","medium","high","xhigh","max","ultra"]),id:\.self) { Text($0 == "default" ? "默认" : $0).tag($0) }
+                    ForEach(parameterChoices("efforts",fallback:[]),id:\.self) { Text(parameterLabel($0)).tag($0) }
                 }
                 Picker("速度",selection:text("speed",fallback:"default")) {
-                    ForEach(parameterChoices("speeds",fallback:["fast","standard"]),id:\.self) { Text($0 == "default" ? "默认" : $0).tag($0) }
+                    ForEach(parameterChoices("speeds",fallback:[]),id:\.self) { Text(parameterLabel($0)).tag($0) }
                 }
-                Picker("审批权限",selection:text("approvalPolicy",fallback:"default")) {
+                Picker("审批权限",selection:Binding(get:{draft.value.text("approvalPolicy","default")},set:{ if $0 == "unrestricted" { unrestrictedConfirmation = true } else { draft.set("approvalPolicy",$0) } })) {
                     ForEach(policies,id:\.0) { Text($0.1).tag($0.0) }
                 }
                 if draft.value.text("backend") == "cursor" {
@@ -108,7 +113,7 @@ struct NativeProjectView: View {
                     Spacer()
                     Button("移除项目",role:.destructive) { removeConfirmation = true }
                 }
-                Text("保存会取消此项目正在运行的任务并重启它的消息入口。").font(.caption).foregroundStyle(.secondary)
+                Text("名称、头像和计划立即生效；模型参数下次任务生效；目录、权限和入口变更请先停止任务。").font(.caption).foregroundStyle(.secondary)
             }
         }.formStyle(.grouped).disabled(store.busy || !store.connected)
     }
@@ -117,6 +122,12 @@ struct NativeProjectView: View {
         let choices = model.map { $0.objects(key).map { $0.text("value") } } ?? fallback
         let current = draft.value.text(key == "efforts" ? "effort" : "speed","default")
         return ["default"] + Array(Set(choices + (current == "default" ? [] : [current]))).sorted()
+    }
+    private func parameterLabel(_ value: String) -> String {
+        if value == "default" { return "默认" }
+        let model = models.first { $0.text("id") == draft.value.text("model") }
+        let known = (model?.objects("efforts") ?? []) + (model?.objects("speeds") ?? [])
+        return known.contains { $0.text("value") == value } ? value : value + "（已保存，能力未确认）"
     }
     private var policies: [(String,String)] {
         switch draft.value.text("backend","codex") {

@@ -31,12 +31,17 @@ it('isolates failing routes, owns transport lifecycle and releases state locks',
   await gateway.stop();expect(backend.close).toHaveBeenCalledTimes(1)
   await gateway.start();expect(gateway.snapshot()[0]?.phase).toBe('listening')
 })
-it('serves the standalone UI and enforces loopback Host, Origin and CSRF before mutations',async()=>{
+it('serves the native API and enforces loopback Host, Origin and CSRF before mutations',async()=>{
   const dir=await fixture(),file=join(dir,'config.json'),config=appSchema.parse({port:0,stateDir:dir})
   const gateway=new Gateway(config,{photon:{}})
   const server=await startServer(file,config,{photon:{}},gateway);cleanup.push(()=>server.close());cleanup.push(()=>gateway.stop())
-  expect((await fetch(server.url)).status).toBe(200)
-  const state=await (await fetch(server.url+'/api/state')).json() as {csrf:string}
+  expect((await fetch(server.url)).status).toBe(404)
+  const firstState=await fetch(server.url+'/api/state')
+  const state=await firstState.json() as {csrf:string}
+  const unchanged=await fetch(server.url+'/api/state',{headers:{'if-none-match':firstState.headers.get('etag')!}})
+  expect(unchanged.status).toBe(304)
+  expect(await unchanged.text()).toBe('')
+  for (const asset of ['/app.js','/style.css','/brand.png']) expect((await fetch(server.url+asset)).status).toBe(404)
   expect(await new Promise<number | undefined>((resolve,reject)=>{get(server.url+'/api/state',{headers:{Host:'attacker.test'}},response=>{response.resume();resolve(response.statusCode)}).on('error',reject)})).toBe(403)
   expect((await fetch(server.url+'/api/stop',{method:'POST',headers:{origin:'https://evil.test'}})).status).toBe(403)
   const headers={origin:server.url,'content-type':'application/json','x-agent-token':state.csrf}
@@ -97,9 +102,9 @@ it('applies one project without closing another backend or changing its configur
   const next={...config.routes[0],label:'Updated project'}
   const response=await fetch(server.url+'/api/save-route',{method:'POST',headers:{origin:server.url,'content-type':'application/json','x-agent-token':state.csrf},body:JSON.stringify({revision:0,id:'one',route:next,photon:{two:'must-not-change'}})})
   expect(response.status).toBe(200)
-  expect(backends[0]!.close).toHaveBeenCalledTimes(1)
+  expect(backends[0]!.close).not.toHaveBeenCalled()
   expect(backends[1]!.close).not.toHaveBeenCalled()
-  expect(backends).toHaveLength(3)
+  expect(backends).toHaveLength(2)
   const {readFile}=await import('node:fs/promises')
   const saved=JSON.parse(await readFile(file,'utf8'))
   expect(saved.routes[1]).toEqual(config.routes[1])

@@ -58,7 +58,12 @@ struct NativeSettingsView: View {
                 Text(store.state["hasCursorKey"] as? Bool == true ? "已配置 API Key；留空保留现有凭据。" : "尚未配置，也可使用 CURSOR_API_KEY 环境变量。")
                 SecureField("API Key",text:$apiKey)
                 Button("保存凭据") { Task { if await store.saveKey(apiKey) { apiKey = "" } } }.disabled(apiKey.isEmpty)
-                Text("保存会重启全部路线并取消当前任务。密钥保存在本机私有配置中，不会回显。").font(.caption).foregroundStyle(.secondary)
+                Text("仅更新 Cursor 项目；如有 Cursor 任务运行，请先停止。密钥保存在本机私有配置中，不会回显。").font(.caption).foregroundStyle(.secondary)
+            }
+            Section("常驻与登录启动") {
+                Text("关闭窗口后 App 继续运行；退出 App 后，自有服务停止。登录启动是独立设置。")
+                Link("打开系统登录项设置",destination:URL(string:"x-apple.systempreferences:com.apple.LoginItems-Settings.extension")!)
+                Text("在系统设置中将 Agent iMessage 加入登录时打开。本 App 不会自动注册登录项。").font(.caption).foregroundStyle(.secondary)
             }
             Section("本机服务") {
                 HStack {
@@ -67,7 +72,7 @@ struct NativeSettingsView: View {
                 }
             }
             Section { Text(store.notice).font(.caption).textSelection(.enabled) }
-        }.formStyle(.grouped).frame(width:540,height:380).disabled(store.busy || !store.connected)
+        }.formStyle(.grouped).frame(width:540,height:540).disabled(store.busy || !store.connected)
         .confirmationDialog("停止全部路线会取消正在运行的任务。",isPresented:$stopConfirmation) {
             Button("停止全部路线",role:.destructive) { Task { await store.perform("api/stop") } }
         }

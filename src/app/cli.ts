@@ -8,7 +8,7 @@ import { service } from './service.js'
 async function main(): Promise<void> {
   const [command = 'start', arg, extra, credential] = process.argv.slice(2)
   if (command === '--help' || command === 'help') {
-    console.log('Agent iMessage Gateway\n  start [config.json]       Start local Web UI and enabled routes\n  import SOURCE DEST [DSH_CREDENTIAL_EXPORT]  Migrate without modifying source\n  service install|remove [config.json]       macOS background service\nNo Cursor Desktop, Codex Desktop or DSH Web required.')
+    console.log('Agent iMessage Gateway\n  start [config.json]       Start local native-app API and enabled routes\n  import SOURCE DEST [DSH_CREDENTIAL_EXPORT]  Migrate without modifying source\n  service install|remove [config.json]       macOS background service\nNo Cursor Desktop, Codex Desktop or DSH Web required.')
     return
   }
   if (command === 'import') { if (!arg || !extra) throw new Error('Source and destination required'); await importConfig(resolve(arg), resolve(extra), credential && resolve(credential)); console.log('Configuration migrated. Source unchanged.'); return }

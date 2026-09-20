@@ -1,3 +1,4 @@
+import { PluginError } from '../errors.js'
 import type { ScheduledTask } from './cron.js'
 import { failureText } from '../backends/failure.js'
 import { gatewayTools as tools } from './tools.js'
@@ -9,10 +10,13 @@ import type { ChannelMessage } from '../channels/types.js'
 import type { RouteConfig } from './config.js'
 import { object, SessionInUseError, type ObjectValue } from '../backends/jsonrpc.js'
 import type { Backend, BackendEvent, BackendRequest } from '../backends/types.js'
-import type { RouteState } from './state.js'
+import type { TaskRecord, RouteState } from './state.js'
 
 interface Store { state: RouteState; save(): Promise<void> }
 interface Active {
+  task: TaskRecord
+  release(): void
+  sessionId?: string
   channel: ChannelMessage
   turnId?: string
   startedAt: number
@@ -27,6 +31,8 @@ interface Active {
   changes: Map<string, unknown>
 }
 interface Pending {
+  details: string
+  expiresAt: number
   kind: 'approval' | 'question'
   resolve(value: unknown): void
   cancel(): void
@@ -37,9 +43,12 @@ interface Pending {
 /** One route owns one thread and at most one turn. Busy prompts are rejected, never silently queued. */
 export class GatewayRouter {
   private active: Active | undefined
+  private nextRoute: RouteConfig | undefined
+  updateModel(route: RouteConfig): void { this.nextRoute = {...this.route, model:route.model, effort:route.effort, speed:route.speed} as RouteConfig }
   private readonly activity: Array<{ sequence: number; at: number; messageId?: string; stage: string; text?: string; itemId?: string }> = []
   private activitySequence = 0
   private historyTimer: ReturnType<typeof setTimeout> | undefined
+  private readonly deliveries = new Set<Promise<void>>()
   private outgoing: Promise<void> = Promise.resolve()
   private syncHistory(): void { this.store.state.activity = this.activity.map(entry => ({...entry})) }
   private persistHistory(): void {
@@ -72,29 +81,30 @@ export class GatewayRouter {
   private incoming: Promise<void> = Promise.resolve()
   private events: Promise<void> = Promise.resolve()
 
-  constructor(private readonly backend: Backend, private readonly route: RouteConfig, private readonly store: Store, private readonly interactionTimeoutMs = 600_000, private readonly waitNoticeMs = 20_000) {
+  constructor(private readonly backend: Backend, private route: RouteConfig, private readonly store: Store, private readonly interactionTimeoutMs = 600_000, private readonly waitNoticeMs = 20_000, private readonly acquire: () => (() => void) | undefined = () => () => {}) {
     this.activity.push(...(store.state.activity ?? []).slice(-200))
     this.activitySequence = Math.max(0, ...this.activity.map(entry => entry.sequence))
     backend.onEvent = event => {
       this.events = this.events.then(() => this.notification(event)).catch(() => { this.record('error', this.active?.channel, '处理 Agent 事件失败。'); this.fail() })
     }
     backend.onRequest = request => this.serverRequest(request)
-    backend.onClose = () => { if (this.active) { this.record('failed', this.active.channel, `后端连接已关闭。最后阶段：${this.active.phase}；总耗时 ${this.duration(this.active.startedAt)}。`); this.lastTurnStatus = 'failed' }; this.record('backend-closed', this.active?.channel); this.closed = true; this.cancelPending(); this.active?.abort.abort(); this.active = undefined }
+    backend.onClose = () => { if (this.active) { this.record('failed', this.active.channel, `后端连接已关闭。最后阶段：${this.active.phase}；总耗时 ${this.duration(this.active.startedAt)}。`); this.lastTurnStatus = 'failed' }; this.record('backend-closed', this.active?.channel); this.closed = true; this.cancelPending(); this.endActive('failed'); this.active = undefined }
   }
 
   private get agentName(): string { return this.route.backend === 'cursor' ? 'Cursor' : this.route.backend === 'dsh' ? 'DSH' : 'Codex' }
 
-  snapshot() { return { busy: Boolean(this.active), current: this.active ? {messageId:this.active.channel.id, startedAt:this.active.startedAt, phase:this.active.phase, phaseAt:this.active.phaseAt, runId:this.active.runId} : undefined, sessionId: this.store.state.threadId, pending: this.pending.size, closed: this.closed, receivedCount: this.receivedCount, lastActivityAt: this.lastActivityAt, lastTurnStatus: this.lastTurnStatus, activity: this.activity.map(entry => ({...entry})) } }
+  snapshot() { return { tasks: this.store.state.tasks ?? [], requests: [...this.pending].map(([id,p]) => ({id,kind:p.kind,details:p.details,expiresAt:p.expiresAt,questions:p.questions})), busy: Boolean(this.active), current: this.active ? {taskId:this.active.task.id, messageId:this.active.channel.id, startedAt:this.active.startedAt, phase:this.active.phase, phaseAt:this.active.phaseAt, runId:this.active.runId} : undefined, sessionId: this.store.state.threadId, pending: this.pending.size, closed: this.closed, receivedCount: this.receivedCount, lastActivityAt: this.lastActivityAt, lastTurnStatus: this.lastTurnStatus, activity: this.activity.map(entry => ({...entry})) } }
 
   setConnected(value: boolean): void {
     if (this.connected !== value) this.record(value ? 'connected' : 'disconnected', this.active?.channel)
     this.connected = value
     if (!value && this.active) {
+      this.active.task.reason = '消息入口断开，已请求中止执行。'
       this.active.stopping = true
       this.active.abort.abort()
       this.cancelPending()
       const turnId = this.active.turnId
-      if (turnId) void this.backend.cancel(this.store.state.threadId!, turnId).catch(() => { this.record('error', this.active?.channel, '处理 Agent 事件失败。'); this.fail() })
+      if (turnId) void this.backend.cancel(this.active.sessionId!, turnId).catch(() => { this.record('error', this.active?.channel, '处理 Agent 事件失败。'); this.fail() })
     }
   }
 
@@ -108,15 +118,15 @@ export class GatewayRouter {
     const marker = {id} as ChannelMessage
     this.record('scheduled', marker, `定时任务：${task.name}\n${task.prompt}`)
     if (projectBusy || this.active || this.closed || !this.connected) {
-      this.record('schedule-skipped', marker, '本次跳过：项目有任务运行，或消息入口尚未连接。不会排队补跑。'); return
+      this.record('schedule-skipped', marker, projectBusy || this.active ? '本次跳过：项目有任务运行，不会排队补跑。' : this.closed ? '本次跳过：执行后端已关闭，不会补跑。' : '本次跳过：消息入口尚未连接，不会补跑。'); return
     }
     let channel: ChannelMessage
     try { channel = await getMessage() }
     catch { this.record('schedule-skipped', marker, '本次跳过：无法建立主动回复通道。微信请先给机器人发一条消息；也请检查入口连接。'); return }
-    await this.receive(channel, true)
+    await this.receive(channel, true, task.context !== 'shared')
   }
 
-  receive(channel: ChannelMessage, scheduled = false): Promise<void> {
+  receive(channel: ChannelMessage, scheduled = false, isolated = false): Promise<void> {
     if (!scheduled) this.record('received', channel, channel.text)
     const operation = this.incoming.then(async () => {
       if (this.closed || !this.connected) { this.record('unavailable', channel); return }
@@ -127,12 +137,12 @@ export class GatewayRouter {
       await this.store.save()
       this.receivedCount++
       this.lastActivityAt = Date.now()
-      await this.handle(channel, scheduled)
+      await this.handle(channel, scheduled, isolated)
     })
     this.incoming = operation.catch(async error => {
       this.record('error', channel, '处理失败，请检查本机后端登录、连接和配置。')
       if (error instanceof SessionInUseError && !this.active?.turnId) {
-        this.active?.abort.abort(); this.active = undefined
+        this.endActive('failed'); this.active = undefined
         this.ready = false
         await this.send(channel, 'This Codex session is in use by another client. Send /new to start a separate Gateway session, or release the session in the other client and retry.').catch(() => {})
         return
@@ -144,17 +154,18 @@ export class GatewayRouter {
     return this.incoming
   }
 
-  async close(): Promise<void> { this.record('stopped', this.active?.channel); this.fail(); await this.closing; clearTimeout(this.historyTimer); this.historyTimer = undefined; this.syncHistory(); await this.store.save() }
+  async close(): Promise<void> { this.record('stopped', this.active?.channel); this.fail(); await this.closing; await this.events; await Promise.allSettled(this.deliveries); clearTimeout(this.historyTimer); this.historyTimer = undefined; this.syncHistory(); await this.store.save() }
 
   private fail(): void {
     this.closed = true
     this.cancelPending()
-    this.active?.abort.abort()
+    const active = this.active
+    this.endActive('interrupted', false)
     this.active = undefined
-    this.closing ??= this.backend.close().catch(() => {})
+    this.closing ??= this.backend.close().catch(() => {}).finally(() => active?.release())
   }
 
-  private async handle(channel: ChannelMessage, scheduled = false): Promise<void> {
+  private async handle(channel: ChannelMessage, scheduled = false, isolated = false): Promise<void> {
     const text = channel.text.trim()
     if (!text) return
     const [inputCommand, ...args] = text.split(/\s+/)
@@ -173,7 +184,7 @@ export class GatewayRouter {
       active.stopping = true
       active.abort.abort()
       this.cancelPending()
-      if (active.turnId) await this.backend.cancel(this.store.state.threadId!, active.turnId)
+      if (active.turnId) await this.backend.cancel(active.sessionId!, active.turnId)
       await this.send(channel, `Stop requested. Waiting for ${this.agentName} to finish interrupting.`)
       return
     }
@@ -204,9 +215,16 @@ export class GatewayRouter {
       return
     }
     if (!scheduled && text.startsWith('/') && !text.startsWith('//')) { await this.send(channel, 'Unknown command. Send /help.'); return }
+    if (this.nextRoute) { this.route = this.nextRoute; this.nextRoute = undefined; this.ready = false }
+    const release = this.acquire()
+    if (!release) { this.record('busy', channel, '该工作目录正由另一个任务使用。'); await this.send(channel, '该工作目录正由另一个任务使用，请稍后重试。'); return }
     const startedAt = Date.now()
-    const active: Active = { channel, startedAt, phase:'正在建立会话', phaseAt:startedAt, stopping: false, abort: new AbortController(), answers: new Map(), changes: new Map() }
+    const task: TaskRecord = {id:randomUUID(),messageId:channel.id,input:channel.text,startedAt,backend:this.route.backend ?? 'codex',cwd:this.route.cwd,...(this.route.effort ? {effort:this.route.effort} : {}),...(this.route.speed ? {speed:this.route.speed} : {}),...(this.route.approvalPolicy ? {approvalPolicy:this.route.approvalPolicy} : {}),...(this.route.model ? {model:this.route.model} : {}),execution:'running',delivery:'pending'}
+    this.store.state.tasks ??= []
+    this.store.state.tasks.push(task)
+    const active: Active = { task, release, channel, startedAt, phase:'正在建立会话', phaseAt:startedAt, stopping: false, abort: new AbortController(), answers: new Map(), changes: new Map() }
     this.active = active
+    await this.store.save()
     this.record('opening-session', channel)
     const notice = setTimeout(() => {
       void this.send(channel, `已收到任务，${this.agentName} 尚未完成。当前：${active.phase}。可发 /status 查看进度，或 /stop 取消。`, false,
@@ -214,12 +232,14 @@ export class GatewayRouter {
     }, this.waitNoticeMs)
     notice.unref()
     active.abort.signal.addEventListener('abort', () => clearTimeout(notice), {once:true})
-    await this.ensureThread(channel)
+    active.sessionId = await this.ensureThread(channel,isolated)
     if (this.active !== active || this.closed || !this.connected) {
       active.abort.abort()
-      if (this.active === active) { this.record('interrupted', channel, '建立会话期间连接已断开，任务未提交。'); this.active = undefined }
+      if (this.active === active) { this.record('interrupted', channel, '建立会话期间连接已断开，任务未提交。'); this.endActive('interrupted'); this.active = undefined }
       return
     }
+    task.sessionId = active.sessionId
+    await this.store.save()
     this.record('session-ready', channel, `建立／恢复会话耗时 ${this.duration(startedAt)}`)
     this.progress(active, '正在提交任务')
     void channel.responding(() => new Promise<void>(resolve => {
@@ -227,17 +247,17 @@ export class GatewayRouter {
       else active.abort.signal.addEventListener('abort', () => resolve(), { once: true })
     })).catch(() => {})
     this.record('submitting', channel)
-    const id = await this.backend.startTurn(this.store.state.threadId!, !scheduled && text.startsWith('//') ? text.slice(1) : text)
+    const id = await this.backend.startTurn(active.sessionId!, !scheduled && text.startsWith('//') ? text.slice(1) : text)
     if (this.active !== active) return
     if (active.turnId && active.turnId !== id) throw new Error('Turn ownership mismatch')
     if (!active.turnId) this.record('accepted', channel)
     active.turnId = id
-    if (active.stopping || !this.connected) await this.backend.cancel(this.store.state.threadId!, id)
+    if (active.stopping || !this.connected) await this.backend.cancel(active.sessionId!, id)
   }
 
-  private async ensureThread(channel: ChannelMessage): Promise<void> {
-    if (this.ready) return
-    const threadId = this.store.state.threadId
+  private async ensureThread(channel: ChannelMessage, isolated: boolean): Promise<string> {
+    if (this.ready && !isolated) return this.store.state.threadId!
+    const threadId = isolated ? undefined : this.store.state.threadId
     const thread = await this.backend.openSession({
       ...(threadId ? { id: threadId } : {}), tools:channel.nativeVoice === false ? tools.filter(t=>t.name !== 'send_imessage_voice') : tools, cwd: this.route.cwd,
       ...(this.route.approvalPolicy ? {approvalPolicy:this.route.approvalPolicy} : {}),
@@ -246,20 +266,22 @@ export class GatewayRouter {
       ...(this.route.effort && this.route.effort !== 'default' ? { effort: this.route.effort } : {}),
     })
     if (typeof thread.id !== 'string' || thread.cwd !== this.route.cwd || (threadId && thread.id !== threadId)) throw new Error('Thread workspace mismatch')
+    if (isolated) { this.ready = false; return thread.id }
     this.store.state.threadId = thread.id
     this.store.state.sessions = [...new Set([...(this.store.state.sessions ?? []), thread.id])].slice(-100)
     await this.store.save()
     this.ready = true
+    return thread.id
   }
 
   private owns(params: ObjectValue): Active | undefined {
     const active = this.active
-    if (!active || !active.turnId || params.threadId !== this.store.state.threadId || params.turnId !== active.turnId) return undefined
+    if (!active || !active.turnId || params.threadId !== active.sessionId || params.turnId !== active.turnId) return undefined
     return active
   }
 
   private async notification(event: BackendEvent): Promise<void> {
-    if (event.type === 'started' && this.active && event.sessionId === this.store.state.threadId) {
+    if (event.type === 'started' && this.active && event.sessionId === this.active.sessionId) {
       if (this.active.turnId && this.active.turnId !== event.turnId) { this.fail(); return }
       this.record('started', this.active.channel, '本地适配器已接单；尚不代表模型开始输出。')
       this.progress(this.active, '等待后端活动')
@@ -273,12 +295,11 @@ export class GatewayRouter {
       this.lastTurnStatus = event.status
       this.lastActivityAt = Date.now()
       this.cancelPending()
-      active.abort.abort()
+      active.task.result = active.stopping || event.status === 'interrupted' ? 'Task stopped.' : event.status === 'failed' ? `${this.agentName} 任务失败。${failureText[event.failure ?? 'unknown']}` : [...active.answers.values()].join('\n\n') || 'Task completed without a text response.'
+      this.endActive(event.status)
       this.active = undefined
-      if (!this.connected) return
-      if (active.stopping || event.status === 'interrupted') await this.send(active.channel, 'Task stopped.')
-      else if (event.status === 'failed') await this.send(active.channel, `${this.agentName} 任务失败（${this.duration(active.startedAt)}）。${failureText[event.failure ?? 'unknown']}`)
-      else await this.send(active.channel, [...active.answers.values()].join('\n\n') || 'Task completed without a text response.')
+      await this.store.save()
+      if (this.connected) void this.deliver(active.task, active.channel).catch(() => this.record('send-failed',active.channel,'结果已保存，但回传状态无法落盘；请检查本机存储。'))
       return
     }
     if (active.stopping || !this.connected) return
@@ -361,14 +382,15 @@ export class GatewayRouter {
         : questions.map(q => `${q.id}: ${q.question}\n${JSON.stringify(q.options ?? [])}`).join('\n')
     if (details.length > 2600) throw new Error('Request too large for safe review over the channel')
     if (approval && Array.isArray(params.availableDecisions) && !params.availableDecisions.includes('accept')) throw new Error('Single-action approval unavailable')
-    const id = randomUUID().slice(0, 8)
+    const id = randomUUID()
     this.progress(active, approval ? '等待你的审批' : '等待你的回答')
     this.record(approval ? 'waiting-approval' : 'waiting-answer', active.channel)
     return new Promise((resolve, reject) => {
-      const finish = (value: unknown) => { this.record('interaction-resolved', active.channel); clearTimeout(timer); this.pending.delete(id); this.progress(active, '等待后端继续执行'); resolve(value) }
-      const cancel = () => { this.record('interaction-cancelled', active.channel); clearTimeout(timer); this.pending.delete(id); if (approval) resolve({ decision: 'cancel' }); else reject(new Error('Question cancelled')) }
+      let settled = false
+      const finish = (value: unknown) => { if (settled) return; settled = true; this.record('interaction-resolved', active.channel); clearTimeout(timer); this.pending.delete(id); this.progress(active, '等待后端继续执行'); resolve(value) }
+      const cancel = () => { if (settled) return; settled = true; this.record('interaction-cancelled', active.channel); clearTimeout(timer); this.pending.delete(id); if (approval) resolve({ decision: 'cancel' }); else reject(new Error('Question cancelled')) }
       const timer = setTimeout(cancel, this.interactionTimeoutMs)
-      this.pending.set(id, { kind: approval ? 'approval' : 'question', resolve: finish, cancel, questions: questions.map(q => String(q.id)) })
+      this.pending.set(id, { details, expiresAt:Date.now() + this.interactionTimeoutMs, kind: approval ? 'approval' : 'question', resolve: finish, cancel, questions: questions.map(q => String(q.id)) })
       const hint = approval ? `/approve ${id} or /deny ${id}` : `/answer ${id} {"question-id":"answer"}`
       void this.send(active.channel, `${approval ? 'Approval requested' : 'Input requested'}\n${details}\n${hint}\nExpires in ${Math.ceil(this.interactionTimeoutMs / 60000)} minutes.`, true).catch(cancel)
     })
@@ -389,6 +411,41 @@ export class GatewayRouter {
     await this.send(channel, `Response delivered to ${this.agentName}.`)
   }
 
+  private endActive(status: TaskRecord['execution'], release = true): void {
+    if (!this.active) return
+    this.active.task.execution = status
+    this.active.task.finishedAt = Date.now()
+    this.active.abort.abort(); if (release) this.active.release()
+    void this.store.save().catch(() => {})
+  }
+  deliver(task: TaskRecord, channel: ChannelMessage): Promise<void> {
+    const work = this.deliverResult(task,channel)
+    this.deliveries.add(work)
+    void work.then(() => this.deliveries.delete(work), () => this.deliveries.delete(work))
+    return work
+  }
+  private async deliverResult(task: TaskRecord, channel: ChannelMessage): Promise<void> {
+    if (!task.result || task.delivery === 'sending' || task.delivery === 'sent') throw new PluginError('invalid-command','结果尚未生成、正在发送或已发送。')
+    task.delivery = 'sending'
+    await this.store.save()
+    try { await this.send(channel, task.result); task.delivery = 'sent' }
+    catch { task.delivery = 'uncertain' }
+    await this.store.save()
+  }
+  async control(taskId: string, action: string, requestId?: string, answers?: Record<string,string>): Promise<void> {
+    const active = this.active
+    if (!active || active.task.id !== taskId || active.stopping) throw new PluginError('request-not-found','任务已结束或已请求停止，请刷新后重试。')
+    if (action === 'stop') {
+      active.stopping = true; active.abort.abort(); this.cancelPending()
+      if (active.turnId) await this.backend.cancel(active.sessionId!,active.turnId)
+      return
+    }
+    const pending = this.pending.get(requestId ?? '')
+    if (!pending || pending.expiresAt <= Date.now()) throw new PluginError('request-not-found','请求已过期或已在另一端处理。')
+    if (pending.kind === 'approval' && ['approve','deny'].includes(action)) pending.resolve({decision:action === 'approve' ? 'accept' : 'decline'})
+    else if (pending.kind === 'question' && action === 'answer' && answers && Object.keys(answers).length === pending.questions.length && pending.questions.every(id => typeof answers[id] === 'string' && answers[id]!.trim())) pending.resolve({answers:Object.fromEntries(pending.questions.map(id => [id,{answers:[answers[id]]}]))})
+    else throw new PluginError('invalid-command','请为每个问题提供回答。')
+  }
   private cancelPending(): void { for (const entry of [...this.pending.values()]) entry.cancel() }
   private send(channel: ChannelMessage, text: string, raw = false, guard: () => boolean = () => true): Promise<void> {
     const work = this.outgoing.then(async () => { if (guard()) await this.sendNow(channel, text, raw) })

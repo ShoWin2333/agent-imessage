@@ -182,7 +182,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let viewItem = NSMenuItem(); viewItem.title = "显示"; menu.addItem(viewItem)
         let view = NSMenu(title: "显示"); viewItem.submenu = view
         view.addItem(withTitle: "重新连接", action: #selector(reconnect), keyEquivalent: "r").target = self
-        view.addItem(withTitle: "在浏览器中打开", action: #selector(openBrowser), keyEquivalent: "").target = self
         let windowItem = NSMenuItem(); windowItem.title = "窗口"; menu.addItem(windowItem)
         let windows = NSMenu(title: "窗口"); windowItem.submenu = windows; NSApp.windowsMenu = windows
         windows.addItem(withTitle: "最小化", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
@@ -290,7 +289,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
     @objc func reconnect() { startService() }
-    @objc func openBrowser() { NSWorkspace.shared.open(url) }
     func poll(_ remaining: Int, generation: Int) {
         guard !closing && generation == pollGeneration else { return }
         var request = URLRequest(url: url.appendingPathComponent("api/state"))

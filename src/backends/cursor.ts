@@ -43,7 +43,7 @@ export class CursorBackend extends BaseBackend {
     }
     const opts: AgentOptions = {
       apiKey: this.apiKey,
-      ...(this.route.model ? { model: modelSelection(this.route.model, this.route.effort, this.route.speed) } : {}),
+      ...(options.model ? { model: modelSelection(options.model, options.effort, options.speed) } : {}),
       ...(this.route.cursorMode === 'ask' ? { tools: [] } : {}),
       local: { cwd: this.route.cwd, settingSources: this.route.cursorSettings === 'none' ? [] : this.route.cursorSettings === 'project-user' ? ['project', 'user'] : ['project'], sandboxOptions: { enabled: this.route.approvalPolicy !== 'unrestricted' }, autoReview: this.route.approvalPolicy === 'auto-review', customTools },
     }

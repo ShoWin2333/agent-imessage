@@ -7,7 +7,7 @@ final class MockGatewayProtocol: URLProtocol {
     override func startLoading() {
         do {
             let (status, value) = try Self.handler(request)
-            let response = HTTPURLResponse(url:request.url!,statusCode:status,httpVersion:nil,headerFields:["Content-Type":"application/json"])!
+            let response = HTTPURLResponse(url:request.url!,statusCode:status,httpVersion:nil,headerFields:["Content-Type":"application/json","ETag":"test-tag"])!
             client?.urlProtocol(self,didReceive:response,cacheStoragePolicy:.notAllowed)
             client?.urlProtocol(self,didLoad:try JSONSerialization.data(withJSONObject:value))
             client?.urlProtocolDidFinishLoading(self)
@@ -80,5 +80,13 @@ final class MockGatewayProtocol: URLProtocol {
         draft.setChannels([])
         precondition(draft.value["enabled"] as? Bool == false)
         print("PASS: channel migration preserves legacy identity; removing all channels disables route")
+        MockGatewayProtocol.handler = { request in
+            precondition(request.value(forHTTPHeaderField:"If-None-Match") == "test-tag")
+            return (304,[:])
+        }
+        await store.refresh()
+        precondition(store.connected && store.drafts[0] === draft && draft.dirty)
+        precondition(store.activities("one").first?.value.text("text") == "hello")
+        print("PASS: unchanged responses preserve state and unsaved drafts without decoding a new body")
     }
 }

@@ -44,8 +44,8 @@ try {
   }
   await writeFile(config, JSON.stringify({port:0, stateDir:join(home,'state'), routes:[]}), {mode:0o600})
   let url = await boot()
-  assert.equal((await fetch(url)).status, 200)
-  for (const name of ['app.js', 'style.css', 'brand.png']) assert.equal((await fetch(`${url}/${name}`)).status, 200)
+  assert.equal((await fetch(url)).status, 404)
+  for (const name of ['app.js', 'style.css', 'brand.png']) assert.equal((await fetch(`${url}/${name}`)).status, 404)
   let state = await (await fetch(`${url}/api/state`)).json()
   assert.deepEqual(state.config.routes, [])
   const snapshot = await readFile(config, 'utf8')
@@ -61,7 +61,7 @@ try {
   const created = JSON.parse(await readFile(join(home, '.config/agent-imessage/config.json'),'utf8'))
   assert.deepEqual(created.routes, [])
   assert.equal(created.stateDir, join(home,'.local/state/agent-imessage'))
-  console.log('PASS: relocated signed bundle, minimal PATH, isolated HOME, UI assets, first-run config and restart persistence.')
+  console.log('PASS: relocated signed bundle, minimal PATH, isolated HOME, native-only API, first-run config and restart persistence.')
 } finally {
   if (child && child.exitCode === null) {
     await new Promise(resolve => {child.once('exit',resolve); child.kill('SIGKILL')})

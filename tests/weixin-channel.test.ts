@@ -110,9 +110,9 @@ it('preserves legacy iMessage state when adding Weixin and isolates approvals be
     return {messages:{async *[Symbol.asyncIterator](){yield {id:'i1',text:'imessage task',send:imessageSend,sendFile:async()=>{},sendVoice:async()=>{},responding:fn=>fn()} as ChannelMessage;await done}},stop:async()=>end()}
   })
   cleanup.push(()=>gateway.stop());await gateway.start()
-  await expect.poll(()=>backends.map(b=>b.startTurn.mock.calls.length)).toEqual([1,1])
+  await expect.poll(()=>backends.map(b=>b.startTurn.mock.calls.length)).toEqual([1,0])
   expect(backends[0]!.openSession.mock.calls[0]![0].id).toBe('legacy-session')
-  expect(backends[1]!.openSession.mock.calls[0]![0].id).toBeUndefined()
+  expect(backends[1]!.openSession).not.toHaveBeenCalled()
   const approval=backends[0]!.onRequest({kind:'approval',sessionId:'legacy-session',turnId:'turn',payload:{details:{command:'test'}}})
   await expect.poll(()=>imessageSend.mock.calls.at(-1)?.[0]).toContain('/approve')
   const id=imessageSend.mock.calls.at(-1)![0].match(/\/approve ([\w-]+)/)![1]

@@ -1,7 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
-import { existsSync } from 'node:fs'
-import { readFile } from 'node:fs/promises'
-import { randomBytes, timingSafeEqual } from 'node:crypto'
+import { randomBytes, timingSafeEqual, createHash } from 'node:crypto'
 import { object } from '../backends/jsonrpc.js'
 import { atomicJson, validateConfig, type AppConfig, type Secrets } from './config.js'
 import { PluginError } from '../errors.js'
@@ -9,10 +7,9 @@ import { listModels } from '../backends/catalog.js'
 import { WeixinLogin } from './weixin.js'
 import { WeixinError } from '../channels/weixin-api.js'
 import { routeChannels, photonSecretKey } from '../gateway/config.js'
+import { nextRuns, scheduleSchema } from '../gateway/cron.js'
 import { PhotonAccount } from './photon.js'
 import type { Gateway } from '../gateway/app.js'
-
-const publicDir = existsSync(new URL('../../public/index.html', import.meta.url)) ? new URL('../../public/', import.meta.url) : new URL('../../../public/', import.meta.url)
 
 async function body(req: IncomingMessage): Promise<unknown> {
   let value = ''
@@ -31,10 +28,8 @@ export async function startServer(configFile: string, initial: AppConfig, initia
   const weixinLogin = new WeixinLogin(credential => {
     const work = mutation.then(async () => {
       const next = {...secrets,weixin:{...secrets.weixin,[credential.accountId]:credential}}
-      await atomicJson(`${configFile}.secrets.json`,next)
+      await gateway.replace(config,next,() => atomicJson(`${configFile}.secrets.json`,next))
       secrets = next
-      // Rebinding an existing account refreshes its runtime without restarting other projects.
-      for (const route of config.routes) if (routeChannels(route).some(c => c.kind === 'weixin' && c.accountId === credential.accountId)) await gateway.replaceRoute(route.id,config,secrets)
     })
     mutation = work.catch(() => {})
     return work
@@ -47,14 +42,15 @@ export async function startServer(configFile: string, initial: AppConfig, initia
       res.setHeader('x-content-type-options', 'nosniff')
       res.setHeader('referrer-policy', 'no-referrer')
       res.setHeader('content-security-policy', "default-src 'self'; img-src 'self' data:; frame-ancestors 'none'; form-action 'self'")
-      if (req.method === 'GET' && (req.url === '/' || req.url === '/app.js' || req.url === '/style.css' || req.url === '/brand.png')) {
-        const name = req.url === '/' ? 'index.html' : req.url.slice(1)
-        const content = await readFile(new URL(name, publicDir))
-        res.writeHead(200, { 'content-type': name.endsWith('png') ? 'image/png' : name.endsWith('html') ? 'text/html; charset=utf-8' : name.endsWith('js') ? 'text/javascript; charset=utf-8' : 'text/css; charset=utf-8', 'cache-control': 'no-store' }).end(content); return
-      }
       if (req.method === 'GET' && req.url === '/api/state') {
-        json(res, 200, { config, revision, weixinLogin:weixinLogin.snapshot(), weixinAccounts:Object.values(secrets.weixin ?? {}).map(c=>({accountId:c.accountId})), authorization: photonAccount.snapshot(), csrf: token, routes: gateway.snapshot(), hasCursorKey: Boolean(secrets.cursorApiKey || process.env.CURSOR_API_KEY), hasPhotonSecret: Object.fromEntries(config.routes.map(r => [r.id, routeChannels(r).some(c=>c.kind === 'imessage' && Boolean(secrets.photon[photonSecretKey(r,c)] || process.env[c.projectSecretEnv]))])) }); return
+        const state = { config, revision, weixinLogin:weixinLogin.snapshot(), weixinAccounts:Object.values(secrets.weixin ?? {}).map(c=>({accountId:c.accountId})), authorization: photonAccount.snapshot(), csrf: token, routes: gateway.snapshot(), hasCursorKey: Boolean(secrets.cursorApiKey || process.env.CURSOR_API_KEY), hasPhotonSecret: Object.fromEntries(config.routes.map(r => [r.id, routeChannels(r).some(c=>c.kind === 'imessage' && Boolean(secrets.photon[photonSecretKey(r,c)] || process.env[c.projectSecretEnv]))])) }
+        const payload = JSON.stringify(state)
+        const etag = '"' + createHash('sha256').update(payload).digest('hex') + '"'
+        res.setHeader('etag',etag)
+        if (req.headers['if-none-match'] === etag) { res.writeHead(304).end(); return }
+        res.writeHead(200,{'content-type':'application/json','cache-control':'no-store'}).end(payload); return
       }
+      if (req.method === 'GET') { json(res,404,{error:'Use the native macOS app'}); return }
       const provided = Buffer.from(String(req.headers['x-agent-token'] ?? ''))
       if (req.method !== 'POST' || req.headers.origin !== origin || !String(req.headers['content-type']).startsWith('application/json') || provided.length !== token.length || !timingSafeEqual(provided, Buffer.from(token))) { json(res, 403, { error: 'Invalid local request' }); return }
       const input = object(await body(req))
@@ -69,7 +65,19 @@ export async function startServer(configFile: string, initial: AppConfig, initia
         await work
         return
       }
+      if (req.url === '/api/tasks/control') {
+        await gateway.control(String(input.routeId),String(input.channelId),String(input.taskId),String(input.action),typeof input.requestId === 'string' ? input.requestId : undefined,input.answers as Record<string,string> | undefined)
+        json(res,200,{ok:true}); return
+      }
       const work = mutation.then(async () => {
+        if (req.url === '/api/schedules/preview') {
+          const task = scheduleSchema.parse(input.schedule)
+          json(res,200,{runs:nextRuns(task.cron,task.timeZone)}); return
+        }
+        if (req.url === '/api/schedules/run') {
+          await gateway.runSchedule(String(input.routeId),String(input.scheduleId))
+          json(res,200,{ok:true}); return
+        }
         if (req.url === '/api/photon/projects') {
           try { json(res, 200, {projects: await photonAccount.projects()}) }
           catch { json(res, 400, {error:'无法读取 Photon 项目，请先完成或更新 Photon 项目管理授权。'}) }
@@ -114,13 +122,12 @@ export async function startServer(configFile: string, initial: AppConfig, initia
           }
           const validKeys = new Set(next.routes.flatMap(r=>routeChannels(r).filter(c=>c.kind === 'imessage').map(c=>photonSecretKey(r,c))))
           for (const id of Object.keys(nextSecrets.photon)) if (!validKeys.has(id)) delete nextSecrets.photon[id]
-          await atomicJson(`${configFile}.secrets.json`, nextSecrets)
-          await atomicJson(configFile, next)
+          await gateway.replace(next,nextSecrets,async () => {
+            await atomicJson(`${configFile}.secrets.json`, nextSecrets)
+            await atomicJson(configFile, next)
+          })
           secrets = nextSecrets; config = next; revision++
-          if (single) {
-            selectedSecrets.delete(String(input.id))
-            await gateway.replaceRoute(String(input.id), config, secrets)
-          } else { selectedSecrets.clear(); await gateway.replace(config, secrets) }
+          if (single) selectedSecrets.delete(String(input.id)); else selectedSecrets.clear()
         } else if (req.url === '/api/photon/authorize') await photonAccount.begin()
         else if (req.url === '/api/photon/cancel') photonAccount.cancel()
         else if ((req.url === '/api/photon/provision' || req.url === '/api/photon/select')) {
