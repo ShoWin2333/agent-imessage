@@ -8,12 +8,14 @@ import SwiftUI
     @Published var notice = "正在连接本机服务…"
     @Published var selection: String? = nil
     private(set) var baseURL: URL
+    private var stateTag: String?
     private var editorRevision: Int?
     private var polling: Task<Void, Never>?
     private var refreshTask: Task<Void, Never>?
     private let session: URLSession
     init(url: URL, session: URLSession = .shared) { baseURL = url; self.session = session }
     func start(url: URL) {
+        if baseURL != url { stateTag = nil }
         baseURL = url
         guard polling == nil else { return }
         polling = Task { [weak self] in
@@ -61,6 +63,7 @@ import SwiftUI
         var request = URLRequest(url: baseURL.appendingPathComponent(path))
         request.timeoutInterval = body == nil ? 5 : 120
         request.cachePolicy = .reloadIgnoringLocalCacheData
+        if path == "api/state", let stateTag { request.setValue(stateTag,forHTTPHeaderField:"If-None-Match") }
         if let body {
             request.httpMethod = "POST"
             request.setValue("application/json", forHTTPHeaderField:"Content-Type")
@@ -71,6 +74,8 @@ import SwiftUI
         }
         let (data, response) = try await session.data(for:request)
         guard let response = response as? HTTPURLResponse else { throw GatewayFailure(message:"本机服务响应无效。") }
+        if path == "api/state", response.statusCode == 304 { return state }
+        if path == "api/state", response.statusCode == 200 { stateTag = response.value(forHTTPHeaderField:"ETag") }
         let result = (try? JSONSerialization.jsonObject(with:data)) as? JSONObject ?? [:]
         guard (200..<300).contains(response.statusCode) else {
             throw GatewayFailure(message: response.statusCode == 409 ? "配置已在其他窗口变更。请先保留未保存的内容，再重新载入配置。" : result.text("error", "操作失败，请检查配置和连接。"))

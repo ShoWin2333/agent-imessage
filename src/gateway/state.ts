@@ -3,7 +3,15 @@ import { mkdir, readFile, rename, writeFile, rm, lstat } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { RouteConfig } from './config.js'
 
+export interface TaskRecord {
+  id: string; messageId: string; input: string; startedAt: number; finishedAt?: number
+  sessionId?: string; model?: string; backend: string; result?: string
+  reason?: string; cwd?: string; effort?: string; speed?: string; approvalPolicy?: string
+  execution: 'running' | 'completed' | 'interrupted' | 'failed'
+  delivery: 'pending' | 'sending' | 'sent' | 'uncertain'
+}
 export interface RouteState {
+  tasks?: TaskRecord[]
   activity?: Array<{sequence:number;at:number;messageId?:string;stage:string;text?:string;itemId?:string}>
   scheduleRuns?: Record<string, number>
   weixinContext?: string
@@ -46,6 +54,10 @@ export class StateStore {
         const value = raw as Record<string, unknown>
         if (!Array.isArray(value.seen) || !value.seen.every(x => typeof x === 'string') || (value.threadId !== undefined && typeof value.threadId !== 'string')) throw new Error('Invalid state')
         store.state.seen = value.seen.slice(-1024)
+        if (value.tasks !== undefined) {
+          if (!Array.isArray(value.tasks) || !value.tasks.every(t => t && ['id','messageId','input','backend'].every(k => typeof t[k] === 'string') && Number.isFinite(t.startedAt) && ['running','completed','interrupted','failed'].includes(t.execution) && ['pending','sending','sent','uncertain'].includes(t.delivery) && ['result','sessionId','model','cwd','effort','speed','approvalPolicy','reason'].every(k => t[k] === undefined || typeof t[k] === 'string'))) throw new Error('Invalid task records')
+          store.state.tasks = (value.tasks as TaskRecord[]).map(t => ({...t, ...(t.execution === 'running' ? {execution:'interrupted' as const,reason:'服务重启前任务未确认结束，请检查本机结果；不会自动重跑。'} : {}), delivery:t.delivery === 'sending' ? 'uncertain' : t.delivery}))
+        }
         if (value.sessions !== undefined) {
           if (!Array.isArray(value.sessions) || !value.sessions.every(id => typeof id === 'string')) throw new Error('Invalid sessions')
           store.state.sessions = value.sessions.slice(-100)

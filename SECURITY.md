@@ -1,6 +1,6 @@
 # Security boundaries
 
-Agent iMessage is a local, single-user Gateway. Its Web UI binds only to `127.0.0.1`, validates the exact Host and Origin, requires a per-process CSRF token for writes, sends no CORS permission, limits request bodies, and never returns stored secrets. It is not a multi-user remotely accessible control plane.
+Agent iMessage is a local, single-user Gateway. Its native-app API binds only to `127.0.0.1`, validates the exact Host and Origin, requires a per-process CSRF token for writes, sends no CORS permission, limits request bodies, and never returns stored secrets. It is not a multi-user remotely accessible control plane.
 
 Configuration, Photon credentials and management tokens are private files (`0600`) in a private directory (`0700`). Atomic replacement avoids partial JSON. Invalid files fail closed rather than resetting the configuration. Environment variable names are public configuration; their values are not. Do not place configuration/secrets in an Agent-accessible project or commit them to source control.
 

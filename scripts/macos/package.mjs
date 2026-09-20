@@ -35,7 +35,7 @@ try {
   run(process.execPath, ['scripts/macos/build.mjs', app], {env:{...process.env, AGENT_GATEWAY_STANDALONE:'1'}})
   const payload = join(app, 'Contents/Resources/gateway')
   mkdirSync(payload, {recursive:true})
-  for (const name of ['package.json', 'package-lock.json', 'lib', 'public', 'LICENSE', 'THIRD_PARTY_NOTICES.md']) {
+  for (const name of ['package.json', 'package-lock.json', 'lib', 'LICENSE', 'THIRD_PARTY_NOTICES.md']) {
     cpSync(join(root, name), join(payload, name), {recursive:true})
   }
   // Install only the locked production graph; never copy the developer node_modules.

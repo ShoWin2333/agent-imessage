@@ -8,7 +8,7 @@ struct GatewayRootView: View {
             List(selection:$store.selection) {
                 Section("工作空间") {
                     ForEach(store.drafts) { draft in
-                        ProjectRow(draft:draft).tag("project:" + draft.id)
+                        ProjectRow(draft:draft,runtime:store.runtime(draft.id)).tag("project:" + draft.id)
                     }
                 }
                 Section {
@@ -40,7 +40,7 @@ struct GatewayRootView: View {
                             LabeledContent("/new",value:"开始独立会话")
                             LabeledContent("/stop",value:"停止当前任务")
                             LabeledContent("/sessions",value:"列出当前入口的会话")
-                            Text("审批和提问会发回原对话。活动记录显示网关收到的消息和 Agent 提供的事件；不包含模型内部推理。")
+                            Text("审批和提问可在任务卡片或原对话中处理；先完成的操作生效。活动记录显示网关收到的消息和 Agent 提供的事件；不包含模型内部推理。")
                         }
                     }.formStyle(.grouped).navigationTitle("使用说明")
                 } else {
@@ -71,12 +71,22 @@ struct GatewayRootView: View {
 }
 private struct ProjectRow: View {
     @ObservedObject var draft: ProjectDraft
+    let runtime: JSONObject
+    private var status: String {
+        if (runtime["pending"] as? Int ?? 0) > 0 { return "需要处理" }
+        if runtime["busy"] as? Bool == true { return "正在执行" }
+        if runtime.objects("channels").contains(where: { $0.objects("tasks").contains { !$0.text("result").isEmpty && ["pending","uncertain"].contains($0.text("delivery")) } }) { return "结果待发送" }
+        return phaseName(runtime.text("phase"))
+    }
     var body: some View {
         HStack {
             if let image = nativeImage(draft.value.text("avatar")) {
                 Image(nsImage:image).resizable().scaledToFill().frame(width:24,height:24).clipShape(RoundedRectangle(cornerRadius:5))
             } else { Image(systemName:"folder") }
-            Text(draft.name + (draft.dirty ? " •" : ""))
+            VStack(alignment:.leading,spacing:2) {
+                Text(draft.name + (draft.dirty ? " •" : ""))
+                Text(status).font(.caption).foregroundStyle(.secondary)
+            }
         }
     }
 }

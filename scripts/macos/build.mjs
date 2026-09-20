@@ -43,9 +43,9 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Deskto
 mkdirSync(join(destination, 'Contents/MacOS'), {recursive:true})
 mkdirSync(join(destination, 'Contents/Resources'), {recursive:true})
 execFileSync('/usr/bin/xcrun', ['swiftc', join(source, 'Main.swift'), join(source, 'GatewayService.swift'), ...['Models','Stores','Views'].flatMap(dir => readdirSync(join(source,'Native',dir)).filter(name=>name.endsWith('.swift')).sort().map(name=>join(source,'Native',dir,name))), '-o', join(destination, `Contents/MacOS/${appName}`), '-framework', 'Cocoa', '-framework', 'SwiftUI', '-target', `${process.arch === 'arm64' ? 'arm64' : 'x86_64'}-apple-macosx14.0`, '-module-cache-path', '/private/tmp/agent-imessage-swift-cache'], {stdio:'inherit',env:swiftEnvironment})
-const iconName = 'AppIcon-' + createHash('sha256').update(readFileSync(resolve(source, '../../public/brand.png'))).digest('hex').slice(0,12)
+const iconName = 'AppIcon-' + createHash('sha256').update(readFileSync(resolve(source, 'Resources/brand.png'))).digest('hex').slice(0,12)
 const iconset = join(destination, 'Contents/Resources/AppIcon.iconset')
-execFileSync('/usr/bin/xcrun', ['swift', '-module-cache-path', '/private/tmp/agent-imessage-swift-cache', join(source, 'Icon.swift'), iconset, resolve(source, '../../public/brand.png')], {stdio:'inherit'})
+execFileSync('/usr/bin/xcrun', ['swift', '-module-cache-path', '/private/tmp/agent-imessage-swift-cache', join(source, 'Icon.swift'), iconset, resolve(source, 'Resources/brand.png')], {stdio:'inherit'})
 execFileSync('/usr/bin/iconutil', ['-c', 'icns', iconset, '-o', join(destination, `Contents/Resources/${iconName}.icns`)], {stdio:'inherit'})
 // Do not register this plist in LaunchAgents: the app loads/unloads it itself.
 if (!standalone) writeFileSync(join(destination, 'Contents/Resources/gateway.plist'),serviceXml,{mode:0o600})

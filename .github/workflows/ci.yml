@@ -28,3 +28,18 @@ jobs:
       - run: npm run build
       - run: npm run audit:prod
       - run: npm pack --dry-run --ignore-scripts
+
+  native:
+    name: macOS native contracts
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --legacy-peer-deps --ignore-scripts
+      - run: npm run build
+      - run: npm run test:macos:store
+      - run: npm run test:macos:service
+      - run: AGENT_GATEWAY_STANDALONE=1 node scripts/macos/build.mjs "$RUNNER_TEMP/Agent iMessage.app"

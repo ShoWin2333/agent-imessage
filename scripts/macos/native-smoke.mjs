@@ -87,12 +87,12 @@ try {
 
   const node=join(moved,'Contents/Helpers/node'), entry=join(moved,'Contents/Resources/gateway/lib/types/app/cli.js')
   direct=spawn(node,[entry,'start',config],{stdio:'ignore'})
-  await waitFor(async()=>{try{return (await fetch(`http://127.0.0.1:${port}/`)).ok}catch{return false}},'external server')
+  await waitFor(async()=>{try{return (await fetch(`http://127.0.0.1:${port}/api/state`)).ok}catch{return false}},'external server')
   const external=await launch(moved)
   assert.equal(external.owned,false)
   await finished()
   assert.equal(direct.exitCode,null)
-  assert.equal((await fetch(`http://127.0.0.1:${port}/`)).status,200)
+  assert.equal((await fetch(`http://127.0.0.1:${port}/api/state`)).status,200)
   console.log('PASS: directly launched external Gateway survives App Quit.')
   assert.equal(JSON.parse(await readFile(config,'utf8')).port,port)
 } finally {

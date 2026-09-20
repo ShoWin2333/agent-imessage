@@ -22,17 +22,34 @@ export function parseCron(expression: string): Array<{values:Set<number>;wildcar
 export function validTimeZone(zone: string): boolean { try { new Intl.DateTimeFormat('en',{timeZone:zone}).format(); return true } catch { return false } }
 export const scheduleSchema = z.object({
   id:z.string().regex(/^[a-zA-Z0-9_-]{1,64}$/), name:z.string().trim().min(1).max(100),
+  context:z.enum(['isolated','shared']).optional(),
   enabled:z.boolean(), cron:z.string().refine(value => {try {parseCron(value);return true} catch {return false}},'Use five numeric cron fields'),
   timeZone:z.string().max(100).refine(validTimeZone,'Invalid time zone'),
   channelId:z.string().min(1).max(64), prompt:z.string().trim().min(1).max(8000),
 }).strict()
 export type ScheduledTask = z.infer<typeof scheduleSchema>
-export function cronMatches(expression: string, timeZone: string, now: Date): boolean {
+function makeMatcher(expression: string, timeZone: string): (now: Date) => boolean {
   const fields = parseCron(expression)
-  const parts = new Intl.DateTimeFormat('en-US',{timeZone,minute:'2-digit',hour:'2-digit',hourCycle:'h23',day:'2-digit',month:'2-digit',weekday:'short'}).formatToParts(now)
+  const formatter = new Intl.DateTimeFormat('en-US',{timeZone,minute:'2-digit',hour:'2-digit',hourCycle:'h23',day:'2-digit',month:'2-digit',weekday:'short'})
+  return (now: Date) => {
+  const parts = formatter.formatToParts(now)
   const part = (type: string) => parts.find(p => p.type === type)!.value
   const values = [Number(part('minute')),Number(part('hour')),Number(part('day')),Number(part('month')),['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].indexOf(part('weekday'))]
   const matches = fields.map((field,index) => field.values.has(values[index]!))
   const dayMatches = fields[2]!.wildcard || fields[4]!.wildcard ? matches[2] && matches[4] : matches[2] || matches[4]
   return Boolean(matches[0] && matches[1] && matches[3] && dayMatches)
+  }
+}
+export function cronMatches(expression: string, timeZone: string, now: Date): boolean { return makeMatcher(expression,timeZone)(now) }
+
+/** Bounded preview, including timezone/DST behavior of the scheduler itself. */
+export function nextRuns(expression: string, timeZone: string, after = new Date(), count = 5): number[] {
+  parseCron(expression)
+  if (!validTimeZone(timeZone)) throw new Error('Invalid time zone')
+  const runs: number[] = []
+  const start = Math.floor(after.getTime()/60000)*60000 + 60000
+  // Five occurrences within a year, without blocking the event loop on repeated formatters.
+  const matcher = makeMatcher(expression,timeZone)
+  for (let time=start; time<start+366*86400000 && runs.length<count; time+=60000) if (matcher(new Date(time))) runs.push(time)
+  return runs
 }

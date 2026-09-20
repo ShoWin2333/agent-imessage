@@ -27,13 +27,13 @@ try {
     lines.on('line', line => { const match=line.match(/Agent iMessage: (http:\/\/127\.0\.0\.1:\d+)/); if(match){clearTimeout(timer);resolve(match[1])} })
     child.once('exit', () => {clearTimeout(timer);reject(new Error('Packaged app exited'))})
   })
-  assert.equal((await fetch(url)).status,200)
+  assert.equal((await fetch(url)).status,404)
   const state=await (await fetch(url+'/api/state')).json()
   assert.deepEqual(state.config.routes,[])
   assert.equal(typeof state.csrf,'string')
   const dependencies=JSON.parse(await readFile(join(cwd,'package.json'),'utf8')).dependencies
   assert.equal(Object.keys(dependencies).some(name=>name.startsWith('@deepseek-ai/')),false)
-  console.log('PASS: production tarball installed without dev/DSH dependencies; SDK imports and standalone Web UI boots.')
+  console.log('PASS: production tarball installed without dev/DSH dependencies; SDK imports and native-app API boots.')
 } finally {
   if(child && child.exitCode === null) await new Promise(resolve=>{const timer=setTimeout(()=>child.kill('SIGKILL'),5000);child.once('exit',()=>{clearTimeout(timer);resolve()});child.kill('SIGTERM')})
   await rm(dir,{recursive:true,force:true})

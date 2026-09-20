@@ -1,6 +1,6 @@
 # Agent iMessage
 
-A standalone local Agent App / Gateway for iMessage. One local Web UI manages multiple projects backed by **Cursor SDK**, **Codex App Server**, or **headless DSH**. No desktop editor or DSH Web process is required.
+A standalone local Agent App / Gateway for iMessage. One native macOS SwiftUI app manages multiple projects backed by **Cursor SDK**, **Codex App Server**, or **headless DSH**. No desktop editor or DSH Web process is required.
 
 ```text
 iMessage ↔ Photon / Spectrum ↔ Gateway ↔ Backend
@@ -8,7 +8,7 @@ iMessage ↔ Photon / Spectrum ↔ Gateway ↔ Backend
                                │        ├─ Codex App Server (stdio)
                                │        └─ DSH ACP (headless process)
                                └─ routing, sessions, approvals, questions, media,
-                                  configuration, secrets, status and Web UI
+                                  configuration, secrets, status and native-app API
 ```
 
 ## Run
@@ -24,7 +24,7 @@ npm install -g . --ignore-scripts
 agent-imessage start
 ```
 
-Open **http://127.0.0.1:8787**. Add projects with a backend, absolute workspace path, model/effort settings, Photon project, authorized sender and assigned recipient. Supply a Photon project secret in the UI or an environment variable. You can authorize Photon and provision a shared number from the UI.
+Open the native macOS app (`./script/build_and_run.sh` for development); port 8787 serves its local API only. Add projects with a backend, absolute workspace path, model/effort settings, Photon project, authorized sender and assigned recipient. Supply a Photon project secret in the UI or an environment variable. You can authorize Photon and provision a shared number from the UI.
 
 Each route requires a unique ID and Photon project; sender/recipient pairs must not overlap. Stop old consumers before connecting the new Gateway to the same project. Photon shared lines require a **phone-number iMessage identity**, not an email identity.
 
@@ -45,7 +45,7 @@ The built-in installer currently supports macOS launchd. The service is `app.age
 
 ## Configuration and migration
 
-Default config: `~/.config/agent-imessage/config.json`. Secrets are stored separately in `config.json.secrets.json`, Photon OAuth in `config.json.photon.json`; files are private (`0600`) and their parent directory must be `0700`. The browser never receives saved secrets. launchd does not inherit interactive shell variables: prefer saved secrets or explicitly configured service environment variables.
+Default config: `~/.config/agent-imessage/config.json`. Secrets are stored separately in `config.json.secrets.json`, Photon OAuth in `config.json.photon.json`; files are private (`0600`) and their parent directory must be `0700`. The native app never receives saved secrets. launchd does not inherit interactive shell variables: prefer saved secrets or explicitly configured service environment variables.
 
 A version-1 config contains `port`, an absolute `stateDir`, optional backend binary paths, and `routes`. Each route has `id`, `backend`, `cwd`, `projectId`, `projectSecretEnv`, `senderPhoneNumber`, `assignedPhoneNumber`, and optional `label`, `enabled`, `model`, `effort`, `speed`, `cursorMode` and `cursorApiKeyEnv`. See the full [Chinese guide](README.md) for an example.
 
@@ -151,3 +151,8 @@ behavior. `npm run test:macos:native -- '/tmp/Gateway Standalone Test.app'` uses
 dedicated test identity and empty config to cover menu/window behavior, SIGKILL
 recovery, relocation, Quit during startup and external-process preservation.
 Native tests require a logged-in macOS desktop session.
+
+
+The browser UI and editor browser launcher have been removed. `npm start` runs the loopback API only; use the macOS app (`./script/build_and_run.sh` for development). Tasks persist independently of the 200-event diagnostic buffer, with separate execution and delivery states. Desktop controls stop tasks, resolve pending requests, and resend stored text results without repeating execution. Interrupted tasks never replay automatically after restart.
+
+Canonical workspaces admit one task at a time within the Gateway. Labels, avatars and schedules apply without restart; model parameters apply on the next task; changing workspace, permissions, bindings or credentials requires affected tasks to be stopped first. Scheduled tasks default to independent sessions, offer common time selectors, previews and a manual trial, and record skipped slots without catch-up.
