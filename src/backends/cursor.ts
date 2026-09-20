@@ -1,16 +1,12 @@
 import { Agent, type SDKAgent, type Run, type AgentOptions, type SDKCustomTool, type ModelSelection, type SDKJsonValue } from '@cursor/sdk'
+import { toolCategory } from './progress.js'
 import { randomUUID } from 'node:crypto'
 import { BaseBackend, type SessionOptions } from './types.js'
 import type { RouteConfig } from '../gateway/config.js'
 import { object } from './jsonrpc.js'
 
-// Only fixed categories cross the transport boundary; SDK errors may contain secrets.
-export function cursorFailure(error: unknown): 'session-busy' | 'authentication' | 'unknown' {
-  const message = error instanceof Error ? error.message : String(object(error).message ?? '')
-  if (/already has active run/i.test(message)) return 'session-busy'
-  if (/invalid api key|unauthenticated|unauthorized|authentication failed/i.test(message)) return 'authentication'
-  return 'unknown'
-}
+export { backendFailure as cursorFailure } from './failure.js'
+import { backendFailure as cursorFailure } from './failure.js'
 
 export function modelSelection(model: string, effort = 'default', speed = 'default'): ModelSelection {
   const params = []
@@ -69,14 +65,35 @@ export class CursorBackend extends BaseBackend {
     try {
       const run = await this.agent!.send(text, this.route.cursorMode === 'plan' ? { mode: 'plan' } : {})
       active.run = run
+      const progress = (phase: import('./types.js').BackendPhase, detail?: string) => {
+        if (!this.closed && !active.cancelled) this.onEvent({type:'progress',sessionId,turnId:active.id,phase,runId:run.id,...(detail ? {detail} : {})})
+      }
+      progress('run-created')
       if (active.cancelled || this.closed) await run.cancel()
       const chunks: string[] = []
+      let preview = '', lastPreview = -Infinity, modelActive = false, generating = false
+      const toolStates = new Map<string, string>()
       for await (const event of run.stream()) {
-        if (event.type === 'assistant') for (const block of event.message.content) if (block.type === 'text') chunks.push(block.text)
+        if (active.cancelled || this.closed) continue
+        if (!modelActive && ['thinking','assistant','tool_call'].includes(event.type)) { modelActive = true; progress('model-active') }
+        if (event.type === 'tool_call' && toolStates.get(event.call_id) !== event.status) {
+          toolStates.set(event.call_id, event.status)
+          progress(event.status === 'running' ? 'tool-running' : event.status === 'completed' ? 'tool-completed' : 'tool-failed',toolCategory(event.name))
+        }
+        if (event.type === 'assistant') for (const block of event.message.content) if (block.type === 'text') {
+          chunks.push(block.text)
+          if (!generating && block.text) { generating = true; progress('generating') }
+          preview = (preview + block.text).slice(-8000)
+          if (Date.now() - lastPreview >= 1000) {
+            lastPreview = Date.now()
+            this.onEvent({type:'preview',sessionId,turnId:active.id,id:active.id,text:preview})
+          }
+        }
       }
       const result = await run.wait()
       if (result.error) failure = cursorFailure(result.error)
-      status = active.cancelled || result.status === 'cancelled' ? 'interrupted' : result.status === 'finished' ? 'completed' : 'failed'
+      else if (result.status === 'cancelled') failure = 'aborted'
+      status = active.cancelled ? 'interrupted' : result.status === 'finished' ? 'completed' : 'failed'
       if (!this.closed && status === 'completed') this.onEvent({ type: 'message', sessionId, turnId: active.id, id: active.id, text: result.result?.trim() || chunks.join('').trim() })
     } catch (error) { status = active.cancelled ? 'interrupted' : 'failed'; failure = cursorFailure(error) }
     finally {

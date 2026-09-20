@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile, rename, rm, realpath, stat, lstat } from 'n
 import { dirname, join, isAbsolute } from 'node:path'
 import { homedir } from 'node:os'
 import { randomUUID } from 'node:crypto'
+import { PluginError } from '../errors.js'
 import { z } from 'zod'
 import { routeSchema, routeChannels } from '../gateway/config.js'
 import { parsePhotonCredential } from '../credential.js'
@@ -32,7 +33,10 @@ export async function atomicJson(file: string, value: unknown): Promise<void> {
 }
 export async function validateConfig(value: unknown, resolveWorkspaces = true): Promise<AppConfig> {
   const parsed = appSchema.safeParse(value)
-  if (!parsed.success) throw new Error('Invalid config: check fields, absolute paths and E.164 numbers')
+  if (!parsed.success) {
+    if (parsed.error.issues.some(issue => issue.path.includes('schedules'))) throw new PluginError('invalid-command','定时任务配置无效：请填写名称和任务内容，使用有效的五段 Cron、IANA 时区及本项目入口；任务 ID 不可重复。')
+    throw new Error('Invalid config: check fields, absolute paths and E.164 numbers')
+  }
   const config = parsed.data
   const ids = new Set(), projects = new Set(), addresses = new Set()
   const weixinOwners = new Map<string, string>()

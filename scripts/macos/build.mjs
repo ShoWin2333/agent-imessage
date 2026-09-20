@@ -1,6 +1,6 @@
 import {createHash} from 'node:crypto'
 import {execFileSync} from 'node:child_process'
-import {mkdirSync, writeFileSync, existsSync, readFileSync} from 'node:fs'
+import {mkdirSync, writeFileSync, existsSync, readFileSync, readdirSync} from 'node:fs'
 import {homedir} from 'node:os'
 import {resolve, join, dirname} from 'node:path'
 import {fileURLToPath} from 'node:url'
@@ -10,6 +10,12 @@ const appName = process.env.AGENT_GATEWAY_APP_NAME ?? 'Agent iMessage'
 const bundleId = process.env.AGENT_GATEWAY_BUNDLE_ID ?? 'app.agent-imessage.desktop'
 if (!/^[A-Za-z0-9 _-]+$/.test(appName) || !/^[A-Za-z0-9.-]+$/.test(bundleId)) throw new Error('Invalid app identity')
 const source = dirname(fileURLToPath(import.meta.url))
+// Recent SwiftUI SDKs ship compiler plugins in full Xcode, not Command Line Tools.
+// Honor an explicit toolchain and never change the user's global xcode-select setting.
+const selectedDeveloper = process.env.DEVELOPER_DIR ?? execFileSync('/usr/bin/xcode-select',['-p'],{encoding:'utf8'}).trim()
+const fullXcode = '/Applications/Xcode.app/Contents/Developer'
+const swiftEnvironment = !process.env.DEVELOPER_DIR && selectedDeveloper.endsWith('/CommandLineTools') && existsSync(fullXcode)
+  ? {...process.env,DEVELOPER_DIR:fullXcode} : process.env
 const destination = resolve(process.argv[2] ?? '/tmp/Agent iMessage.app')
 const standalone = process.env.AGENT_GATEWAY_STANDALONE === '1'
 const service = resolve(process.argv[3] ?? join(homedir(), 'Library/LaunchAgents/app.agent-imessage.gateway.plist'))
@@ -36,7 +42,7 @@ const port = config.port ?? 8787
 if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Desktop wrapper requires a fixed port from 1 to 65535')
 mkdirSync(join(destination, 'Contents/MacOS'), {recursive:true})
 mkdirSync(join(destination, 'Contents/Resources'), {recursive:true})
-execFileSync('/usr/bin/xcrun', ['swiftc', join(source, 'Main.swift'), join(source, 'GatewayService.swift'), '-o', join(destination, `Contents/MacOS/${appName}`), '-framework', 'Cocoa', '-framework', 'WebKit', '-module-cache-path', '/private/tmp/agent-imessage-swift-cache'], {stdio:'inherit'})
+execFileSync('/usr/bin/xcrun', ['swiftc', join(source, 'Main.swift'), join(source, 'GatewayService.swift'), ...['Models','Stores','Views'].flatMap(dir => readdirSync(join(source,'Native',dir)).filter(name=>name.endsWith('.swift')).sort().map(name=>join(source,'Native',dir,name))), '-o', join(destination, `Contents/MacOS/${appName}`), '-framework', 'Cocoa', '-framework', 'SwiftUI', '-target', `${process.arch === 'arm64' ? 'arm64' : 'x86_64'}-apple-macosx14.0`, '-module-cache-path', '/private/tmp/agent-imessage-swift-cache'], {stdio:'inherit',env:swiftEnvironment})
 const iconName = 'AppIcon-' + createHash('sha256').update(readFileSync(resolve(source, '../../public/brand.png'))).digest('hex').slice(0,12)
 const iconset = join(destination, 'Contents/Resources/AppIcon.iconset')
 execFileSync('/usr/bin/xcrun', ['swift', '-module-cache-path', '/private/tmp/agent-imessage-swift-cache', join(source, 'Icon.swift'), iconset, resolve(source, '../../public/brand.png')], {stdio:'inherit'})

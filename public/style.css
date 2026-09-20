@@ -1179,3 +1179,22 @@ a:focus-visible {
     transition: none !important;
   }
 }
+
+.activity { margin-top: 24px; border-top: 1px solid #dce2e8; padding-top: 18px; }
+.activity > summary { font-weight: 650; cursor: pointer; }
+.activity > p { color: #657083; font-size: 12px; line-height: 1.6; }
+.activity-list { max-height: 440px; overflow: auto; }
+.activity-entry { border-bottom: 1px solid #e6eaf0; padding: 10px 0; font-size: 13px; }
+.activity-entry summary { cursor: pointer; line-height: 1.6; overflow-wrap: anywhere; }
+.activity-entry pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; background: #f5f7fa; padding: 12px; border-radius: 8px; }
+.activity-error > summary { color: #aa3434; }
+
+.chat-turn { display:flex; flex-direction:column; gap:18px; padding:18px 4px 26px; border-bottom:1px solid var(--border,#ddd); }
+.chat-user { align-self:flex-end; max-width:85%; padding:14px 18px; border-radius:16px; background:rgba(59,130,246,.12); }
+.chat-user small { opacity:.65; }
+.chat-turn p { white-space:pre-wrap; overflow-wrap:anywhere; }
+.chat-agent { align-self:flex-start; max-width:95%; padding:8px 12px; }
+.chat-agent details { margin-top:12px; font-size:13px; }
+.schedules { margin:20px 0; }
+.schedules fieldset { display:grid; gap:12px; border:1px solid #ddd; border-radius:12px; padding:18px; margin:12px 0; }
+.schedules textarea { min-height:100px; font:inherit; width:100%; }

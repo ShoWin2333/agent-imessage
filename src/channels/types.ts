@@ -20,11 +20,13 @@ export interface ChannelMessage {
 }
 
 export interface ChannelConnection {
+  scheduledMessage?(id: string, text: string): Promise<ChannelMessage>
   messages: AsyncIterable<ChannelMessage>
   stop(): Promise<void>
 }
 export type ChannelFactory<Config> = (config: Config) => Promise<ChannelConnection>
 export interface ChannelAdapter {
+  scheduledMessage?(id: string, text: string): Promise<ChannelMessage>
   readonly state: RuntimeView
   start(): Promise<void>
   stop(): Promise<void>

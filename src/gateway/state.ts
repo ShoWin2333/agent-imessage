@@ -4,6 +4,9 @@ import { join } from 'node:path'
 import type { RouteConfig } from './config.js'
 
 export interface RouteState {
+  activity?: Array<{sequence:number;at:number;messageId?:string;stage:string;text?:string;itemId?:string}>
+  scheduleRuns?: Record<string, number>
+  weixinContext?: string
   channelCursor?: string
   threadId?: string
   seen: string[]
@@ -47,6 +50,13 @@ export class StateStore {
           if (!Array.isArray(value.sessions) || !value.sessions.every(id => typeof id === 'string')) throw new Error('Invalid sessions')
           store.state.sessions = value.sessions.slice(-100)
         }
+        if (Array.isArray(value.activity)) store.state.activity = value.activity.filter((entry): entry is NonNullable<RouteState['activity']>[number] => {
+          if (!entry || typeof entry !== 'object') return false
+          const row = entry as Record<string,unknown>
+          return Number.isSafeInteger(row.sequence) && typeof row.at === 'number' && typeof row.stage === 'string' && ['messageId','text','itemId'].every(key => row[key] === undefined || typeof row[key] === 'string')
+        }).slice(-200).map(entry => ({...entry, ...(entry.text ? {text:entry.text.slice(0,8050)} : {})}))
+        if (value.scheduleRuns && typeof value.scheduleRuns === 'object' && !Array.isArray(value.scheduleRuns)) store.state.scheduleRuns = Object.fromEntries(Object.entries(value.scheduleRuns).filter(([_, minute]) => Number.isSafeInteger(minute))) as Record<string,number>
+        if (typeof value.weixinContext === 'string') store.state.weixinContext = value.weixinContext
         if (typeof value.channelCursor === 'string') store.state.channelCursor = value.channelCursor
         if (typeof value.threadId === 'string') store.state.threadId = value.threadId
       } catch (error) {

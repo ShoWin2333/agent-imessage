@@ -1,3 +1,4 @@
+import { cronMatches } from './cron.js'
 import { createHash } from 'node:crypto'
 import type { ChannelAdapter } from '../channels/types.js'
 import { IMessageAdapter } from '../channels/imessage.js'
@@ -30,6 +31,8 @@ export class Gateway {
   private readonly runtimes = new Map<string, Runtime>()
   private readonly errors = new Map<string, string>()
   private operation = Promise.resolve()
+  private scheduler: ReturnType<typeof setInterval> | undefined
+  private ticking = false
   constructor(private config: AppConfig, private secrets: Secrets, private readonly backendFactory = createBackend, private readonly connectionFactory: SpectrumConnectionFactory = createSpectrumConnection) {}
   snapshot() {
     return this.config.routes.map(route => {
@@ -70,6 +73,14 @@ export class Gateway {
     return result
   }
   private async startAll(onlyId?: string): Promise<void> {
+    if (!this.scheduler) {
+      this.scheduler = setInterval(() => {
+        if (this.ticking) return
+        this.ticking = true
+        void this.enqueue(() => this.tickSchedules()).catch(() => {}).finally(() => {this.ticking = false})
+      }, 5000)
+      this.scheduler.unref()
+    }
     for (const route of this.config.routes) {
       if (onlyId !== undefined && route.id !== onlyId) continue
       if (route.enabled === false) continue
@@ -114,7 +125,25 @@ export class Gateway {
       }
     }
   }
+  /** No catch-up: sleep/offline slots are skipped; each current minute is claimed durably. */
+  async tickSchedules(now = new Date()): Promise<void> {
+    const minute = Math.floor(now.getTime() / 60_000)
+    for (const route of this.config.routes) {
+      if (route.enabled === false) continue
+      for (const task of route.schedules ?? []) {
+        if (!task.enabled || !cronMatches(task.cron,task.timeZone,now)) continue
+        const runtime = this.runtimes.get(this.key(route,task.channelId))
+        if (!runtime) continue
+        const busy = [...this.runtimes.values()].some(r => r.routeId === route.id && r.router.snapshot().busy)
+        await runtime.router.schedule(task,minute,async () => {
+          if (!runtime.adapter.scheduledMessage) throw new Error('Proactive delivery unavailable')
+          return runtime.adapter.scheduledMessage(`cron:${task.id}:${minute}`,task.prompt)
+        },busy)
+      }
+    }
+  }
   private async stopAll(): Promise<void> {
+    clearInterval(this.scheduler); this.scheduler = undefined
     for (const runtime of this.runtimes.values()) {
       await runtime.adapter.stop()
       await runtime.router.close()

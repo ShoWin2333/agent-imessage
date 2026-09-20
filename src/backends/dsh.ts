@@ -1,3 +1,5 @@
+import { toolCategory } from './progress.js'
+import { backendFailure } from './failure.js'
 import { randomUUID } from 'node:crypto'
 import { JsonRpcProcess, object, type Rpc, type ObjectValue } from './jsonrpc.js'
 import { BaseBackend, type SessionOptions } from './types.js'
@@ -7,7 +9,8 @@ interface Wire extends Rpc { waitClosed?(): Promise<void>; notify(method: string
 /** Owns a headless DSH ACP process. No DSH Web or plugin UI is involved. */
 export class DshBackend extends BaseBackend {
   private sessionId: string | undefined
-  private active: { id: string; text: string; cancelled: boolean } | undefined
+  private active: { id: string; text: string; cancelled: boolean; previewAt: number } | undefined
+  private readonly toolStates = new Map<string, string>()
   private closed = false
   private toolServer: Awaited<ReturnType<typeof startToolServer>> | undefined
   private cancelTimer: ReturnType<typeof setTimeout> | undefined
@@ -17,8 +20,17 @@ export class DshBackend extends BaseBackend {
     wire.onNotification = (method, params) => {
       if (method !== 'session/update' || params.sessionId !== this.sessionId || !this.active || this.active.cancelled) return
       const update = object(params.update), content = object(update.content)
+      if ((update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') && this.toolStates.get(String(update.toolCallId)) !== String(update.status ?? 'running')) {
+        this.toolStates.set(String(update.toolCallId),String(update.status ?? 'running'))
+        this.onEvent({type:'progress',sessionId:this.sessionId!,turnId:this.active.id,phase:update.status === 'completed' ? 'tool-completed' : update.status === 'failed' ? 'tool-failed' : 'tool-running',detail:toolCategory(update.kind)})
+      }
       if (update.sessionUpdate === 'agent_message_chunk' && content.type === 'text' && typeof content.text === 'string') {
+        if (!this.active.text && content.text) this.onEvent({type:'progress',sessionId:this.sessionId!,turnId:this.active.id,phase:'generating'})
         this.active.text += content.text
+        if (Date.now() - this.active.previewAt >= 1000) {
+          this.active.previewAt = Date.now()
+          this.onEvent({type:'preview',sessionId:this.sessionId!,turnId:this.active.id,id:this.active.id,text:this.active.text.slice(-8000)})
+        }
         if (this.active.text.length > 1_000_000) void this.close()
       }
     }
@@ -65,22 +77,23 @@ export class DshBackend extends BaseBackend {
   }
   async startTurn(sessionId: string, text: string): Promise<string> {
     if (this.closed || this.active || sessionId !== this.sessionId) throw new Error('Invalid turn')
-    const active = { id: randomUUID(), text: '', cancelled: false }
+    const active = { id: randomUUID(), text: '', cancelled: false, previewAt: -Infinity }
     this.active = active
+    this.toolStates.clear()
     this.onEvent({ type: 'started', sessionId, turnId: active.id })
     void this.wire.request('session/prompt', { sessionId, prompt: [{ type: 'text', text }] }, 30 * 60_000).then(
       result => this.complete(active, result.stopReason === 'cancelled' ? 'interrupted' : result.stopReason === 'end_turn' ? 'completed' : 'failed'),
-      () => this.complete(active, 'failed'),
+      error => this.complete(active, 'failed', backendFailure(error)),
     )
     return active.id
   }
-  private complete(active: NonNullable<typeof this.active>, status: 'completed' | 'interrupted' | 'failed'): void {
+  private complete(active: NonNullable<typeof this.active>, status: 'completed' | 'interrupted' | 'failed', failure: import('./types.js').BackendFailure = 'unknown'): void {
     if (this.closed || this.active !== active) return
     clearTimeout(this.cancelTimer)
     const sessionId = this.sessionId!, turnId = active.id
     this.onEvent({ type: 'message', sessionId, turnId, id: turnId, text: active.text })
     this.active = undefined
-    this.onEvent({ type: 'completed', sessionId, turnId, status: active.cancelled ? 'interrupted' : status })
+    this.onEvent({ type: 'completed', sessionId, turnId, status: active.cancelled ? 'interrupted' : status, ...(status === 'failed' ? {failure} : {}) })
   }
   async cancel(sessionId: string, turnId: string): Promise<void> {
     if (this.active?.id !== turnId || sessionId !== this.sessionId) return

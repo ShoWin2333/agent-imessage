@@ -105,3 +105,65 @@ it('applies one project without closing another backend or changing its configur
   expect(saved.routes[1]).toEqual(config.routes[1])
   expect(JSON.parse(await readFile(file+'.secrets.json','utf8')).photon.two).toBe('secret')
 })
+
+it('exposes receipt and session admission stalls before Agent starts, and bounds activity text and count',async()=>{
+  const backend=new Backend(),store={state:{seen:[]} as RouteState,save:async()=>{}}
+  const router=new GatewayRouter(backend,route,store);cleanup.push(()=>router.close());router.setConnected(true)
+  let release!:(value:{id:string;cwd:string})=>void
+  backend.openSession.mockImplementation(()=>new Promise(resolve=>{release=resolve}))
+  const channel=(id:string,text:string):SpectrumInboundMessage=>({id,text,send:async()=>{},sendVoice:async()=>{},sendFile:async()=>{},responding:fn=>fn()})
+  const receiving=router.receive(channel('first','x'.repeat(9000)))
+  await expect.poll(()=>router.snapshot().activity.at(-1)?.stage).toBe('opening-session')
+  expect(router.snapshot().activity.find(e=>e.stage==='received')?.text?.length).toBeLessThan(8100)
+  const queued=router.receive(channel('second','queued'))
+  expect(router.snapshot().activity.at(-1)).toMatchObject({stage:'received',messageId:'second'})
+  release({id:'session',cwd:route.cwd});await receiving;await queued
+  expect(router.snapshot().activity.some(e=>e.stage==='busy' && e.messageId==='second')).toBe(true)
+  for(let i=0;i<220;i++) await router.receive(channel('first','duplicate'))
+  expect(router.snapshot().activity).toHaveLength(200)
+  expect(router.snapshot().activity.at(-1)?.stage).toBe('duplicate')
+})
+
+it('records generated replies and failed delivery without exposing raw provider errors',async()=>{
+  const backend=new Backend(),store={state:{seen:[]} as RouteState,save:async()=>{}}
+  const router=new GatewayRouter(backend,route,store);cleanup.push(()=>router.close());router.setConnected(true)
+  await router.receive({id:'task',text:'hello',send:async()=>{throw new Error('secret-provider-token')},sendVoice:async()=>{},sendFile:async()=>{},responding:fn=>fn()})
+  backend.onEvent({type:'message',sessionId:'session',turnId:'turn',id:'answer',text:'a reply'})
+  backend.onEvent({type:'completed',sessionId:'session',turnId:'turn',status:'completed'})
+  await expect.poll(()=>router.snapshot().activity.some(e=>e.stage==='send-failed')).toBe(true)
+  const events=router.snapshot().activity
+  expect(events.find(e=>e.stage==='response')).toMatchObject({messageId:'task',text:'a reply'})
+  expect(events.find(e=>e.stage==='sent')).toBeUndefined()
+  expect(JSON.stringify(events)).not.toContain('secret-provider-token')
+})
+
+it('shows shared elapsed phases, sends only one delayed notice and never delivers previews as final answers',async()=>{
+  const backend=new Backend(),store={state:{seen:[]} as RouteState,save:async()=>{}}
+  const router=new GatewayRouter(backend,{...route,backend:'dsh'},store,1000,10);cleanup.push(()=>router.close());router.setConnected(true)
+  const send=vi.fn(async(_text:string)=>{})
+  await router.receive({id:'long-task',text:'hello',send,sendVoice:async()=>{},sendFile:async()=>{},responding:fn=>fn()})
+  backend.onEvent({type:'progress',sessionId:'session',turnId:'turn',phase:'tool-running'})
+  backend.onEvent({type:'preview',sessionId:'session',turnId:'turn',id:'part',text:'unfinished'})
+  await expect.poll(()=>send.mock.calls.length).toBe(1)
+  expect(send.mock.calls[0]![0]).toContain('正在执行工具')
+  expect(router.snapshot().current?.phase).toBe('正在执行工具')
+  backend.onEvent({type:'message',sessionId:'session',turnId:'turn',id:'final',text:'finished'})
+  backend.onEvent({type:'completed',sessionId:'session',turnId:'turn',status:'completed'})
+  await expect.poll(()=>send.mock.calls.length).toBe(2)
+  expect(send.mock.calls[1]![0]).toBe('finished')
+  expect(router.snapshot().activity.find(e=>e.stage==='completed')?.text).toContain('首段文本')
+  expect(router.snapshot().current).toBeUndefined()
+})
+
+it('releases a task disconnected during session setup and admits a later task',async()=>{
+  const backend=new Backend(),store={state:{seen:[]} as RouteState,save:async()=>{}}
+  const router=new GatewayRouter(backend,route,store);cleanup.push(()=>router.close());router.setConnected(true)
+  let release!:(value:{id:string;cwd:string})=>void
+  backend.openSession.mockImplementationOnce(()=>new Promise(resolve=>{release=resolve}))
+  const channel=(id:string):SpectrumInboundMessage=>({id,text:'hello',send:async()=>{},sendVoice:async()=>{},sendFile:async()=>{},responding:fn=>fn()})
+  const first=router.receive(channel('first'))
+  await expect.poll(()=>router.snapshot().busy).toBe(true)
+  router.setConnected(false);release({id:'session',cwd:route.cwd});await first
+  expect(router.snapshot().busy).toBe(false);expect(backend.startTurn).not.toHaveBeenCalled()
+  router.setConnected(true);await router.receive(channel('second'));expect(backend.startTurn).toHaveBeenCalledTimes(1)
+})

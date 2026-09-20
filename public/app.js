@@ -279,9 +279,32 @@ function renderRoute(route) {
   imessageCard.append(iMessageLabel);weixinCard.append(weixinLabel,weixinHelp,weixinRows,addWeixin);channelCards.append(imessageCard,weixinCard);channelsBox.append(channelsTitle,channelsHelp,channelCards)
   section.append(grid,channelsBox,rules,photonBox,provision,provisionStatus)
   updateChannels()
+  const schedules = document.createElement('details'); schedules.className='schedules'
+  const scheduleTitle = document.createElement('summary'); scheduleTitle.textContent='定时任务 · Cron'
+  const scheduleHelp = document.createElement('p'); scheduleHelp.textContent='到点后使用本项目 Agent 执行并主动回复。服务运行、电脑唤醒时有效；忙碌或断线跳过，不补跑。沿用入口会话。微信需先给机器人发过消息。'
+  const scheduleRows = document.createElement('div')
+  const addSchedule = (task = {}) => {
+    const row = document.createElement('fieldset'); row.dataset.scheduleId=task.id || 'cron-'+crypto.randomUUID().slice(0,8)
+    const inputs = {}
+    for (const [key,label,value] of [['name','任务名称',task.name || '新任务'],['cron','Cron：分 时 日 月 周',task.cron || '0 9 * * *'],['timeZone','时区',task.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone],['channelId','回复入口 ID',task.channelId || route.channels?.[0]?.id || 'imessage'],['prompt','交给 Agent 的任务',task.prompt || '']]) {
+      const field=document.createElement('label');field.textContent=label
+      const input=document.createElement(key==='prompt'?'textarea':'input');input.value=value;input.required=true;field.append(input);row.append(field);inputs[key]=input
+    }
+    const hint=document.createElement('p');hint.textContent='0 9 * * 1-5：工作日 09:00；*/30 * * * *：每半小时。入口 ID 可从项目运行状态查看。'
+    const enabled=document.createElement('input');enabled.type='checkbox';enabled.checked=task.enabled === true
+    const enabledLabel=document.createElement('label');enabledLabel.append(enabled,document.createTextNode('启用此任务'))
+    const remove=document.createElement('button');remove.type='button';remove.textContent='删除任务';remove.onclick=()=>row.remove()
+    row.read=()=>({id:row.dataset.scheduleId,enabled:enabled.checked,...Object.fromEntries(Object.entries(inputs).map(([key,input])=>[key,input.value.trim()]))})
+    row.append(hint,enabledLabel,remove);scheduleRows.append(row)
+  }
+  for(const task of route.schedules || [])addSchedule(task)
+  section.readSchedules=()=>[...scheduleRows.children].map(row=>row.read())
+  const addScheduleButton=document.createElement('button');addScheduleButton.type='button';addScheduleButton.textContent='添加定时任务'
+  addScheduleButton.onclick=()=>{if(scheduleRows.children.length<16)addSchedule()}
+  schedules.append(scheduleTitle,scheduleHelp,scheduleRows,addScheduleButton);section.append(schedules)
   const save = document.createElement('button'); save.type = 'button'; save.textContent = '保存并应用此项目'
   save.onclick = async () => {
-    for (const input of section.querySelectorAll('input,select')) if (!input.reportValidity()) return
+    for (const input of section.querySelectorAll('input,select,textarea')) if (!input.reportValidity()) return
     const value = readRoute(section)
     if (state.config.routes.some(r => r.id === section.dataset.id) && value.id !== section.dataset.id) { notice('单独保存时不能修改路由 ID，请使用全局保存。'); return }
     const result = await post('/api/save-route', {revision:formRevision, id:value.id, route:value, photon:{[value.id]:section.querySelector('[name=photonSecret]').value.trim()}})
@@ -295,6 +318,12 @@ function renderRoute(route) {
   save.className='primary project-save'
   section.append(save)
   const runtime = document.createElement('p'); runtime.className = 'runtime'; runtime.dataset.role = 'runtime'; section.append(runtime)
+  const activity=document.createElement('details');activity.className='activity';activity.open=true
+  const activityTitle=document.createElement('summary');activityTitle.textContent='实时对话与活动';activity.append(activityTitle)
+  const activityHelp=document.createElement('p');activityHelp.textContent='每 3 秒刷新 · 每个入口保留最近 200 条活动 · 重启后可回看。发送成功表示渠道接口已接受，不代表已读。';activity.append(activityHelp)
+  const activityCurrent=document.createElement('p');activityCurrent.dataset.role='activity-current';activity.append(activityCurrent)
+  const activityList=document.createElement('div');activityList.dataset.role='activity';activityList.className='activity-list';activity.append(activityList)
+  section.append(activity)
   const advanced=document.createElement('details'); advanced.className='advanced'
   const summary=document.createElement('summary'); summary.textContent='高级配置'; advanced.append(summary)
   const advancedGrid=document.createElement('div'); advancedGrid.className='grid'; advanced.append(advancedGrid)
@@ -316,9 +345,62 @@ const phaseLabel = phase => ({listening:'运行中',stopped:'已停止',starting
 function statuses() {
   for (const section of $('routes').children) {
     const status = state.routes.find(r => r.id === section.dataset.id)
+    renderActivity(section, status)
     const badge = section.querySelector('[data-role=status]'); badge.textContent = status ? phaseLabel(status.phase) : '未保存'; badge.classList.toggle('live', status?.phase === 'listening')
     section.querySelector('[data-role=runtime]').textContent = status?.channels?.map(c=>`${c.kind === 'weixin' ? '微信' : 'iMessage'} · ${phaseLabel(c.phase)} · ${c.error || (c.busy ? '任务运行中' : '空闲')} · 待处理 ${c.pending || 0} · 已接收 ${c.receivedCount || 0}`).join('\n') || status?.error || (status ? `${status.busy ? '任务运行中' : '空闲'} · 会话 ${status.sessionId || '尚未开始'} · 待处理 ${status.pending || 0} · 已接收 ${status.receivedCount || 0} · 最近结果 ${status.lastTurnStatus || '—'}` : '')
   }
+}
+const activityLabels = {
+'session-ready':'会话就绪','run-created':'运行已创建，等待模型活动','model-active':'模型返回活动','generating':'开始生成回复','tool-running':'正在执行工具','tool-completed':'工具执行完成','tool-failed':'工具报告错误','preview':'回复生成中','scheduled':'定时任务触发','schedule-skipped':'定时任务已跳过',
+  stopped:'路线已停止',accepted:'适配器已接单','media-failed':'附件读取或发送失败',connected:'渠道已连接',disconnected:'渠道断开',received:'网关收到消息',unavailable:'未处理：连接不可用',duplicate:'重复消息已忽略',
+  'opening-session':'正在建立 Agent 会话',submitting:'正在提交任务',started:'适配器已接单',response:'Agent 返回文本',changes:'Agent 报告文件变化',
+  request:'Agent 请求', 'waiting-approval':'等待审批','waiting-answer':'等待回答','interaction-resolved':'已收到审批／回答','interaction-cancelled':'审批／提问取消或超时',
+  completed:'Agent 已完成',interrupted:'任务已中断',failed:'Agent 执行失败',error:'处理失败',busy:'未执行：已有任务运行',
+  sending:'正在发送回复',sent:'渠道接口返回成功','send-failed':'回复发送失败','backend-closed':'Agent 连接已关闭'
+}
+function renderActivity(section, status) {
+  const list=section.querySelector('[data-role=activity]')
+  const entries=(status?.channels || []).flatMap(channel=>(channel.activity || []).map(entry=>({...entry,channelId:channel.id,kind:channel.kind})))
+    .sort((a,b)=>b.at-a.at || b.sequence-a.sequence)
+  section.querySelector('[data-role=activity-current]').textContent=(status?.channels || []).map(channel=>{
+    const last=channel.activity?.at(-1)
+    if(channel.current)return `${channel.id}：${channel.current.phase} · 已用 ${Math.floor((Date.now()-channel.current.startedAt)/1000)} 秒 · 本阶段 ${Math.floor((Date.now()-channel.current.phaseAt)/1000)} 秒`
+    return last ? `${channel.id}：${activityLabels[last.stage] || last.stage} · ${Math.max(0,Math.floor((Date.now()-last.at)/1000))} 秒无新活动` : `${channel.id}：尚无活动`
+  }).join('\n')
+  const signature=JSON.stringify(entries)
+  if(list.dataset.signature===signature) return
+  list.dataset.signature=signature
+  const expanded=new Set([...list.querySelectorAll('details[open]')].map(node=>node.dataset.key))
+  const scroll=list.scrollTop
+  list.replaceChildren()
+  if(!entries.length){const empty=document.createElement('p');empty.textContent='尚无活动记录。消息到达网关后会显示在这里；没有记录不代表上游已送达。';list.append(empty);return}
+  const groups = new Map()
+  for(const entry of [...entries].reverse()) {
+    if(!entry.messageId)continue
+    const key=entry.channelId+':'+entry.messageId
+    if(!groups.has(key))groups.set(key,[])
+    groups.get(key).push(entry)
+  }
+  for(const [key,rows] of groups) {
+    const turn=document.createElement('article');turn.className='chat-turn'
+    const input=rows.find(e=>['received','scheduled'].includes(e.stage))
+    const bubble=document.createElement('div');bubble.className='chat-user'
+    const from=document.createElement('small');from.textContent=(input?.stage==='scheduled'?'定时任务':'你')+' · '+rows[0].channelId+' · '+new Date(rows[0].at).toLocaleString()
+    const text=document.createElement('p');text.textContent=input?.text || '较早的消息已超出保留范围';bubble.append(from,text);turn.append(bubble)
+    const answer=document.createElement('div');answer.className='chat-agent'
+    const title=document.createElement('strong');title.textContent='Agent';answer.append(title)
+    const finals=rows.filter(e=>e.stage==='response'), responses=finals.length?finals:rows.filter(e=>e.stage==='preview').slice(-1)
+    for(const response of responses){const content=document.createElement('p');content.textContent=(response.stage==='preview'?'回复片段（未完成）\n':'')+(response.text || '');answer.append(content)}
+    const outcome=rows.filter(e=>['completed','failed','interrupted','error','send-failed','schedule-skipped','busy'].includes(e.stage)).at(-1)
+    if(outcome){const result=document.createElement('p');result.textContent=outcome.text || activityLabels[outcome.stage];if(['failed','error','send-failed'].includes(outcome.stage))result.className='activity-error';answer.append(result)}
+    const steps=document.createElement('details');steps.dataset.key=key;steps.open=expanded.has(key)
+    const summary=document.createElement('summary');summary.textContent='执行步骤';steps.append(summary)
+    for(const entry of rows.filter(e=>!['received','scheduled','response','preview'].includes(e.stage))){
+      const item=document.createElement('p');item.textContent=new Date(entry.at).toLocaleTimeString()+' · '+(activityLabels[entry.stage] || entry.stage)+(entry.text?'\n'+entry.text:'');steps.append(item)
+    }
+    answer.append(steps);turn.append(answer);list.append(turn)
+  }
+  list.scrollTop=scroll
 }
 async function refresh(initial = false) {
   const response = await fetch('/api/state'); if (!response.ok) throw new Error('无法连接本地 Gateway')
@@ -391,8 +473,9 @@ async function post(path, value = {}, report = notice) {
 function readRoute(section) {
   const original = state.config.routes.find(r => r.id === section.dataset.id)
   const route = { ...(original || {}) }
+  const schedules=section.readSchedules();if(schedules.length || original?.schedules)route.schedules=schedules
   if(section.avatar)route.avatar=section.avatar;else delete route.avatar
-  for (const input of section.querySelectorAll('input,select')) {
+  for (const input of section.querySelectorAll('input,select,textarea')) {
     if (!input.name || input.name === 'photonSecret') continue
     if (input.name === 'cursorSettings' && input.disabled) { delete route.cursorSettings; continue }
     if (input.name === 'enabled') route.enabled = input.checked
@@ -412,7 +495,7 @@ function readRoute(section) {
 }
 $('settings').onsubmit = event => {
   event.preventDefault()
-  for(const input of $('settings').querySelectorAll('input,select')) if(!input.reportValidity()) return
+  for(const input of $('settings').querySelectorAll('input,select,textarea')) if(!input.reportValidity()) return
   const photon = {}, routes = []
   for (const section of $('routes').children) {
     const route = readRoute(section)

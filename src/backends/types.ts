@@ -9,9 +9,13 @@ export interface SessionOptions {
   effort?: string
   tools: ObjectValue[]
 }
+export type BackendFailure = 'session-busy' | 'authentication' | 'timeout' | 'aborted' | 'network' | 'rate-limit' | 'unknown'
+export type BackendPhase = 'run-created' | 'model-active' | 'generating' | 'tool-running' | 'tool-completed' | 'tool-failed'
 export type BackendEvent =
+  | { type: 'progress'; sessionId: string; turnId: string; phase: BackendPhase; runId?: string; detail?: string }
+  | { type: 'preview'; sessionId: string; turnId: string; id: string; text: string }
   | { type: 'started'; sessionId: string; turnId: string }
-  | { type: 'completed'; sessionId: string; turnId: string; status: 'completed' | 'interrupted' | 'failed'; failure?: 'session-busy' | 'authentication' | 'unknown' }
+  | { type: 'completed'; sessionId: string; turnId: string; status: 'completed' | 'interrupted' | 'failed'; failure?: BackendFailure }
   | { type: 'message'; sessionId: string; turnId: string; id: string; text: string }
   | { type: 'changes'; sessionId: string; turnId: string; id: string; changes: unknown }
 export interface BackendRequest {

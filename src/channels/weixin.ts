@@ -50,6 +50,24 @@ export class WeixinAdapter implements ChannelAdapter {
     this.stopping = work.finally(()=>{this.stopping=undefined})
     return this.stopping
   }
+  async scheduledMessage(id: string, text: string): Promise<ChannelMessage> {
+    const context = this.store.state.weixinContext, signal = this.controller?.signal
+    if (!context || !signal || signal.aborted || this.state.phase !== 'listening') throw new Error('WeChat needs an active conversation')
+    return this.message(id,text,context,signal)
+  }
+  private message(id: string, text: string, context: string, signal: AbortSignal): ChannelMessage {
+    const user = this.credential.ownerUserId
+    return { id, text, nativeVoice:false,
+            send: async value => { for (const part of splitWeixinText(value)) await this.api.send(this.credential,user,context,part,signal) },
+            sendFile: media => this.api.file(this.credential,user,context,media,signal),
+            sendVoice: async () => { throw new Error('Native voice is not supported by this channel; use file delivery') },
+            responding: async callback => {
+              const typing = new AbortController(), combined = AbortSignal.any([signal,typing.signal])
+              const task = (async () => { while (!combined.aborted) { await this.api.typing(this.credential,user,context,combined).catch(() => {}); await pause(combined,10_000) } })().catch(() => {})
+              try { return await callback() } finally { typing.abort(); await task }
+            },
+          }
+  }
   private async run(signal: AbortSignal) {
     let failures = 0, announced = false
     while (!signal.aborted) {
@@ -77,16 +95,9 @@ export class WeixinAdapter implements ChannelAdapter {
             continue
           }
           if (!text) continue
-          const message: ChannelMessage = { id, text, nativeVoice:false,
-            send: async value => { for (const part of splitWeixinText(value)) await this.api.send(this.credential,user,context,part,signal) },
-            sendFile: media => this.api.file(this.credential,user,context,media,signal),
-            sendVoice: async () => { throw new Error('Native voice is not supported by this channel; use file delivery') },
-            responding: async callback => {
-              const typing = new AbortController(), combined = AbortSignal.any([signal,typing.signal])
-              const task = (async () => { while (!combined.aborted) { await this.api.typing(this.credential,user,context,combined).catch(() => {}); await pause(combined,10_000) } })().catch(() => {})
-              try { return await callback() } finally { typing.abort(); await task }
-            },
-          }
+          this.store.state.weixinContext = context
+          await this.store.save()
+          const message = this.message(id,text,context,signal)
           // Stop must not wait for an Agent's session creation or turn admission.
           // Gateway closes the backend next; the handler promise remains observed.
           signal.throwIfAborted()
