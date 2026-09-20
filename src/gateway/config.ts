@@ -8,6 +8,7 @@ const env = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/)
 export const channelSchema = z.discriminatedUnion('kind', [
   z.object({ id: identifier, kind: z.literal('imessage'), projectId: z.string().min(1), projectSecretEnv: env,
     senderPhoneNumber: phone, assignedPhoneNumber: phone }).strict(),
+  z.object({ id: identifier, kind: z.literal('telegram'), botId: z.string().regex(/^[1-9]\d{0,15}$/), ownerUserId: z.string().regex(/^[1-9]\d{0,15}$/) }).strict(),
   z.object({ id: identifier, kind: z.literal('weixin'), accountId: z.string().min(1).max(256) }).strict(),
 ])
 export type ChannelConfig = z.infer<typeof channelSchema>

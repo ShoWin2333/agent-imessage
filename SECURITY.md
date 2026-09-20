@@ -19,3 +19,7 @@ The backend's own OS sandbox and permission implementation remain part of the tr
 The deployment requires one trusted local OS account. Other processes running as that account may access its files and local UI. Do not expose the UI through a tunnel or reverse proxy without adding a separate authenticated control plane.
 
 Report vulnerabilities privately to the repository maintainer. Include a minimal reproduction without real keys, phone numbers or message contents.
+
+## Telegram
+
+Telegram uses the fixed HTTPS Bot API origin with redirects disabled. Bot Tokens are held in the private secrets file and provider errors are sanitized so token-bearing request URLs do not reach runtime status. Only private messages whose sender and chat IDs both match the configured owner are admitted; groups, other users, bots and edited updates are ignored. Inbound attachments and captions are not executed. One bot may bind to one channel only, preventing competing update consumers inside a configuration. Bot/owner identity participates in state isolation. A separate application using the same bot can still conflict with polling and must be stopped separately.

@@ -30,7 +30,8 @@ struct NativeProjectView: View {
             else { configuration }
         }
         .navigationTitle(draft.name)
-        .onAppear { if draft.dirty && draft.value.text("cwd").isEmpty { tab = "config" } }
+        .onChange(of: store.channelSettingsRequest) { _, id in if id == draft.id { tab = "config"; store.channelSettingsRequest = nil } }
+        .onAppear { if store.channelSettingsRequest == draft.id { tab = "config"; store.channelSettingsRequest = nil }; if draft.dirty && draft.value.text("cwd").isEmpty { tab = "config" } }
         .confirmationDialog("移除项目不会影响其他项目。若本项目正在执行，请先停止任务。",isPresented:$removeConfirmation) {
             Button("移除项目",role:.destructive) { Task { await store.remove(draft) } }
         }

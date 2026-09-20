@@ -20,8 +20,8 @@ export const appSchema = z.object({
 }).strict()
 export type AppConfig = z.infer<typeof appSchema>
 export interface WeixinCredential { token: string; accountId: string; ownerUserId: string; baseUrl: string }
-export interface Secrets { weixin?: Record<string, WeixinCredential> | undefined; cursorApiKey?: string | undefined; photon: Record<string, string> }
-const secretSchema = z.object({ weixin: z.record(z.string(), z.object({token:z.string().min(1),accountId:z.string().min(1),ownerUserId:z.string().min(1),baseUrl:z.string().url()})).optional(), cursorApiKey: z.string().optional(), photon: z.record(z.string(), z.string()) })
+export interface Secrets { photonAccounts?: Record<string,{secret:string;assignedPhoneNumber:string;senderPhoneNumber:string}> | undefined; telegramAccounts?: Record<string, {ownerUserId: string; username: string}> | undefined; telegram?: Record<string, string> | undefined; weixin?: Record<string, WeixinCredential> | undefined; cursorApiKey?: string | undefined; photon: Record<string, string> }
+const secretSchema = z.object({ photonAccounts:z.record(z.string(),z.object({secret:z.string().min(1),assignedPhoneNumber:z.string(),senderPhoneNumber:z.string()})).optional(), telegramAccounts: z.record(z.string(),z.object({ownerUserId:z.string().regex(/^[1-9]\d{0,15}$/),username:z.string()})).optional(), telegram: z.record(z.string(), z.string().regex(/^[1-9]\d*:[A-Za-z0-9_-]+$/)).optional(), weixin: z.record(z.string(), z.object({token:z.string().min(1),accountId:z.string().min(1),ownerUserId:z.string().min(1),baseUrl:z.string().url()})).optional(), cursorApiKey: z.string().optional(), photon: z.record(z.string(), z.string()) })
 
 export async function atomicJson(file: string, value: unknown): Promise<void> {
   await mkdir(dirname(file), { recursive: true, mode: 0o700 })
@@ -49,7 +49,7 @@ export async function validateConfig(value: unknown, resolveWorkspaces = true): 
         if (owner) throw new Error(`WeChat 机器人必须唯一绑定（unique）：已绑定「${owner}」，请先在原项目解绑并保存，再绑定「${route.label || route.id}」。停止项目不会释放绑定。`)
         weixinOwners.set(channel.accountId, route.label || route.id)
       }
-      const project = channel.kind === 'imessage' ? `imessage:${channel.projectId}` : `weixin:${channel.accountId}`
+      const project = channel.kind === 'imessage' ? `imessage:${channel.projectId}` : channel.kind === 'telegram' ? `telegram:${channel.botId}` : `weixin:${channel.accountId}`
       const address = channel.kind === 'imessage' ? `${channel.senderPhoneNumber}:${channel.assignedPhoneNumber}` : project
       if (projects.has(project) || addresses.has(address)) throw new Error('Message accounts and sender/recipient pairs must be unique across projects')
       projects.add(project); addresses.add(address)

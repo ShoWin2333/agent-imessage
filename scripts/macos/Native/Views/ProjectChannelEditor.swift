@@ -3,80 +3,86 @@ import SwiftUI
 struct ProjectChannelEditor: View {
     @ObservedObject var store: GatewayStore
     @ObservedObject var draft: ProjectDraft
-    @State private var photonProjects: [JSONObject] = []
-    @State private var selectedPhoton = ""
+    @State private var expandedChannels: Set<String> = []
+    private func title(_ kind: String) -> String { ["imessage":"iMessage","weixin":"微信","telegram":"Telegram"][kind] ?? kind }
+    private func key(_ kind: String) -> String { ["imessage":"projectId","weixin":"accountId","telegram":"botId"][kind] ?? "" }
+    private func accounts(_ kind: String) -> [JSONObject] {
+        store.state.objects(["imessage":"photonAccounts","weixin":"weixinAccounts","telegram":"telegramAccounts"][kind] ?? "")
+    }
+    private func owner(_ kind: String, _ account: String, _ channelID: String) -> String? {
+        for route in store.state.object("config").objects("routes") where route.text("id") != draft.id {
+            if ProjectDraft(route).channels.contains(where: { $0.text("kind") == kind && $0.text(key(kind)) == account }) { return route.text("label",route.text("id")) }
+        }
+        if draft.channels.contains(where: { $0.text("id") != channelID && $0.text("kind") == kind && $0.text(key(kind)) == account }) { return "当前 Agent 的其他入口" }
+        return nil
+    }
+    private func label(_ account: JSONObject, _ kind: String) -> String {
+        if kind == "telegram", !account.text("username").isEmpty { return "@" + account.text("username") }
+        if kind == "imessage" { return account.text("assignedPhoneNumber") + " · " + account.text("projectId") }
+        return account.text(key(kind))
+    }
     var body: some View {
         ForEach(draft.channels.map { $0.text("id") },id:\.self) { id in
             if let channel = draft.channels.first(where: { $0.text("id") == id }) {
-                DisclosureGroup(channel.text("kind") == "weixin" ? "微信 · \(id)" : "iMessage · \(id)") {
-                    if channel.text("kind") == "weixin" {
-                        Picker("微信机器人",selection:field(id,"accountId")) {
-                            Text("选择已扫码绑定的机器人").tag("")
-                            ForEach(accounts(current:channel.text("accountId")),id:\.self) { account in
-                                Text(account + ownerLabel(account)).tag(account)
-                                    .disabled(isOwnedElsewhere(account))
+                let kind = channel.text("kind")
+                DisclosureGroup(title(kind) + " · " + id, isExpanded: Binding(get: { expandedChannels.contains(id) }, set: { if $0 { expandedChannels.insert(id) } else { expandedChannels.remove(id) } })) {
+                    Picker("选择" + title(kind) + "账号", selection: Binding(get: { draft.channels.first { $0.text("id") == id }?.text(key(kind)) ?? "" }, set: { select($0, kind:kind, id:id) })) {
+                        Text("选择已添加的账号").tag("")
+                        ForEach(accounts(kind).map { $0.text(key(kind)) }, id: \.self) { accountID in
+                            if let account = accounts(kind).first(where: { $0.text(key(kind)) == accountID }) {
+                                let bound = owner(kind,accountID,id)
+                                Text(label(account,kind) + (bound.map { "（已绑定：" + $0 + "）" } ?? ""))
+                                    .tag(accountID).disabled(bound != nil)
                             }
                         }
-                    } else {
-                        TextField("你的号码（含国家区号）",text:field(id,"senderPhoneNumber"))
-                        TextField("Photon 项目 ID",text:field(id,"projectId"))
-                        TextField("Photon 分配的号码",text:field(id,"assignedPhoneNumber"))
-                        TextField("密钥环境变量",text:field(id,"projectSecretEnv"))
-                        SecureField("Project Secret（留空保留已存密钥）",text:Binding(get:{draft.secrets[secretKey(id)] ?? ""},set:{draft.secrets[secretKey(id)] = $0; draft.dirty = true}))
-                        HStack {
-                            Button("加载已有 Photon 项目") { Task { if let result = await store.perform("api/photon/projects") { photonProjects = result.objects("projects") } } }
-                            Button("创建 / 获取号码") { provision(id,existing:false) }
-                        }
-                        if !photonProjects.isEmpty {
-                            Picker("已有项目",selection:$selectedPhoton) {
-                                Text("选择 Photon 项目").tag("")
-                                ForEach(photonProjects.indices,id:\.self) { i in Text(photonProjects[i].text("name") + " · " + photonProjects[i].text("id")).tag(photonProjects[i].text("id")) }
-                            }
-                            Button("使用所选项目 / 获取号码") { provision(id,existing:true) }.disabled(selectedPhoton.isEmpty)
+                        if !channel.text(key(kind)).isEmpty && !accounts(kind).contains(where: { $0.text(key(kind)) == channel.text(key(kind)) }) {
+                            Text(channel.text(key(kind)) + "（现有配置）").tag(channel.text(key(kind)))
                         }
                     }
-                    Button("移除此入口",role:.destructive) { draft.setChannels(draft.channels.filter { $0.text("id") != id }) }
+                    if kind == "imessage" {
+                        VStack(alignment:.leading,spacing:4) {
+                            Text("允许联系的手机号（含国家区号）")
+                            TextField("例如：+8613800000000",text:field(id,"senderPhoneNumber")).labelsHidden().textFieldStyle(.roundedBorder)
+                        }
+                        Text("接收号码：" + channel.text("assignedPhoneNumber")).font(.caption).foregroundStyle(.secondary)
+                    }
+                    Button("解绑此入口",role:.destructive) { draft.setChannels(draft.channels.filter { $0.text("id") != id }) }
                 }
             }
         }
         HStack {
-            Button("添加 iMessage 入口") {
-                let id = draft.channels.contains(where:{$0.text("id") == "imessage"}) ? "imessage-" + UUID().uuidString.prefix(8) : "imessage"
-                draft.setChannels(draft.channels + [["id":String(id),"kind":"imessage","projectId":"","senderPhoneNumber":"","assignedPhoneNumber":"","projectSecretEnv":"PHOTON_" + draft.id.replacingOccurrences(of:"-",with:"_").uppercased()]])
+            ForEach(["imessage","weixin","telegram"], id: \.self) { kind in
+                Button("绑定 " + title(kind)) { add(kind) }
             }
-            Button("添加微信入口") { draft.setChannels(draft.channels + [["id":"weixin-" + UUID().uuidString.prefix(8),"kind":"weixin","accountId":""]]) }
         }.disabled(draft.channels.count >= 8)
-        Text("先在「消息渠道」中绑定账号。机器人只能绑定一个项目；更换项目前先解绑并保存。关闭全部入口后项目会停用。").font(.caption).foregroundStyle(.secondary)
+        Button("前往消息渠道添加 / 管理账号") { store.selection = "channels" }
+        Text("选择账号后保存并应用。每个账号只能绑定一个 Agent；转移前请先在原 Agent 解绑并保存。解绑全部入口后项目会停用。").font(.caption).foregroundStyle(.secondary)
+    }
+    private func add(_ kind: String) {
+        let id = kind == "imessage" && !draft.channels.contains(where: { $0.text("id") == "imessage" }) ? "imessage" : kind + "-" + UUID().uuidString.prefix(8)
+        var channel: JSONObject = ["id":String(id),"kind":kind]
+        if kind == "imessage" { channel.merge(["projectId":"","projectSecretEnv":"AGENT_PHOTON_MANAGED","senderPhoneNumber":"","assignedPhoneNumber":""]) { _,new in new } }
+        else if kind == "weixin" { channel["accountId"] = "" }
+        else { channel["botId"] = ""; channel["ownerUserId"] = "" }
+        draft.setChannels(draft.channels + [channel]); expandedChannels.insert(String(id))
+    }
+    private func select(_ value: String, kind: String, id: String) {
+        var channels = draft.channels
+        guard let index = channels.firstIndex(where: { $0.text("id") == id }) else { return }
+        channels[index][key(kind)] = value
+        let account = accounts(kind).first { $0.text(key(kind)) == value } ?? [:]
+        if kind == "telegram" { channels[index]["ownerUserId"] = account.text("ownerUserId") }
+        if kind == "imessage" {
+            channels[index]["assignedPhoneNumber"] = account.text("assignedPhoneNumber")
+            channels[index]["senderPhoneNumber"] = account.text("senderPhoneNumber")
+            channels[index]["projectSecretEnv"] = "AGENT_PHOTON_MANAGED"
+        }
+        draft.setChannels(channels)
     }
     private func field(_ id: String, _ key: String) -> Binding<String> {
         Binding(get:{draft.channels.first{$0.text("id") == id}?.text(key) ?? ""},set:{ text in
             var channels = draft.channels
             if let index = channels.firstIndex(where:{$0.text("id") == id}) { channels[index][key] = text; draft.setChannels(channels) }
         })
-    }
-    private func secretKey(_ id: String) -> String { draft.value["channels"] == nil ? draft.id : draft.id + ":" + id }
-    private func accounts(current: String) -> [String] {
-        Array(Set(store.state.objects("weixinAccounts").map{$0.text("accountId")} + (current.isEmpty ? [] : [current]))).sorted()
-    }
-    private func ownerLabel(_ account: String) -> String { isOwnedElsewhere(account) ? "（已绑定其他项目）" : "" }
-    private func isOwnedElsewhere(_ account: String) -> Bool {
-        store.state.object("config").objects("routes").contains { route in
-            route.text("id") != draft.id && route.objects("channels").contains { $0.text("accountId") == account }
-        }
-    }
-    private func provision(_ id: String, existing: Bool) {
-        guard let channel = draft.channels.first(where:{$0.text("id") == id}) else { return }
-        let sender = channel.text("senderPhoneNumber")
-        var body: JSONObject = ["id":draft.id,"name":draft.id,"sender":sender]
-        if existing { body["projectId"] = selectedPhoton }
-        Task {
-            if let result = await store.perform(existing ? "api/photon/select" : "api/photon/provision",body) {
-                field(id,"projectId").wrappedValue = result.text("projectId")
-                field(id,"assignedPhoneNumber").wrappedValue = result.text("assignedPhoneNumber")
-                // Server retains a selected credential until this project is saved.
-                draft.secrets[secretKey(id)] = ""
-                store.notice = "已获取号码，请保存并应用项目。"
-            }
-        }
     }
 }

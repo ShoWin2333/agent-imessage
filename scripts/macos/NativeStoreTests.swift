@@ -17,6 +17,11 @@ final class MockGatewayProtocol: URLProtocol {
 }
 @main struct NativeStoreTests {
     @MainActor static func main() async throws {
+        for invalid in ["", "ShoWin2333", "@user", "+8613800000000", "123:token", "0", "9007199254740992"] {
+            precondition(TelegramFormValidation.ownerError(invalid) != nil)
+        }
+        precondition(TelegramFormValidation.ownerError(" 123456789 ") == nil)
+        print("PASS: Telegram owner validation rejects usernames, phones and tokens before submission")
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [MockGatewayProtocol.self]
         let session = URLSession(configuration:config)
