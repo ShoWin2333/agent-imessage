@@ -29,6 +29,30 @@ jobs:
       - run: npm run audit:prod
       - run: npm pack --dry-run --ignore-scripts
 
+  plugin:
+    name: DSH plugin Node ${{ matrix.node }} (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: apps/dsh-imessage
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: ['22.19.0', '24']
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: apps/dsh-imessage/package-lock.json
+      - run: npm ci --legacy-peer-deps --ignore-scripts
+      - run: npm test
+      - run: npm run build
+      - run: npm run audit:prod
+      - run: npm pack --dry-run --ignore-scripts
+
   native:
     name: macOS native contracts
     runs-on: macos-15

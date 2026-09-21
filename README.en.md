@@ -1,5 +1,14 @@
 # Agent iMessage
 
+This repository maintains two parallel product lines:
+
+| Product | Where it runs | Location |
+| --- | --- | --- |
+| **macOS App / Gateway** | Native macOS app with Cursor / Codex / headless DSH backends | Repository root (this README) |
+| **DSH iMessage plugin** | Original DSH Web plugin on **Windows / Linux / macOS** | [`apps/dsh-imessage`](./apps/dsh-imessage) |
+
+Use the DSH plugin on Windows. The two lines share the Photon iMessage idea but keep separate configuration, UI, and process models.
+
 A standalone local Agent App / Gateway for iMessage. One native macOS SwiftUI app manages multiple projects backed by **Cursor SDK**, **Codex App Server**, or **headless DSH**. No desktop editor or DSH Web process is required.
 
 ```text
@@ -58,7 +67,7 @@ agent-imessage import /private/dsh-settings.json /private/new/config.json /priva
 
 Import preserves source files, refuses an existing destination, and migrates all routes or fails validation. The standard Cursor prototype directory also supports dedupe and verified local SDK session migration. DSH flat/multi-route settings and v1/v2 Photon credential exports are supported; old DSH plugin active-session mappings are not automatically migrated. DSH's own historical sessions remain intact.
 
-`apps/cursor-imessage` is now only a launcher. The optional editor extension opens the standalone UI and no longer owns configuration or process lifetime. The old DSH plugin UI and separate Codex distribution are retired.
+`apps/cursor-imessage` is now only a launcher. The optional editor extension opens the standalone UI and no longer owns configuration or process lifetime. The DSH plugin continues as a parallel product in [`apps/dsh-imessage`](./apps/dsh-imessage); the separate Codex distribution is retired.
 
 ## Commands and media
 

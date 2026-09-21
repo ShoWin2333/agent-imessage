@@ -1,5 +1,14 @@
 # Agent iMessage
 
+本仓库分成两条并行产品线：
+
+| 产品 | 适用环境 | 位置 |
+| --- | --- | --- |
+| **macOS App / Gateway** | macOS 原生 App，独立运行 Cursor / Codex / DSH backend | 仓库根目录（本 README） |
+| **DSH iMessage 插件** | 跑在 DSH Web 里的原始插件，支持 **Windows / Linux / macOS** | [`apps/dsh-imessage`](./apps/dsh-imessage) |
+
+Windows 请使用 DSH 插件，不要运行 macOS App。两条线共用 Photon iMessage 传输思路，但配置、UI 和进程模型互相独立。
+
 独立运行的本地 Agent App / Gateway。用 iMessage 操作本地项目，在 macOS SwiftUI 原生界面 中管理 Cursor、Codex 和 DSH。无需启动 Cursor Desktop、Codex Desktop 或 DSH Web。
 
 ```text
@@ -192,7 +201,7 @@ App 启动的服务使用独立随机 launchd label，并在私有目录中先�
 
    支持旧扁平设置、`routes` 和 v1 单项目 / v2 多项目凭据。按 Photon 项目名称匹配，缺失或无效配置会报错，不丢弃路线。DSH 的持久化历史仍由 DSH 保存；旧插件的活动会话映射目前不自动迁移，Gateway 从新会话开始。
 
-迁移后先停止/禁用旧消费者，再启动 Gateway。旧配置与旧持久化文件可以保留用于回退。仓库中的 `apps/cursor-imessage` 现在只是根 App 的启动入口；原浏览器入口编辑器扩展已移除。旧 `packages/codex` 独立分发与 DSH 插件 UI 已移除，统一从仓库根目录构建和安装。
+迁移后先停止/禁用旧消费者，再启动 Gateway。旧配置与旧持久化文件可以保留用于回退。仓库中的 `apps/cursor-imessage` 现在只是根 App 的启动入口；原浏览器入口编辑器扩展已移除。DSH 插件作为并行产品线保留在 [`apps/dsh-imessage`](./apps/dsh-imessage)，不再内嵌于本 App；旧 `packages/codex` 独立分发已移除。统一从仓库根目录构建和安装 **macOS App / Gateway**。
 
 ## 手机命令与共享工具
 
@@ -220,6 +229,7 @@ App 启动的服务使用独立随机 launchd label，并在私有目录中先�
 - `src/backends/`：Cursor SDK、Codex App Server、DSH ACP 协议转换；SDK worker 隔离 Agent 的环境变量。
 - `src/spectrum-runtime.ts` 与 Photon / media 基础模块：唯一的授权号码过滤、传输、重连、媒体验证实现。
 - `scripts/macos/Native/`：唯一管理界面；`scripts/macos/Resources/`：原生图标资源。
+- `apps/dsh-imessage/`：并行维护的 DSH Web 插件（Windows / Linux / macOS）。
 
 新增 Claude Code 等 Agent 时，实现一个 `Backend` 并注册到 factory、配置 backend 枚举和 UI 选项即可；不需要重写 iMessage、Photon、审批提示、消息分块或文件验证。
 

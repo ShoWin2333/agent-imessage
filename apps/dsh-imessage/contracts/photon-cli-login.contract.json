@@ -1,0 +1,19 @@
+{
+  "repository": "https://github.com/photon-hq/cli",
+  "source": "src/commands/login.ts",
+  "authSource": "src/lib/auth-client.ts",
+  "commit": "13fb65a3f33e801cb50f7e7a240a8eb6466c4152",
+  "clientId": "photon-cli",
+  "scope": "openid profile email",
+  "grantType": "urn:ietf:params:oauth:grant-type:device_code",
+  "defaultIntervalSeconds": 5,
+  "defaultExpirySeconds": 1800,
+  "slowDownSeconds": 5,
+  "rateLimitSeconds": 10,
+  "errorCodes": [
+    "authorization_pending",
+    "slow_down",
+    "access_denied",
+    "expired_token"
+  ]
+}
