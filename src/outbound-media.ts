@@ -284,7 +284,9 @@ function requireAgentCwd(agent: Agent | undefined): string {
 
 function isPathInside(root: string, target: string): boolean {
   const relative = path.relative(root, target)
-  return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative))
+  if (relative === '') return true
+  if (relative === '..' || path.isAbsolute(relative)) return false
+  return !relative.startsWith(`..${path.sep}`) && !relative.startsWith('../')
 }
 
 function isNotFound(error: unknown): boolean {

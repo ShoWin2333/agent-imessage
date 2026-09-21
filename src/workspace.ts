@@ -2,6 +2,7 @@ import { access, constants, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { DEFAULT_PHOTON_PROJECT_NAME } from './constants.js'
 import { PluginError } from './errors.js'
+import { unwrapCopiedPath } from './path-shape.js'
 
 /** Photon project names allowed in settings and provisioning. */
 const PHOTON_PROJECT_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/
@@ -24,7 +25,7 @@ export function normalizePhotonProjectName(input: string | undefined): string {
  * An empty/undefined override falls back to `process.cwd()`.
  */
 export async function resolveWorkspaceCwd(input: string | undefined, fallback = process.cwd()): Promise<string> {
-  const raw = input?.trim() ?? ''
+  const raw = unwrapCopiedPath(input ?? '')
   if (raw.length === 0) return path.resolve(fallback)
   if (!path.isAbsolute(raw)) {
     throw new PluginError(

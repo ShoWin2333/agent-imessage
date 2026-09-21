@@ -2,6 +2,15 @@
 
 [中文](./README.md) | **English**
 
+**This is the long-lived DSH plugin branch. Do not merge it into `main`.**
+
+| Branch | Product |
+| --- | --- |
+| `main` | macOS App / Gateway |
+| `cursor/dsh-plugin-a61b` (this branch) | Original DSH Web plugin for **Windows / Linux / macOS** |
+
+The two lines continue independently: separate config, UI, process model, and git history. On Windows, check out this branch; do not use the macOS App on `main`.
+
 This fork connects DeepSeek Harness (DSH) to iMessage. Beyond remote text conversations, it lets DSH send **images, arbitrary files, and native voice messages** directly back to the active iMessage conversation.
 
 > DSH is no longer limited to returning a text answer. It can deliver charts, documents, archives, and audio from the workspace straight to your phone.
@@ -48,25 +57,39 @@ Native iMessage voice messages may show “Expires in 2 min.” This is Apple's 
 
 ## Install this fork
 
-The unqualified `dsh-imessage` package on npm refers to the upstream release and may not contain this fork's enhancements. To use the image, file, voice, and multi-route features from this repository, build and install the fork locally:
+The unqualified `dsh-imessage` package on npm refers to the upstream release and may not contain this fork's enhancements. Check out **this plugin branch** and pack it locally; do not install from `main`.
+
+macOS / Linux:
 
 ```sh
-git clone https://github.com/ShoWin2333/dsh-imessage.git
-cd dsh-imessage
+git clone -b cursor/dsh-plugin-a61b --single-branch https://github.com/ShoWin2333/agent-imessage.git
+cd agent-imessage
 npm ci --legacy-peer-deps
 npm run build
 npm pack
-```
-
-If an upstream package or an older build with the same version is already installed, remove it first so the package manager does not reuse the cached artifact:
-
-```sh
 dsh plugin --profile web remove dsh-imessage
 dsh plugin --profile web add ./dsh-imessage-*.tgz
 dsh web
 ```
 
-If DSH runs under launchd or another persistent service, restart that service after installation.
+Windows (PowerShell; WSL is not required):
+
+Install Node.js **22.19+ (22.x) or 24+**, confirm `node -v` and `npm -v`, then:
+
+```powershell
+git clone -b cursor/dsh-plugin-a61b --single-branch https://github.com/ShoWin2333/agent-imessage.git
+cd agent-imessage
+npm ci --legacy-peer-deps
+npm run build
+npm pack
+npx --yes @deepseek-ai/dsh plugin --profile web remove dsh-imessage
+npx --yes @deepseek-ai/dsh plugin --profile web add (Get-ChildItem .\dsh-imessage-*.tgz | Select-Object -First 1).FullName
+npx --yes @deepseek-ai/dsh web
+```
+
+If an upstream package or an older build with the same version is already installed, `remove` clears it before this fork is added. PowerShell does not expand `*.tgz`; pass the actual tarball path. Workspace fields accept Windows absolute paths such as `D:\work\app`; quotes copied from Explorer are stripped automatically.
+
+If DSH runs under launchd, Task Scheduler, or another persistent service, restart that service after installation.
 
 ### Compatibility target
 
@@ -80,7 +103,7 @@ Open **Settings → iMessage**:
 
 1. Select **Authorize** and complete Photon device authorization.
 2. Add or edit a route and set its local workspace, Photon project name, and sender phone number.
-3. An empty workspace uses the `dsh web` process directory; an empty Photon project name uses `dsh`.
+3. An empty workspace uses the `dsh web` process directory; an empty Photon project name uses `dsh`. On Windows use a drive path (`D:\work\app`) or UNC (`\\server\share\repo`); on macOS / Linux use `/absolute/path`.
 4. Save the E.164 phone number that will text the hosted line. The same personal number may be reused across routes.
 5. Copy the hosted iMessage number assigned to the route and message it from the configured personal number.
 

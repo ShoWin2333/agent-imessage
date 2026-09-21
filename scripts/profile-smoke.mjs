@@ -4,17 +4,19 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { parseTrailingJsonArray } from './pack-report.mjs'
+import { resolveCli } from './resolve-cli.mjs'
 
 const execute = promisify(execFile)
 const projectRoot = resolve(import.meta.dirname, '..')
 const temporary = await mkdtemp(join(tmpdir(), 'dsh-imessage-profile-'))
 const packDirectory = join(temporary, 'pack')
 const dshHome = join(temporary, 'home')
-const dshBinary = process.env.DSH_BIN ?? 'dsh'
+const dshBinary = resolveCli(process.env.DSH_BIN ?? 'dsh')
+const npmBinary = resolveCli('npm')
 
 try {
   await mkdir(packDirectory)
-  const packed = await execute('npm', [
+  const packed = await execute(npmBinary, [
     'pack', '--json', '--ignore-scripts', '--pack-destination', packDirectory,
   ], { cwd: projectRoot })
   const report = parseTrailingJsonArray(packed.stdout)

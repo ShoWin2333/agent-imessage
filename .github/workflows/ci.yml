@@ -3,18 +3,21 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [main]
+    branches:
+      - main
+      - cursor/dsh-plugin-a61b
 
 permissions:
   contents: read
 
 jobs:
   test:
-    name: Node ${{ matrix.node }}
-    runs-on: ubuntu-latest
+    name: Node ${{ matrix.node }} (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest, windows-latest]
         node: ['22.19.0', '24']
     steps:
       - uses: actions/checkout@v7
@@ -22,15 +25,27 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
           cache: npm
-      # pnpm/action-setup remains the supported action for the pinned pnpm 10 line.
-      - uses: pnpm/action-setup@v6
-        with:
-          version: 10.33.0
       - run: npm ci --legacy-peer-deps --ignore-scripts
       - run: npm test
       - run: npm run build
       - run: npm run audit:prod
       - run: npm pack --dry-run --ignore-scripts
+
+  profile:
+    name: Packed DSH profile smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+      # pnpm/action-setup remains the supported action for the pinned pnpm 10 line.
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.33.0
+      - run: npm ci --legacy-peer-deps --ignore-scripts
+      - run: npm run build
       # dsh@rc.6 currently resolves dsh-app-boot@rc.7 through its own caret.
       # Those two boot dependencies are peer-only there, so name them explicitly
       # in the disposable CLI used solely for packed-profile validation.

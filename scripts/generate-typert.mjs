@@ -19,7 +19,11 @@ try {
   mkdirSync(packageRoot, { recursive: true })
   cpSync(join(projectRoot, 'src'), join(packageRoot, 'src'), { recursive: true })
   writeFileSync(join(packageRoot, 'package.json'), readFileSync(join(projectRoot, 'package.json')))
-  symlinkSync(join(projectRoot, 'node_modules'), join(workspace, 'node_modules'), 'dir')
+  symlinkSync(
+    join(projectRoot, 'node_modules'),
+    join(workspace, 'node_modules'),
+    process.platform === 'win32' ? 'junction' : 'dir',
+  )
 
   mkdirSync(join(protocolRoot, 'src'), { recursive: true })
   writeFileSync(join(protocolRoot, 'package.json'), `${JSON.stringify({

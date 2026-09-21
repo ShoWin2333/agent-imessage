@@ -2,6 +2,15 @@
 
 **中文** | [English](./README.en.md)
 
+**这是长期独立的 DSH 插件分支，不要合并进 `main`。**
+
+| 分支 | 产品 |
+| --- | --- |
+| `main` | macOS App / Gateway |
+| `cursor/dsh-plugin-a61b`（本分支） | 原始 DSH Web 插件，支持 **Windows / Linux / macOS** |
+
+两条线齐头并进：配置、UI、进程模型和 git 历史都分开。Windows 请检出本分支，不要使用 `main` 上的 macOS App。
+
 这个 fork 把 DeepSeek Harness（DSH）接入 iMessage。除了通过短信式对话远程使用 DSH，它还能让 DSH 在当前 iMessage 会话里直接发回**图片、任意文件和原生语音消息**。
 
 > 不只是把最终答案转成文字：你可以让 DSH 把工作区里的图表、文档、压缩包或音频直接发到手机上。
@@ -48,25 +57,39 @@ iMessage 原生语音默认可能显示“2 分钟后过期”。这是 Apple �
 
 ## 安装这个 Fork
 
-npm 上未带仓库地址的 `dsh-imessage` 指向上游正式包，不保证包含本 fork 的增强。要使用这里的图片、文件、语音和多路由能力，请从本仓库打包安装：
+npm 上未带仓库地址的 `dsh-imessage` 指向上游正式包，不保证包含本 fork 的增强。请检出**本插件分支**后打包安装，不要从 `main` 安装。
+
+macOS / Linux：
 
 ```sh
-git clone https://github.com/ShoWin2333/dsh-imessage.git
-cd dsh-imessage
+git clone -b cursor/dsh-plugin-a61b --single-branch https://github.com/ShoWin2333/agent-imessage.git
+cd agent-imessage
 npm ci --legacy-peer-deps
 npm run build
 npm pack
-```
-
-如果已经安装过上游包或同版本的旧构建，先移除它，以免包管理器复用缓存：
-
-```sh
 dsh plugin --profile web remove dsh-imessage
 dsh plugin --profile web add ./dsh-imessage-*.tgz
 dsh web
 ```
 
-如果 DSH 由 launchd 或其他常驻服务启动，请在安装后重启对应服务。
+Windows（PowerShell；无需 WSL）：
+
+先安装 Node.js **22.19+（22 系列）或 24+**，确认 `node -v` 与 `npm -v` 可用，然后：
+
+```powershell
+git clone -b cursor/dsh-plugin-a61b --single-branch https://github.com/ShoWin2333/agent-imessage.git
+cd agent-imessage
+npm ci --legacy-peer-deps
+npm run build
+npm pack
+npx --yes @deepseek-ai/dsh plugin --profile web remove dsh-imessage
+npx --yes @deepseek-ai/dsh plugin --profile web add (Get-ChildItem .\dsh-imessage-*.tgz | Select-Object -First 1).FullName
+npx --yes @deepseek-ai/dsh web
+```
+
+如果已经安装过上游包或同版本的旧构建，上面的 `remove` 会清掉缓存后再装本 fork。PowerShell 不会展开 `*.tgz` 通配符，必须传入实际文件路径。工作区请填 Windows 绝对路径，例如 `D:\work\app`；从资源管理器「复制路径」带上的引号会被自动去掉。
+
+如果 DSH 由 launchd、计划任务或其他常驻服务启动，请在安装后重启对应服务。
 
 ### 兼容目标
 
@@ -80,7 +103,7 @@ dsh web
 
 1. 点击 **Authorize**，完成 Photon 设备授权。
 2. 新增或编辑路由，为它设置本地工作区、Photon 项目名和发信号码。
-3. 工作区留空时使用 `dsh web` 的进程目录；Photon 项目名留空时使用 `dsh`。
+3. 工作区留空时使用 `dsh web` 的进程目录；Photon 项目名留空时使用 `dsh`。Windows 使用盘符路径（`D:\work\app`）或 UNC（`\\server\share\repo`），macOS / Linux 使用 `/absolute/path`。
 4. 保存你会用来给托管号码发消息的 E.164 手机号。同一个个人号码可以复用于多条路由。
 5. 复制该路由分配到的托管 iMessage 号码，并从已配置的个人号码给它发消息。
 

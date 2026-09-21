@@ -139,6 +139,32 @@ describe('Settings > iMessage', () => {
     expect(screen.getByDisplayValue('dsh-laptop-b')).toBeTruthy()
   })
 
+  it('accepts a Windows drive-letter workspace path', async () => {
+    const initial = pluginState()
+    const saved = pluginState({
+      revision: 8,
+      routes: [defaultRoute({ workspaceCwd: 'D:\\work\\app', photonProjectName: 'dsh' })],
+    })
+    const { api } = renderState(initial)
+    api.upsertRoute.mockResolvedValue(success(saved))
+    const user = userEvent.setup()
+
+    const cwd = await screen.findByLabelText('Local project directory')
+    await user.clear(cwd)
+    await user.type(cwd, String.raw`D:\work\app`)
+    await user.click(screen.getByRole('button', { name: 'Save route' }))
+
+    await waitFor(() => {
+      expect(api.upsertRoute).toHaveBeenCalledWith({
+        id: 'default',
+        label: 'dsh',
+        workspaceCwd: 'D:\\work\\app',
+        photonProjectName: 'dsh',
+        expectedRevision: 7,
+      })
+    })
+  })
+
   it('validates E.164, provisions a sender, and renders the assigned sms link', async () => {
     const initial = pluginState({
       credentialConfigured: true,

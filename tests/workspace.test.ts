@@ -26,6 +26,7 @@ describe('workspace routing helpers', () => {
     await expect(resolveWorkspaceCwd(undefined, dir)).resolves.toBe(path.resolve(dir))
     await expect(resolveWorkspaceCwd('', dir)).resolves.toBe(path.resolve(dir))
     await expect(resolveWorkspaceCwd(dir)).resolves.toBe(path.resolve(dir))
+    await expect(resolveWorkspaceCwd(`"${dir}"`)).resolves.toBe(path.resolve(dir))
     await expect(resolveWorkspaceCwd('relative/path')).rejects.toMatchObject({ code: 'invalid-workspace' })
     await expect(resolveWorkspaceCwd(path.join(dir, 'missing'))).rejects.toMatchObject({
       code: 'invalid-workspace',

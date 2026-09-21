@@ -61,13 +61,34 @@ describe('loadOutboundMedia path and type validation', () => {
     expect(media.bytes.equals(Buffer.from([0x89, 0x50, 0x4e, 0x47]))).toBe(true)
   })
 
+  it('resolves nested workspace files using native path separators', async () => {
+    const cwd = await tempWorkspace()
+    await mkdir(path.join(cwd, 'reports'))
+    await writeFile(path.join(cwd, 'reports', 'photo.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]))
+    const media = await loadOutboundMedia({
+      rawPath: path.join('reports', 'photo.png'),
+      kind: 'file',
+      workspaceCwd: cwd,
+      maxBytes: DEFAULT_MAX_OUTBOUND_MEDIA_BYTES,
+      signal: new AbortController().signal,
+    })
+    expect(media).toMatchObject({ name: 'photo.png', mimeType: 'image/png' })
+  })
+
   it('rejects symlink escape outside the workspace', async () => {
     const cwd = await tempWorkspace()
     const outside = await tempWorkspace()
     await writeFile(path.join(outside, 'secret.png'), Buffer.from('secret'))
-    await symlink(path.join(outside, 'secret.png'), path.join(cwd, 'alias.png'))
+    let rawPath: string
+    if (process.platform === 'win32') {
+      await symlink(outside, path.join(cwd, 'outside-link'), 'junction')
+      rawPath = path.join('outside-link', 'secret.png')
+    } else {
+      await symlink(path.join(outside, 'secret.png'), path.join(cwd, 'alias.png'))
+      rawPath = 'alias.png'
+    }
     await expect(loadOutboundMedia({
-      rawPath: 'alias.png',
+      rawPath,
       kind: 'file',
       workspaceCwd: cwd,
       maxBytes: DEFAULT_MAX_OUTBOUND_MEDIA_BYTES,

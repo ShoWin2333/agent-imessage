@@ -74,6 +74,7 @@ import type {
   SaveWorkspaceRequest,
   UpsertRouteRequest,
 } from './types.js'
+import { isAbsolutePathShape, unwrapCopiedPath } from './path-shape.js'
 import { normalizePhotonProjectName, resolveWorkspaceCwd } from './workspace.js'
 
 export type * from './types.js'
@@ -87,6 +88,7 @@ export { parseQuestionAnswer } from './question-answer.js'
 export { TurnCorrelation } from './turn-correlation.js'
 export { authorizeDevice } from './device-auth.js'
 export { ensureDshProject, ensureSharedUser } from './photon-management.js'
+export { isAbsolutePathShape, unwrapCopiedPath } from './path-shape.js'
 export { normalizePhotonProjectName, resolveWorkspaceCwd } from './workspace.js'
 export { normalizeRoutes, createRouteSettings } from './routes.js'
 
@@ -845,16 +847,12 @@ function accountView(account: {
 
 function validateSettings(settings: PluginSettings): void {
   for (const route of normalizeRoutes(settings)) {
-    if (route.workspaceCwd !== undefined && route.workspaceCwd.trim().length > 0) {
+    if (route.workspaceCwd !== undefined && unwrapCopiedPath(route.workspaceCwd).length > 0) {
       if (!route.workspaceCwd.includes('\0') && !isAbsolutePathShape(route.workspaceCwd)) {
         throw new Error('workspaceCwd must be an absolute path when set')
       }
     }
   }
-}
-
-function isAbsolutePathShape(value: string): boolean {
-  return value.startsWith('/') || /^[A-Za-z]:[\\/]/u.test(value)
 }
 
 function assertAuthorizationActive(current: number, actual: number, signal: AbortSignal): void {

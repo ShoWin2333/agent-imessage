@@ -12,6 +12,7 @@ import type {
   PublicPluginError,
   RuntimeView,
 } from '../types.js'
+import { isAbsolutePathShape, unwrapCopiedPath } from '../path-shape.js'
 import type { ImessageSettingsController } from './controller.js'
 
 /** Dependencies supplied by the client slot registration. */
@@ -278,12 +279,12 @@ function RouteCard({
   const [phoneDirty, setPhoneDirty] = useState(false)
   const [copied, setCopied] = useState(false)
 
-  const trimmedCwd = cwd.trim()
+  const trimmedCwd = unwrapCopiedPath(cwd)
   const trimmedProject = projectName.trim()
   const trimmedLabel = label.trim()
   const normalizedPhone = phone.trim()
   const projectValid = trimmedProject.length === 0 || isPhotonProjectName(trimmedProject)
-  const cwdValid = trimmedCwd.length === 0 || looksAbsolutePath(trimmedCwd)
+  const cwdValid = trimmedCwd.length === 0 || isAbsolutePathShape(trimmedCwd)
   const phoneValid = isStrictE164(normalizedPhone)
   const authorized = state.authorization.phase === 'authorized'
   const projectReady = state.provisioning.phase === 'ready'
@@ -362,7 +363,7 @@ function RouteCard({
           type="text"
           spellCheck={false}
           autoComplete="off"
-          placeholder="/absolute/path/to/project"
+          placeholder={workspacePathPlaceholder()}
           value={cwd}
           aria-invalid={cwd.length > 0 && !cwdValid}
           disabled={pending !== undefined}
@@ -372,7 +373,7 @@ function RouteCard({
           }}
         />
         {cwd.length > 0 && !cwdValid ? (
-          <p className="dsh-imessage-error">Use an absolute directory path, or leave blank for the host process cwd.</p>
+          <p className="dsh-imessage-error">Use an absolute directory path such as C:/project or /project, or leave it blank.</p>
         ) : (
           <p className="dsh-imessage-muted">Leave blank to use the directory where <code>dsh web</code> was started.</p>
         )}
@@ -615,8 +616,13 @@ function isPhotonProjectName(value: string): boolean {
   return /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u.test(value)
 }
 
-function looksAbsolutePath(value: string): boolean {
-  return value.startsWith('/') || /^[A-Za-z]:[\\/]/u.test(value)
+function workspacePathPlaceholder(): string {
+  const platform = (
+    (navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData?.platform
+    ?? navigator.platform
+    ?? ''
+  )
+  return /win/i.test(platform) ? 'C:\\path\\to\\project' : '/absolute/path/to/project'
 }
 
 function openAuthorizationWindow(): Window | null {
