@@ -5,7 +5,7 @@ on:
   push:
     branches:
       - main
-      - cursor/dsh-plugin-a61b
+      - dsh-plugin
 
 permissions:
   contents: read

@@ -7,7 +7,7 @@
 | Branch | Product |
 | --- | --- |
 | `main` | macOS App / Gateway |
-| `cursor/dsh-plugin-a61b` (this branch) | Original DSH Web plugin for **Windows / Linux / macOS** |
+| `dsh-plugin` (this branch) | Original DSH Web plugin for **Windows / Linux / macOS** |
 
 The two lines continue independently: separate config, UI, process model, and git history. On Windows, check out this branch; do not use the macOS App on `main`.
 
@@ -62,7 +62,7 @@ The unqualified `dsh-imessage` package on npm refers to the upstream release and
 macOS / Linux:
 
 ```sh
-git clone -b cursor/dsh-plugin-a61b --single-branch https://github.com/ShoWin2333/agent-imessage.git
+git clone -b dsh-plugin --single-branch https://github.com/ShoWin2333/agent-imessage.git
 cd agent-imessage
 npm ci --legacy-peer-deps
 npm run build
@@ -77,7 +77,7 @@ Windows (PowerShell; WSL is not required):
 Install Node.js **22.19+ (22.x) or 24+**, confirm `node -v` and `npm -v`, then:
 
 ```powershell
-git clone -b cursor/dsh-plugin-a61b --single-branch https://github.com/ShoWin2333/agent-imessage.git
+git clone -b dsh-plugin --single-branch https://github.com/ShoWin2333/agent-imessage.git
 cd agent-imessage
 npm ci --legacy-peer-deps
 npm run build

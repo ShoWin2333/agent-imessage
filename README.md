@@ -7,7 +7,7 @@
 | 分支 | 产品 |
 | --- | --- |
 | `main` | macOS App / Gateway |
-| `cursor/dsh-plugin-a61b`（本分支） | 原始 DSH Web 插件，支持 **Windows / Linux / macOS** |
+| `dsh-plugin`（本分支） | 原始 DSH Web 插件，支持 **Windows / Linux / macOS** |
 
 两条线齐头并进：配置、UI、进程模型和 git 历史都分开。Windows 请检出本分支，不要使用 `main` 上的 macOS App。
 
@@ -62,7 +62,7 @@ npm 上未带仓库地址的 `dsh-imessage` 指向上游正式包，不保证包
 macOS / Linux：
 
 ```sh
-git clone -b cursor/dsh-plugin-a61b --single-branch https://github.com/ShoWin2333/agent-imessage.git
+git clone -b dsh-plugin --single-branch https://github.com/ShoWin2333/agent-imessage.git
 cd agent-imessage
 npm ci --legacy-peer-deps
 npm run build
@@ -77,7 +77,7 @@ Windows（PowerShell；无需 WSL）：
 先安装 Node.js **22.19+（22 系列）或 24+**，确认 `node -v` 与 `npm -v` 可用，然后：
 
 ```powershell
-git clone -b cursor/dsh-plugin-a61b --single-branch https://github.com/ShoWin2333/agent-imessage.git
+git clone -b dsh-plugin --single-branch https://github.com/ShoWin2333/agent-imessage.git
 cd agent-imessage
 npm ci --legacy-peer-deps
 npm run build
