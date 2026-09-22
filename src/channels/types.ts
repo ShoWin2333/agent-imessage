@@ -5,6 +5,7 @@ import type { RuntimeView } from '../types.js'
 export interface ChannelMessage {
   /** False when the provider cannot deliver native voice messages. */
   nativeVoice?: boolean
+  origin?: 'desktop'
   /** Durable provider message id. */
   id: string
   /** Plain inbound text. */

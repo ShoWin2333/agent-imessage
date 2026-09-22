@@ -44,6 +44,7 @@ struct ActivityEntry: Identifiable {
     var failed: Bool { ["error","failed","send-failed","media-failed","unavailable","backend-closed"].contains(stage) }
 }
 let activityLabels = [
+"commentary":"Agent 进展",
 "session-ready":"会话就绪","run-created":"运行已创建，等待模型活动","model-active":"模型返回活动","generating":"开始生成回复","tool-running":"正在执行工具","tool-completed":"工具执行完成","tool-failed":"工具报告错误","preview":"回复生成中","scheduled":"定时任务触发","schedule-skipped":"定时任务已跳过",
     "connected":"渠道已连接", "disconnected":"渠道断开", "received":"网关收到消息", "unavailable":"未处理：连接不可用",
     "duplicate":"重复消息已忽略", "opening-session":"正在建立 Agent 会话", "submitting":"正在提交任务",

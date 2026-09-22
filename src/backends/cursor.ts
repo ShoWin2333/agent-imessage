@@ -65,8 +65,8 @@ export class CursorBackend extends BaseBackend {
     try {
       const run = await this.agent!.send(text, this.route.cursorMode === 'plan' ? { mode: 'plan' } : {})
       active.run = run
-      const progress = (phase: import('./types.js').BackendPhase, detail?: string) => {
-        if (!this.closed && !active.cancelled) this.onEvent({type:'progress',sessionId,turnId:active.id,phase,runId:run.id,...(detail ? {detail} : {})})
+      const progress = (phase: import('./types.js').BackendPhase, detail?: string, itemId?: string) => {
+        if (!this.closed && !active.cancelled) this.onEvent({type:'progress',sessionId,turnId:active.id,phase,runId:run.id,...(itemId ? {itemId} : {}),...(detail ? {detail} : {})})
       }
       progress('run-created')
       if (active.cancelled || this.closed) await run.cancel()
@@ -78,7 +78,7 @@ export class CursorBackend extends BaseBackend {
         if (!modelActive && ['thinking','assistant','tool_call'].includes(event.type)) { modelActive = true; progress('model-active') }
         if (event.type === 'tool_call' && toolStates.get(event.call_id) !== event.status) {
           toolStates.set(event.call_id, event.status)
-          progress(event.status === 'running' ? 'tool-running' : event.status === 'completed' ? 'tool-completed' : 'tool-failed',toolCategory(event.name))
+          progress(event.status === 'running' ? 'tool-running' : event.status === 'completed' ? 'tool-completed' : 'tool-failed',toolCategory(event.name),event.call_id)
         }
         if (event.type === 'assistant') for (const block of event.message.content) if (block.type === 'text') {
           chunks.push(block.text)

@@ -4,7 +4,12 @@ import { mkdir, readFile, writeFile, rm, lstat } from 'node:fs/promises'
 import { join, dirname, basename } from 'node:path'
 import type { RouteConfig } from './config.js'
 
+export interface WorkflowEntry {
+  sequence: number; at: number; stage: string; text?: string; itemId?: string
+}
 export interface TaskRecord {
+  workflow?: WorkflowEntry[]; workflowTruncated?: boolean; origin?: 'desktop'
+
   id: string; messageId: string; input: string; startedAt: number; finishedAt?: number
   sessionId?: string; model?: string; backend: string; result?: string
   reason?: string; cwd?: string; effort?: string; speed?: string; approvalPolicy?: string
@@ -37,7 +42,7 @@ export class StateStore {
   private readonly archive: TaskArchive
   get archivedCount(): number { return this.archive.count }
   private constructor(private readonly file: string, private readonly lock: string) { this.archive=new TaskArchive(join(dirname(file),'archives',basename(file,'.json'))) }
-  async archivedTasks(cursor?: string) { await this.tail; return this.archive.page(cursor,(this.state.tasks ?? []).map(t=>t.id)) }
+  async archivedTasks(cursor?: string, sessionId?: string) { await this.tail; return this.archive.page(cursor,(this.state.tasks ?? []).map(t=>t.id),sessionId) }
   async task(id: string, archiveKey?: string): Promise<TaskRecord> {
     await this.tail
     const hot=this.state.tasks?.find(t=>t.id===id)
@@ -86,6 +91,9 @@ export class StateStore {
         store.state.seen = value.seen.slice(-1024)
         if (value.tasks !== undefined) {
           if (!Array.isArray(value.tasks) || !value.tasks.every(t => t && ['id','messageId','input','backend'].every(k => typeof t[k] === 'string') && Number.isFinite(t.startedAt) && ['running','completed','interrupted','failed'].includes(t.execution) && ['pending','sending','sent','uncertain'].includes(t.delivery) && ['result','sessionId','model','cwd','effort','speed','approvalPolicy','reason'].every(k => t[k] === undefined || typeof t[k] === 'string'))) throw new Error('Invalid task records')
+          for (const task of value.tasks as TaskRecord[]) {
+            if (task.workflow !== undefined && (!Array.isArray(task.workflow) || !task.workflow.every(e => e && Number.isSafeInteger(e.sequence) && Number.isFinite(e.at) && typeof e.stage === 'string' && (e.text === undefined || typeof e.text === 'string') && (e.itemId === undefined || typeof e.itemId === 'string')))) throw new Error('Invalid workflow')
+          }
           store.state.tasks = (value.tasks as TaskRecord[]).map(t => ({...t, ...(t.execution === 'running' ? {execution:'interrupted' as const,reason:'服务重启前任务未确认结束，请检查本机结果；不会自动重跑。'} : {}), delivery:t.delivery === 'sending' ? 'uncertain' : t.delivery}))
         }
         if (value.sessions !== undefined) {

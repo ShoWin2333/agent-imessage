@@ -40,7 +40,7 @@ struct GatewayRootView: View {
                             LabeledContent("/new",value:"开始独立会话")
                             LabeledContent("/stop",value:"停止当前任务")
                             LabeledContent("/sessions",value:"列出当前入口的会话")
-                            Text("审批和提问可在任务卡片或原对话中处理；先完成的操作生效。活动记录显示网关收到的消息和 Agent 提供的事件；不包含模型内部推理。")
+                            Text("审批和提问可在对话窗口或原消息渠道中处理；先完成的操作生效。活动记录显示网关收到的消息和 Agent 提供的事件；不包含模型内部推理。")
                         }
                     }.formStyle(.grouped).navigationTitle("使用说明")
                 } else {

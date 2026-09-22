@@ -45,7 +45,7 @@ struct NativeTasksView: View {
     }
 }
 
-private struct NativeInteractionView: View {
+struct NativeInteractionView: View {
     @ObservedObject var store: GatewayStore
     let request: JSONObject
     let submit: (String, [String:String]) -> Void
@@ -122,7 +122,7 @@ private struct NativeTaskCard: View {
                 if !currentTask.text("result").isEmpty {
                     Divider(); Text(currentTask.text("result")).textSelection(.enabled)
                     HStack {
-                        Text(delivery == "sent" ? "渠道已接受结果" : delivery == "sending" ? "正在发送结果" : "结果已保存；发送尚未确认").font(.caption).foregroundStyle(.secondary)
+                        Text(currentTask.text("origin") == "desktop" ? "回复已保存在本机对话" : delivery == "sent" ? "渠道已接受结果" : delivery == "sending" ? "正在发送结果" : "结果已保存；发送尚未确认").font(.caption).foregroundStyle(.secondary)
                         if ["pending","uncertain"].contains(delivery) { Button("重新发送结果") { confirmResend=true } }
                     }
                 }

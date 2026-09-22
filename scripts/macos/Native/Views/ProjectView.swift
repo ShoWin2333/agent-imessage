@@ -19,13 +19,13 @@ struct NativeProjectView: View {
                 }
                 Spacer()
                 Picker("项目页面",selection:$tab) {
-                    Text("任务").tag("activity")
+                    Text("对话").tag("activity")
                     Text("定时任务").tag("schedules")
                     Text("项目配置").tag("config")
                 }.pickerStyle(.segmented).frame(width:340)
             }.padding(20)
             Divider()
-            if tab == "activity" { NativeActivityView(store:store,projectID:draft.id) }
+            if tab == "activity" { NativeActivityView(store:store,projectID:draft.id).id(draft.id) }
             else if tab == "schedules" { NativeSchedulesView(store:store,draft:draft) }
             else { configuration }
         }
