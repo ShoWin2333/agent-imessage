@@ -22,7 +22,7 @@ export class DshBackend extends BaseBackend {
       const update = object(params.update), content = object(update.content)
       if ((update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') && this.toolStates.get(String(update.toolCallId)) !== String(update.status ?? 'running')) {
         this.toolStates.set(String(update.toolCallId),String(update.status ?? 'running'))
-        this.onEvent({type:'progress',sessionId:this.sessionId!,turnId:this.active.id,phase:update.status === 'completed' ? 'tool-completed' : update.status === 'failed' ? 'tool-failed' : 'tool-running',detail:toolCategory(update.kind)})
+        this.onEvent({type:'progress',sessionId:this.sessionId!,turnId:this.active.id,itemId:String(update.toolCallId),phase:update.status === 'completed' ? 'tool-completed' : update.status === 'failed' ? 'tool-failed' : 'tool-running',detail:toolCategory(update.kind)})
       }
       if (update.sessionUpdate === 'agent_message_chunk' && content.type === 'text' && typeof content.text === 'string') {
         if (!this.active.text && content.text) this.onEvent({type:'progress',sessionId:this.sessionId!,turnId:this.active.id,phase:'generating'})

@@ -6,7 +6,8 @@ import type {TaskRecord} from './state.js'
 export const HOT_TASK_LIMIT = 500
 export const HOT_TASK_BYTES = 8 * 1024 * 1024
 export function taskSummary(task: TaskRecord) {
-  return {...task,input:task.input.slice(0,400),...(task.result !== undefined ? {result:task.result.slice(0,800)} : {}),inputTruncated:task.input.length>400,resultTruncated:(task.result?.length ?? 0)>800}
+  const {workflow, ...summary} = task
+  return {...summary,workflowRevision:workflow?.at(-1)?.sequence ?? 0,input:task.input.slice(0,400),...(task.result !== undefined ? {result:task.result.slice(0,800)} : {}),inputTruncated:task.input.length>400,resultTruncated:(task.result?.length ?? 0)>800}
 }
 export function partitionTasks(tasks: TaskRecord[], pinned = new Set<string>()) {
   const keep = new Set<string>()
@@ -83,7 +84,7 @@ export class TaskArchive {
     if (typeof task.id!=='string' || typeof task.input!=='string' || (task.result!==undefined && typeof task.result!=='string') || this.key(task)!==key) throw new Error('Invalid archived task')
     return task
   }
-  async page(cursor?: string, exclude: string[] = []) {
+  async page(cursor?: string, exclude: string[] = [], sessionId?: string) {
     if (cursor && !this.valid(cursor)) throw new Error('Invalid archive cursor')
     const keys=await this.keys(), skip=new Set(exclude)
     const remaining=cursor ? keys.filter(k=>k<cursor) : keys
@@ -91,7 +92,7 @@ export class TaskArchive {
     let scanned=0
     while (scanned<remaining.length && tasks.length<25) {
       const archiveKey=remaining[scanned++]!, task=await this.read(archiveKey)
-      if (!skip.has(task.id)) tasks.push({...taskSummary(task),archiveKey})
+      if (!skip.has(task.id) && (sessionId === undefined || (task.sessionId ?? '') === sessionId)) tasks.push({...taskSummary(task),archiveKey})
     }
     return {tasks,nextCursor:scanned<remaining.length ? remaining[scanned-1] : null,total:this.count}
   }

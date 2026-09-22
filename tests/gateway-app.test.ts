@@ -172,3 +172,25 @@ it('releases a task disconnected during session setup and admits a later task',a
   expect(router.snapshot().busy).toBe(false);expect(backend.startTurn).not.toHaveBeenCalled()
   router.setConnected(true);await router.receive(channel('second'));expect(backend.startTurn).toHaveBeenCalledTimes(1)
 })
+
+it('admits authenticated desktop messages into the selected route without sending to remote channels',async()=>{
+  const dir=await fixture(),config=appSchema.parse({port:0,stateDir:dir,routes:[{...route,cwd:dir}]})
+  const backend=new Backend(),remoteSend=vi.fn(async()=>{})
+  let end!:()=>void
+  const gateway=new Gateway(config,{photon:{one:'secret'}},()=>backend,async()=>({messages:{async *[Symbol.asyncIterator](){await new Promise<void>(r=>{end=r})}},scheduledMessage:async()=>({id:'remote',text:'',send:remoteSend,sendFile:async()=>{},sendVoice:async()=>{},responding:fn=>fn()}),stop:async()=>{end()}}))
+  cleanup.push(()=>gateway.stop());await gateway.start()
+  const server=await startServer(join(dir,'config.json'),config,{photon:{one:'secret'}},gateway);cleanup.push(()=>server.close())
+  const state=await (await fetch(server.url+'/api/state')).json()
+  const body={routeId:'one',channelId:'imessage',text:'hello from desktop'}
+  expect((await fetch(server.url+'/api/conversations/send',{method:'POST',headers:{origin:server.url,'content-type':'application/json'},body:JSON.stringify(body)})).status).toBe(403)
+  const post=(input:unknown)=>fetch(server.url+'/api/conversations/send',{method:'POST',headers:{origin:server.url,'content-type':'application/json','x-agent-token':state.csrf},body:JSON.stringify(input)})
+  expect((await post({...body,channelId:'unknown'})).status).toBe(400)
+  expect((await post({...body,text:' '})).status).toBe(400)
+  expect((await post(body)).status).toBe(200)
+  expect(backend.startTurn).toHaveBeenLastCalledWith('session','hello from desktop')
+  backend.onEvent({type:'message',sessionId:'session',turnId:'turn',id:'answer',text:'local answer'})
+  backend.onEvent({type:'completed',sessionId:'session',turnId:'turn',status:'completed'})
+  await expect.poll(()=>gateway.snapshot()[0]?.channels[0]?.tasks?.[0]?.delivery).toBe('sent')
+  expect(remoteSend).not.toHaveBeenCalled()
+  expect(gateway.snapshot()[0]?.channels[0]?.tasks?.[0]).toMatchObject({origin:'desktop',sessionId:'session',result:'local answer'})
+})

@@ -1,7 +1,7 @@
 import { PluginError } from '../errors.js'
 import { ScheduleJournal } from './schedule-journal.js'
 import { cronMatches, nextRuns } from './cron.js'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import type { ChannelAdapter } from '../channels/types.js'
 import { IMessageAdapter } from '../channels/imessage.js'
 import { TelegramAdapter } from '../channels/telegram.js'
@@ -126,8 +126,17 @@ export class Gateway {
     if (!store) throw new PluginError('runtime-failed','请先连接该入口以读取任务历史。')
     return store
   }
-  async taskHistory(routeId: string, channelId: string, cursor?: string) { return this.taskStore(routeId,channelId).archivedTasks(cursor) }
+  async taskHistory(routeId: string, channelId: string, cursor?: string, sessionId?: string) { return this.taskStore(routeId,channelId).archivedTasks(cursor,sessionId) }
   async taskDetail(routeId: string, channelId: string, taskId: string, archiveKey?: string) { return this.taskStore(routeId,channelId).task(taskId,archiveKey) }
+  async converse(routeId: string, channelId: string, text: string, sessionId?: string, fresh = false, messageId: string = randomUUID()): Promise<void> {
+    const runtime = [...this.runtimes.values()].find(r=>r.routeId === routeId && r.channelId === channelId)
+    if (!runtime || this.updating.has(routeId) || runtime.adapter.state.phase !== 'listening') throw new PluginError('busy','请先连接此入口。')
+    if (!/^[a-f0-9-]{36}$/i.test(messageId)) throw new PluginError('invalid-command','消息标识无效。')
+    if (!text.trim() || text.length > 100_000) throw new PluginError('invalid-command','请输入 1–100000 个字符。')
+    // Desktop replies stay in the conversation. Remote delivery requires an explicit action.
+    await runtime.router.submitDesktop({id:`desktop:${messageId}`,text,origin:'desktop',nativeVoice:false,
+      responding:fn=>fn(),send:async()=>{},sendFile:async()=>{throw new Error('Desktop attachments unavailable')},sendVoice:async()=>{throw new Error('Desktop voice unavailable')}},sessionId,fresh)
+  }
   async runSchedule(routeId: string, scheduleId: string): Promise<void> {
     const route = this.config.routes.find(r => r.id === routeId)
     const task = route?.schedules?.find(s => s.id === scheduleId)

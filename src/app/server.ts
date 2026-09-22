@@ -67,8 +67,13 @@ export async function startServer(configFile: string, initial: AppConfig, initia
         await work
         return
       }
+      if (req.url === '/api/conversations/send') {
+        if (typeof input.text !== 'string') throw new PluginError('invalid-command','请输入消息。')
+        await gateway.converse(String(input.routeId),String(input.channelId),input.text,typeof input.sessionId === 'string' ? input.sessionId : undefined,input.fresh === true,typeof input.messageId === 'string' ? input.messageId : undefined)
+        json(res,200,{ok:true}); return
+      }
       if (req.url === '/api/tasks/history') {
-        json(res,200,await gateway.taskHistory(String(input.routeId),String(input.channelId),typeof input.cursor === 'string' ? input.cursor : undefined)); return
+        json(res,200,await gateway.taskHistory(String(input.routeId),String(input.channelId),typeof input.cursor === 'string' ? input.cursor : undefined,typeof input.sessionId === 'string' ? input.sessionId : undefined)); return
       }
       if (req.url === '/api/tasks/detail') {
         json(res,200,{task:await gateway.taskDetail(String(input.routeId),String(input.channelId),String(input.taskId),typeof input.archiveKey === 'string' ? input.archiveKey : undefined)}); return

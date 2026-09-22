@@ -67,9 +67,16 @@ export class GatewayRouter {
   private progress(active: Active, phase: string): void {
     active.phase = phase; active.phaseAt = Date.now()
   }
-  private record(stage: string, channel?: ChannelMessage, text?: string): void {
+  private record(stage: string, channel?: ChannelMessage, text?: string, itemId?: string): void {
     this.activity.push({ sequence: ++this.activitySequence, at: Date.now(), stage,
-      ...(channel ? {messageId: channel.id} : {}), ...(text ? {text: text.slice(0, 8000) + (text.length > 8000 ? '\n…（内容已截断）' : '')} : {}) })
+      ...(itemId ? {itemId} : {}), ...(channel ? {messageId: channel.id} : {}), ...(text ? {text: text.slice(0, 8000) + (text.length > 8000 ? '\n…（内容已截断）' : '')} : {}) })
+    const task = this.active?.channel.id === channel?.id ? this.active?.task : undefined
+    if (task && !['sending','sent','response'].includes(stage)) {
+      task.workflow ??= []
+      if (stage === 'preview') task.workflow = task.workflow.filter(e => e.stage !== 'preview' || e.itemId !== itemId)
+      task.workflow.push({...this.activity.at(-1)!})
+      if (task.workflow.length > 1000) { task.workflow.shift(); task.workflowTruncated = true }
+    }
     if (this.activity.length > 200) this.activity.shift()
     this.persistHistory()
   }
@@ -86,7 +93,7 @@ export class GatewayRouter {
 
   constructor(private readonly backend: Backend, private route: RouteConfig, private readonly store: Store, private readonly interactionTimeoutMs = 600_000, private readonly waitNoticeMs = 20_000, private readonly acquire: () => (() => void) | undefined = () => () => {}) {
     this.activity.push(...(store.state.activity ?? []).slice(-200))
-    this.activitySequence = Math.max(0, ...this.activity.map(entry => entry.sequence))
+    this.activitySequence = Math.max(0, ...this.activity.map(entry => entry.sequence), ...(store.state.tasks ?? []).map(t=>t.workflow?.at(-1)?.sequence ?? 0))
     backend.onEvent = event => {
       this.events = this.events.then(() => this.notification(event)).catch(() => { this.record('error', this.active?.channel, '处理 Agent 事件失败。'); this.fail() })
     }
@@ -96,7 +103,7 @@ export class GatewayRouter {
 
   private get agentName(): string { return this.route.backend === 'cursor' ? 'Cursor' : this.route.backend === 'dsh' ? 'DSH' : 'Codex' }
 
-  snapshot() { return { archivedCount:this.store.archivedCount ?? 0, tasks: (this.store.state.tasks ?? []).map(taskSummary), requests: [...this.pending].map(([id,p]) => ({id,presentation:p.presentation,kind:p.kind,details:p.details,expiresAt:p.expiresAt,questions:p.questions})), busy: Boolean(this.active), current: this.active ? {taskId:this.active.task.id, messageId:this.active.channel.id, startedAt:this.active.startedAt, phase:this.active.phase, phaseAt:this.active.phaseAt, runId:this.active.runId} : undefined, sessionId: this.store.state.threadId, pending: this.pending.size, closed: this.closed, receivedCount: this.receivedCount, lastActivityAt: this.lastActivityAt, lastTurnStatus: this.lastTurnStatus, activity: this.activity.map(entry => ({...entry})) } }
+  snapshot() { return { sessions:this.store.state.sessions ?? [], archivedCount:this.store.archivedCount ?? 0, tasks: (this.store.state.tasks ?? []).map(taskSummary), requests: [...this.pending].map(([id,p]) => ({id,presentation:p.presentation,kind:p.kind,details:p.details,expiresAt:p.expiresAt,questions:p.questions})), busy: Boolean(this.active), current: this.active ? {taskId:this.active.task.id, messageId:this.active.channel.id, startedAt:this.active.startedAt, phase:this.active.phase, phaseAt:this.active.phaseAt, runId:this.active.runId} : undefined, sessionId: this.store.state.threadId, pending: this.pending.size, closed: this.closed, receivedCount: this.receivedCount, lastActivityAt: this.lastActivityAt, lastTurnStatus: this.lastTurnStatus, activity: this.activity.map(entry => ({...entry})) } }
 
   setConnected(value: boolean): void {
     if (this.connected !== value) this.record(value ? 'connected' : 'disconnected', this.active?.channel)
@@ -127,6 +134,34 @@ export class GatewayRouter {
     try { channel = await getMessage() }
     catch { this.record('schedule-skipped', marker, '本次跳过：无法建立主动回复通道。微信请先给机器人发一条消息；也请检查入口连接。'); return }
     await this.receive(channel, true, task.context !== 'shared')
+  }
+
+  submitDesktop(channel: ChannelMessage, sessionId: string | undefined, fresh = false): Promise<void> {
+    const operation = this.incoming.then(async () => {
+      if (this.store.state.tasks?.some(t=>t.messageId === channel.id)) return
+      if (this.closed || !this.connected || this.active) throw new PluginError('busy','入口不可用或当前回复尚未结束，请稍后重试。')
+      if (sessionId && !(this.store.state.sessions ?? []).includes(sessionId) && !(this.store.state.tasks ?? []).some(t=>t.sessionId === sessionId)) throw new PluginError('invalid-command','会话不属于此入口。')
+      if (fresh || (sessionId && sessionId !== this.store.state.threadId)) {
+        if (fresh) delete this.store.state.threadId; else if (sessionId) this.store.state.threadId = sessionId
+        this.ready = false
+        await this.store.save()
+      }
+      this.record('received',channel,channel.text)
+      // Treat composer input as literal text, including leading slash commands.
+      try { await this.handle(channel,true) }
+      catch (error) {
+        const active = this.active as Active | undefined
+        if (active?.channel.id === channel.id) {
+          active.task.reason = '建立会话或提交消息失败，请检查后端连接。'
+          this.record('error',channel,active.task.reason)
+          this.fail()
+        }
+        throw error
+      }
+      if (!this.store.state.tasks?.some(t=>t.messageId === channel.id)) throw new PluginError('busy','工作目录正被占用，请稍后重试。')
+    })
+    this.incoming = operation.catch(() => {})
+    return operation
   }
 
   receive(channel: ChannelMessage, scheduled = false, isolated = false): Promise<void> {
@@ -222,7 +257,7 @@ export class GatewayRouter {
     const release = this.acquire()
     if (!release) { this.record('busy', channel, '该工作目录正由另一个任务使用。'); await this.send(channel, '该工作目录正由另一个任务使用，请稍后重试。'); return }
     const startedAt = Date.now()
-    const task: TaskRecord = {id:randomUUID(),messageId:channel.id,input:channel.text,startedAt,backend:this.route.backend ?? 'codex',cwd:this.route.cwd,...(this.route.effort ? {effort:this.route.effort} : {}),...(this.route.speed ? {speed:this.route.speed} : {}),...(this.route.approvalPolicy ? {approvalPolicy:this.route.approvalPolicy} : {}),...(this.route.model ? {model:this.route.model} : {}),execution:'running',delivery:'pending'}
+    const task: TaskRecord = {workflow:[],...(channel.origin ? {origin:channel.origin} : {}),id:randomUUID(),messageId:channel.id,input:channel.text,startedAt,backend:this.route.backend ?? 'codex',cwd:this.route.cwd,...(this.route.effort ? {effort:this.route.effort} : {}),...(this.route.speed ? {speed:this.route.speed} : {}),...(this.route.approvalPolicy ? {approvalPolicy:this.route.approvalPolicy} : {}),...(this.route.model ? {model:this.route.model} : {}),execution:'running',delivery:'pending'}
     this.store.state.tasks ??= []
     this.store.state.tasks.push(task)
     const active: Active = { task, release, channel, startedAt, phase:'正在建立会话', phaseAt:startedAt, stopping: false, abort: new AbortController(), answers: new Map(), changes: new Map() }
@@ -236,6 +271,11 @@ export class GatewayRouter {
     notice.unref()
     active.abort.signal.addEventListener('abort', () => clearTimeout(notice), {once:true})
     active.sessionId = await this.ensureThread(channel,isolated)
+    if (this.active === active && active.stopping) {
+      this.record('interrupted',channel,'建立会话期间已请求停止，未提交执行。')
+      this.endActive('interrupted'); this.active = undefined
+      return
+    }
     if (this.active !== active || this.closed || !this.connected) {
       active.abort.abort()
       if (this.active === active) { this.record('interrupted', channel, '建立会话期间连接已断开，任务未提交。'); this.endActive('interrupted'); this.active = undefined }
@@ -316,17 +356,18 @@ export class GatewayRouter {
       if (event.phase === 'generating' && this.route.backend !== 'codex') active.firstTextAt ??= Date.now()
       const label = labels[event.phase] + (event.detail ? `（${event.detail}）` : '')
       this.progress(active, label)
-      this.record(event.phase, active.channel, `${label} · 已用 ${this.duration(active.startedAt)}${active.runId ? `\nRun: ${active.runId}` : ''}`)
+      this.record(event.phase, active.channel, `${label} · 已用 ${this.duration(active.startedAt)}`, event.itemId)
       return
     }
     if (event.type === 'preview') {
       active.firstActivityAt ??= Date.now(); active.firstTextAt ??= Date.now()
       const prior = this.activity.findIndex(entry => entry.stage === 'preview' && entry.messageId === active.channel.id && entry.itemId === event.id)
       if (prior >= 0) this.activity.splice(prior,1)
-      this.record('preview', active.channel, event.text); this.activity.at(-1)!.itemId = event.id
+      this.record('preview', active.channel, event.text, event.id)
       this.persistHistory()
       return
     }
+    if (event.type === 'commentary') { this.record('commentary',active.channel,event.text,event.id); return }
     if (event.type === 'changes') { this.record('changes', active.channel); active.changes.set(event.id, event.changes) }
     if (event.type === 'message') {
       if (event.text) { active.firstActivityAt ??= Date.now(); active.firstTextAt ??= Date.now() }

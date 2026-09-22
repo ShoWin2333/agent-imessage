@@ -23,7 +23,8 @@ import SwiftUI
         polling = Task { [weak self] in
             while !Task.isCancelled {
                 if let self, !self.busy { await self.refresh() }
-                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                let active = self?.state.objects("routes").contains { $0["busy"] as? Bool == true } ?? false
+                try? await Task.sleep(nanoseconds: active ? 1_000_000_000 : 3_000_000_000)
             }
         }
     }
@@ -61,7 +62,7 @@ import SwiftUI
             channel.objects("activity").map { ActivityEntry(channel:channel.text("id"),kind:channel.text("kind"),value:$0) }
         }.sorted { $0.date > $1.date || ($0.date == $1.date && ($0.value["sequence"] as? Int ?? 0) > ($1.value["sequence"] as? Int ?? 0)) }
     }
-    private func request(_ path: String, body: JSONObject? = nil) async throws -> JSONObject {
+    func request(_ path: String, body: JSONObject? = nil) async throws -> JSONObject {
         var request = URLRequest(url: baseURL.appendingPathComponent(path))
         request.timeoutInterval = body == nil ? 5 : 120
         request.cachePolicy = .reloadIgnoringLocalCacheData

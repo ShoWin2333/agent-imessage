@@ -153,3 +153,21 @@ it('keeps the route available when a resumed session has another writer and acce
   await s.router.receive(s.message('try again'))
   expect(s.rpc.request).toHaveBeenCalledWith('thread/start',expect.anything())
 })
+
+it('streams owned Codex reply previews and saves commentary without delivering intermediate text to the channel',async()=>{
+  const s=setup();await s.router.receive(s.message('hello'))
+  s.rpc.onNotification('item/agentMessage/delta',{...s.owned,itemId:'draft',delta:'Hello'})
+  s.rpc.onNotification('item/agentMessage/delta',{...s.owned,turnId:'other',itemId:'foreign',delta:'foreign text'})
+  s.rpc.onNotification('item/completed',{...s.owned,item:{type:'agentMessage',id:'comment',phase:'commentary',text:'Checking the files.'}})
+  await s.settle()
+  expect(s.store.state.tasks?.[0]?.workflow).toEqual(expect.arrayContaining([
+    expect.objectContaining({stage:'preview',itemId:'draft',text:'Hello'}),
+    expect.objectContaining({stage:'commentary',text:'Checking the files.'}),
+  ]))
+  expect(JSON.stringify(s.store.state.tasks?.[0]?.workflow)).not.toContain('foreign text')
+  expect(s.send).not.toHaveBeenCalled()
+  s.rpc.onNotification('item/completed',{...s.owned,item:{type:'agentMessage',id:'draft',phase:'final_answer',text:'Hello world'}})
+  s.rpc.onNotification('turn/completed',{threadId:'thread-1',turn:{id:'turn-1',status:'completed'}})
+  await s.settle()
+  expect(s.send).toHaveBeenCalledExactlyOnceWith('Hello world')
+})
