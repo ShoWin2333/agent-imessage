@@ -28,7 +28,7 @@ afterEach(async()=>{for(const fn of cleanup.splice(0).reverse()) await fn()})
 const message=(id:string,text='task'):ChannelMessage=>({id,text,send:vi.fn(async()=>{}),sendFile:async()=>{},sendVoice:async()=>{},responding:fn=>fn()})
 function routerFixture(acquire?:()=> (()=>void)|undefined) {
   const backend=new Backend(), store={state:{seen:[]} as RouteState, save:vi.fn(async()=>{})}
-  const router=new GatewayRouter(backend,route,store,600_000,20_000,acquire)
+  const router=new GatewayRouter(backend,route,store,600_000,acquire)
   cleanup.push(()=>router.close());router.setConnected(true)
   return {backend,store,router}
 }

@@ -189,7 +189,7 @@ export class Gateway {
           this.historyStores.set(key,store)
           stage = 'Agent 后端'
           backend = this.backendFactory(isolated,this.config,this.secrets)
-          router = new GatewayRouter(backend,isolated,store,600_000,20_000,() => {
+          router = new GatewayRouter(backend,isolated,store,600_000,() => {
             if (this.updating.has(route.id) || this.workspaces.has(cwd)) return undefined
             this.workspaces.add(cwd)
             return () => { this.workspaces.delete(cwd) }
