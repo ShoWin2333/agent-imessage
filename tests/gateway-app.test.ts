@@ -142,22 +142,30 @@ it('records generated replies and failed delivery without exposing raw provider 
   expect(JSON.stringify(events)).not.toContain('secret-provider-token')
 })
 
-it('shows shared elapsed phases, sends only one delayed notice and never delivers previews as final answers',async()=>{
-  const backend=new Backend(),store={state:{seen:[]} as RouteState,save:async()=>{}}
-  const router=new GatewayRouter(backend,{...route,backend:'dsh'},store,1000,10);cleanup.push(()=>router.close());router.setConnected(true)
-  const send=vi.fn(async(_text:string)=>{})
-  await router.receive({id:'long-task',text:'hello',send,sendVoice:async()=>{},sendFile:async()=>{},responding:fn=>fn()})
-  backend.onEvent({type:'progress',sessionId:'session',turnId:'turn',phase:'tool-running'})
-  backend.onEvent({type:'preview',sessionId:'session',turnId:'turn',id:'part',text:'unfinished'})
-  await expect.poll(()=>send.mock.calls.length).toBe(1)
-  expect(send.mock.calls[0]![0]).toContain('正在执行工具')
-  expect(router.snapshot().current?.phase).toBe('正在执行工具')
-  backend.onEvent({type:'message',sessionId:'session',turnId:'turn',id:'final',text:'finished'})
-  backend.onEvent({type:'completed',sessionId:'session',turnId:'turn',status:'completed'})
-  await expect.poll(()=>send.mock.calls.length).toBe(2)
-  expect(send.mock.calls[1]![0]).toBe('finished')
-  expect(router.snapshot().activity.find(e=>e.stage==='completed')?.text).toContain('首段文本')
-  expect(router.snapshot().current).toBeUndefined()
+it('keeps long-running progress in the conversation without automatic notices and still answers status requests',async()=>{
+  vi.useFakeTimers()
+  try {
+    const backend=new Backend(),store={state:{seen:[]} as RouteState,save:async()=>{}}
+    const router=new GatewayRouter(backend,{...route,backend:'dsh'},store,1000);cleanup.push(()=>router.close());router.setConnected(true)
+    const send=vi.fn(async(_text:string)=>{})
+    const channel=(id:string,text:string):SpectrumInboundMessage=>({id,text,send,sendVoice:async()=>{},sendFile:async()=>{},responding:fn=>fn()})
+    await router.receive(channel('long-task','hello'))
+    backend.onEvent({type:'progress',sessionId:'session',turnId:'turn',phase:'tool-running'})
+    backend.onEvent({type:'preview',sessionId:'session',turnId:'turn',id:'part',text:'unfinished'})
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(send).not.toHaveBeenCalled()
+    expect(router.snapshot().current?.phase).toBe('正在执行工具')
+    expect(router.snapshot().activity.some(e=>e.stage==='preview' && e.text==='unfinished')).toBe(true)
+    await router.receive(channel('status','/status'))
+    expect(send).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('正在执行工具'))
+    send.mockClear()
+    backend.onEvent({type:'message',sessionId:'session',turnId:'turn',id:'final',text:'finished'})
+    backend.onEvent({type:'completed',sessionId:'session',turnId:'turn',status:'completed'})
+    await vi.advanceTimersByTimeAsync(0)
+    expect(send).toHaveBeenCalledExactlyOnceWith('finished')
+    expect(router.snapshot().activity.find(e=>e.stage==='completed')?.text).toContain('首段文本')
+    expect(router.snapshot().current).toBeUndefined()
+  } finally { vi.useRealTimers() }
 })
 
 it('releases a task disconnected during session setup and admits a later task',async()=>{

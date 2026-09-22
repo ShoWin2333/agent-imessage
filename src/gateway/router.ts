@@ -91,7 +91,7 @@ export class GatewayRouter {
   private incoming: Promise<void> = Promise.resolve()
   private events: Promise<void> = Promise.resolve()
 
-  constructor(private readonly backend: Backend, private route: RouteConfig, private readonly store: Store, private readonly interactionTimeoutMs = 600_000, private readonly waitNoticeMs = 20_000, private readonly acquire: () => (() => void) | undefined = () => () => {}) {
+  constructor(private readonly backend: Backend, private route: RouteConfig, private readonly store: Store, private readonly interactionTimeoutMs = 600_000, private readonly acquire: () => (() => void) | undefined = () => () => {}) {
     this.activity.push(...(store.state.activity ?? []).slice(-200))
     this.activitySequence = Math.max(0, ...this.activity.map(entry => entry.sequence), ...(store.state.tasks ?? []).map(t=>t.workflow?.at(-1)?.sequence ?? 0))
     backend.onEvent = event => {
@@ -264,12 +264,6 @@ export class GatewayRouter {
     this.active = active
     await this.store.save()
     this.record('opening-session', channel)
-    const notice = setTimeout(() => {
-      void this.send(channel, `已收到任务，${this.agentName} 尚未完成。当前：${active.phase}。可发 /status 查看进度，或 /stop 取消。`, false,
-        () => this.active === active && !active.stopping && this.connected && !this.pending.size).catch(() => {})
-    }, this.waitNoticeMs)
-    notice.unref()
-    active.abort.signal.addEventListener('abort', () => clearTimeout(notice), {once:true})
     active.sessionId = await this.ensureThread(channel,isolated)
     if (this.active === active && active.stopping) {
       this.record('interrupted',channel,'建立会话期间已请求停止，未提交执行。')
