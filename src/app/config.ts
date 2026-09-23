@@ -32,7 +32,15 @@ export async function atomicJson(file: string, value: unknown): Promise<void> {
   finally { await rm(temp, { force: true }) }
 }
 export async function validateConfig(value: unknown, resolveWorkspaces = true): Promise<AppConfig> {
-  const parsed = appSchema.safeParse(value)
+  const raw = object(value)
+  // Older installations may still store the removed per-project proxy setting.
+  const migrated = Array.isArray(raw.routes) ? {...raw, routes:raw.routes.map(route => {
+    if (!Object.hasOwn(object(route), 'cursorProxyUrl')) return route
+    const copy = {...object(route)}
+    delete copy.cursorProxyUrl
+    return copy
+  })} : value
+  const parsed = appSchema.safeParse(migrated)
   if (!parsed.success) {
     if (parsed.error.issues.some(issue => issue.path.includes('schedules'))) throw new PluginError('invalid-command','定时任务配置无效：请填写名称和任务内容，使用有效的五段 Cron、IANA 时区及本项目入口；任务 ID 不可重复。')
     throw new Error('Invalid config: check fields, absolute paths and E.164 numbers')
