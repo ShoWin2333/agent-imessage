@@ -52,3 +52,13 @@ it('accepts bounded inline JPEG workspace avatars and rejects remote or active i
     await expect(validateConfig({routes:[{...route,avatar}]},false)).rejects.toThrow()
   }
 })
+it('drops the removed Cursor proxy field from existing configs without changing other validation',async()=>{
+  const dir=await directory(), file=join(dir,'config.json')
+  const route={...base,cwd:dir,backend:'cursor',cursorProxyUrl:'http://127.0.0.1:1082'}
+  await writeFile(file,JSON.stringify({routes:[route]}))
+  const config=await loadAppConfig(file)
+  expect(config.routes[0]).not.toHaveProperty('cursorProxyUrl')
+  expect((await validateConfig({routes:[route]},false)).routes[0]).not.toHaveProperty('cursorProxyUrl')
+  expect(JSON.parse(await readFile(file,'utf8')).routes[0].cursorProxyUrl).toBe(route.cursorProxyUrl)
+  await expect(validateConfig({routes:[{...route,unexpected:true}]},false)).rejects.toThrow('Invalid config')
+})
