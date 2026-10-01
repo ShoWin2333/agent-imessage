@@ -117,6 +117,14 @@ dependencies, Gateway and web assets. Building requires network access, npm and 
 Command Line Tools; running requires neither Node nor the checkout. Builds target the
 host architecture (arm64 or x64). Existing output paths are never overwritten.
 
+Official Node archives persist in `~/Library/Caches/agent-imessage/node/`; set
+`AGENT_GATEWAY_NODE_CACHE_DIR` to use another directory. Cache keys include the
+Node version, platform, architecture and pinned SHA-256. Every reuse verifies the
+checksum; missing or corrupt entries are downloaded again from the official URL.
+Downloads use private temporary directories and are published atomically only
+after verification. Logs show the cache path and hits or downloads. Packaging
+keeps the cache and still installs production dependencies from the lockfile.
+
 Quit the old app and copy the new bundle into Applications. Runtime service paths
 are generated from the installed location. Existing config/secrets/avatars in
 `~/.config/agent-imessage/` and the configured state directory are preserved outside

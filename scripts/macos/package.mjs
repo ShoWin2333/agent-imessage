@@ -5,6 +5,7 @@ import {cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeF
 import {tmpdir} from 'node:os'
 import {dirname, join, resolve} from 'node:path'
 import {fileURLToPath} from 'node:url'
+import {getNodeArchive} from './node-archive-cache.mjs'
 
 if (process.platform !== 'darwin') throw new Error('macOS is required')
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
@@ -22,8 +23,7 @@ const run = (cmd, args, opts = {}) => execFileSync(cmd, args, {cwd:root, stdio:'
 try {
   run('npm', ['run', 'build'])
   const archiveName = `node-v${version}-darwin-${process.arch}`
-  const archive = join(work, 'node.tar.gz')
-  run('/usr/bin/curl', ['--fail', '--location', '--retry', '2', '--output', archive, `https://nodejs.org/dist/v${version}/${archiveName}.tar.gz`])
+  const archive = await getNodeArchive({version, platform:'darwin', arch:process.arch, sha256:hashes[process.arch]})
   if (createHash('sha256').update(readFileSync(archive)).digest('hex') !== hashes[process.arch]) throw new Error('Node archive checksum mismatch')
   run('/usr/bin/tar', ['-xzf', archive, '-C', work])
   const node = join(work, archiveName, 'bin/node')
