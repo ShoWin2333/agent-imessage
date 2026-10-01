@@ -68,6 +68,8 @@ All backends use shared `send_imessage_file`, `send_imessage_voice`, and `ask_im
 
 ## Development
 
+Cursor failures retain the admission/execution stage, category and allowlisted error types, codes and HTTP statuses in local activity and task reasons. Raw exception messages, stacks, URLs and model lists are omitted. A changed model selection (including effort/speed) replaces the idle worker before the next submission, refreshing SDK 1.0.31's model-list cache while preserving the session ID and dedupe state. No worker is replaced during admission or execution, and failed replacement never retries a turn or delivery.
+
 `src/app` owns the application, configuration, migration, Web API and service installer. `src/gateway` owns routing, sessions and shared tools. `src/backends/types.ts` defines the typed execution interface. Adapters have no Photon delivery implementation. `src/spectrum-runtime.ts` and the Photon/media modules are the single transport and security implementations.
 
 To add an agent, implement `Backend` and register its factory/config/UI option. No new iMessage or Photon layer is needed.

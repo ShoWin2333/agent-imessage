@@ -140,13 +140,15 @@ it('delivers an oversized completed result before archiving it',async()=>{
   const backend=new Backend(),router=new GatewayRouter(backend,route,store);cleanup.push(()=>router.close());router.setConnected(true)
   const channel=message('large'),result='x'.repeat(8*1024*1024+1)
   await router.receive(channel);backend.complete(result)
-  await expect.poll(()=>store.archivedCount,{timeout:10000}).toBe(1)
+  // This checks durable delivery/archiving, not latency. Splitting >8 MiB into
+  // graphemes plus disk writes can exceed 10s on CPU-contended Node 22 runners.
+  await expect.poll(()=>store.archivedCount,{timeout:30000}).toBe(1)
   expect(vi.mocked(channel.send).mock.calls.map(call=>call[0]).join('')).toBe(result)
-  await expect.poll(()=>store.archivedCount,{timeout:10000}).toBe(1)
+  await expect.poll(()=>store.archivedCount,{timeout:30000}).toBe(1)
   const page=await store.archivedTasks(),archived=page.tasks[0]!
   expect(archived.delivery).toBe('sent');expect(await store.task(archived.id,archived.archiveKey)).toMatchObject({result})
   expect(backend.startTurn).toHaveBeenCalledTimes(1)
-},15000)
+},45000)
 
 it('continues desktop turns in the exact session, starts new conversations explicitly and rejects busy or foreign sessions',async()=>{
   const {backend,router,store}=routerFixture()

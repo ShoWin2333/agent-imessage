@@ -2,7 +2,7 @@ import {requestId, interactionPresentation} from './interaction.js'
 import { taskSummary } from './task-history.js'
 import { PluginError } from '../errors.js'
 import type { ScheduledTask } from './cron.js'
-import { failureText } from '../backends/failure.js'
+import { failureText, backendDiagnostic, diagnosticText } from '../backends/failure.js'
 import { gatewayTools as tools } from './tools.js'
 import { randomUUID } from 'node:crypto'
 import { chunkText } from '../chunks.js'
@@ -151,10 +151,13 @@ export class GatewayRouter {
       try { await this.handle(channel,true) }
       catch (error) {
         const active = this.active as Active | undefined
-        if (active?.channel.id === channel.id) {
-          active.task.reason = '建立会话或提交消息失败，请检查后端连接。'
-          this.record('error',channel,active.task.reason)
+        const task = active?.channel.id === channel.id ? active.task : this.store.state.tasks?.find(t=>t.messageId === channel.id)
+        if (task) {
+          const diagnostic = backendDiagnostic(error,active?.sessionId ? 'turn-start' : this.store.state.threadId ? 'session-resume' : 'session-create')
+          task.reason = `建立会话或提交消息失败。${failureText[diagnostic.failure]}\n${diagnosticText(diagnostic)}`
+          this.record('error',channel,task.reason)
           this.fail()
+          await this.saveFailureState(channel)
         }
         throw error
       }
@@ -177,19 +180,36 @@ export class GatewayRouter {
       this.lastActivityAt = Date.now()
       await this.handle(channel, scheduled, isolated)
     })
-    this.incoming = operation.catch(async error => {
-      this.record('error', channel, '处理失败，请检查本机后端登录、连接和配置。')
+    const recovered = operation.catch(async error => {
+      const diagnostic = backendDiagnostic(error, this.active?.sessionId ? 'turn-start' : this.store.state.threadId ? 'session-resume' : 'session-create')
+      const detail = `${failureText[diagnostic.failure]}\n${diagnosticText(diagnostic)}`
+      this.record('error', channel, detail)
+      const task = this.active?.task ?? this.store.state.tasks?.find(t=>t.messageId === channel.id)
+      if (task) task.reason = detail
       if (error instanceof SessionInUseError && !this.active?.turnId) {
         this.endActive('failed'); this.active = undefined
         this.ready = false
+        await this.saveFailureState(channel)
         await this.send(channel, 'This Codex session is in use by another client. Send /new to start a separate Gateway session, or release the session in the other client and retry.').catch(() => {})
         return
       }
       // Do not expose upstream errors, prompts or credentials to the remote channel.
       this.fail()
-      await this.send(channel, 'Bridge stopped after an error. Check the local process and restart it; this message will not be replayed automatically.').catch(() => {})
+      await this.saveFailureState(channel)
+      await this.send(channel, `处理失败（${diagnostic.stage}）。${failureText[diagnostic.failure]}\n此入口已停止，请在本机重新连接。本条消息不会自动重试或重发。`).catch(() => {})
     })
-    return this.incoming
+    // An error in recovery must not prevent the next message from being admitted.
+    this.incoming = recovered.catch(() => {})
+    return recovered
+  }
+
+  private async saveFailureState(channel: ChannelMessage): Promise<void> {
+    try { await this.store.save() }
+    catch (error) {
+      // No retry: storage may still be unavailable. Keep notification independent
+      // of persistence and retain only allowlisted metadata in local activity.
+      this.record('state-save-failed', channel, diagnosticText(backendDiagnostic(error, 'state-save')))
+    }
   }
 
   async close(): Promise<void> { this.record('stopped', this.active?.channel); this.fail(); await this.closing; await this.events; await Promise.allSettled(this.deliveries); clearTimeout(this.historyTimer); this.historyTimer = undefined; this.syncHistory(); await this.store.save() }
@@ -329,6 +349,11 @@ export class GatewayRouter {
     if (!active) return
     if (event.type === 'completed') {
       const unpin=this.store.pinTask?.(active.task.id)
+      if (event.status === 'failed' && event.diagnostic) {
+        const detail = diagnosticText(event.diagnostic)
+        active.task.reason = detail
+        this.record('backend-error',active.channel,detail)
+      }
       this.record(event.status, active.channel, `总耗时 ${this.duration(active.startedAt)}；${active.firstActivityAt ? `首个活动 ${((active.firstActivityAt-active.startedAt)/1000).toFixed(1)} 秒` : '未收到模型或工具活动'}；${active.firstTextAt ? `首段文本 ${((active.firstTextAt-active.startedAt)/1000).toFixed(1)} 秒` : '未收到回复文本'}。${active.runId ? `\nRun: ${active.runId}` : ''}${event.status === 'failed' ? '\n' + failureText[event.failure ?? 'unknown'] : ''}`)
       this.lastTurnStatus = event.status
       this.lastActivityAt = Date.now()

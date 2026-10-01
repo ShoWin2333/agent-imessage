@@ -7,6 +7,7 @@ import { object } from './jsonrpc.js'
 
 export { backendFailure as cursorFailure } from './failure.js'
 import { backendFailure as cursorFailure } from './failure.js'
+import { backendDiagnostic, type BackendDiagnostic, type BackendStage } from './failure.js'
 
 export function modelSelection(model: string, effort = 'default', speed = 'default'): ModelSelection {
   const params = []
@@ -62,6 +63,8 @@ export class CursorBackend extends BaseBackend {
   private async execute(sessionId: string, text: string, active: CursorTurn): Promise<void> {
     let status: 'completed' | 'interrupted' | 'failed' = 'failed'
     let failure: ReturnType<typeof cursorFailure> = 'unknown'
+    let stage: BackendStage = 'turn-start'
+    let diagnostic: BackendDiagnostic | undefined
     try {
       const run = await this.agent!.send(text, this.route.cursorMode === 'plan' ? { mode: 'plan' } : {})
       active.run = run
@@ -73,6 +76,7 @@ export class CursorBackend extends BaseBackend {
       const chunks: string[] = []
       let preview = '', lastPreview = -Infinity, modelActive = false, generating = false
       const toolStates = new Map<string, string>()
+      stage = 'turn-stream'
       for await (const event of run.stream()) {
         if (active.cancelled || this.closed) continue
         if (!modelActive && ['thinking','assistant','tool_call'].includes(event.type)) { modelActive = true; progress('model-active') }
@@ -90,15 +94,16 @@ export class CursorBackend extends BaseBackend {
           }
         }
       }
+      stage = 'turn-wait'
       const result = await run.wait()
-      if (result.error) failure = cursorFailure(result.error)
+      if (result.error) { diagnostic = backendDiagnostic(result.error,stage); failure = diagnostic.failure }
       else if (result.status === 'cancelled') failure = 'aborted'
       status = active.cancelled ? 'interrupted' : result.status === 'finished' ? 'completed' : 'failed'
       if (!this.closed && status === 'completed') this.onEvent({ type: 'message', sessionId, turnId: active.id, id: active.id, text: result.result?.trim() || chunks.join('').trim() })
-    } catch (error) { status = active.cancelled ? 'interrupted' : 'failed'; failure = cursorFailure(error) }
+    } catch (error) { status = active.cancelled ? 'interrupted' : 'failed'; diagnostic = backendDiagnostic(error,stage); failure = diagnostic.failure }
     finally {
       if (this.active === active) this.active = undefined
-      if (!this.closed) this.onEvent({ type: 'completed', sessionId, turnId: active.id, status, ...(status === 'failed' ? { failure } : {}) })
+      if (!this.closed) this.onEvent({ type: 'completed', sessionId, turnId: active.id, status, ...(status === 'failed' ? { failure, ...(diagnostic ? {diagnostic} : {}) } : {}) })
     }
   }
   async cancel(sessionId: string, turnId: string): Promise<void> {
