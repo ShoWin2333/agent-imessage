@@ -2,6 +2,7 @@ import { parentPort, workerData } from 'node:worker_threads'
 import { CursorBackend } from './cursor.js'
 import type { RouteConfig } from '../gateway/config.js'
 import type { SessionOptions } from './types.js'
+import { backendDiagnostic, type BackendStage } from './failure.js'
 const port = parentPort!
 const backend = new CursorBackend(workerData.route as RouteConfig, String(workerData.apiKey))
 let sequence = 0
@@ -28,5 +29,8 @@ port.on('message', message => {
       }
       default: throw new Error('Unknown method')
     }
-  })().then(result => port.postMessage({ type: 'result', id: message.id, result }), () => port.postMessage({ type: 'result', id: message.id, error: true }))
+  })().then(result => port.postMessage({ type: 'result', id: message.id, result }), error => {
+    const stage: BackendStage = message.method === 'openSession' ? (message.options?.id ? 'session-resume' : 'session-create') : message.method === 'startTurn' ? 'turn-start' : ['initialize','cancel','close'].includes(message.method) ? message.method : 'initialize'
+    port.postMessage({ type: 'result', id: message.id, error: backendDiagnostic(error,stage) })
+  })
 })

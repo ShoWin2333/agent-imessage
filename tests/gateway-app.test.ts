@@ -202,3 +202,56 @@ it('admits authenticated desktop messages into the selected route without sendin
   expect(remoteSend).not.toHaveBeenCalled()
   expect(gateway.snapshot()[0]?.channels[0]?.tasks?.[0]).toMatchObject({origin:'desktop',sessionId:'session',result:'local answer'})
 })
+
+it('persists actionable session failure metadata without replaying admission, delivery or private errors',async()=>{
+  const {BackendOperationError,backendDiagnostic}=await import('../src/backends/failure.js')
+  const backend=new Backend(),store={state:{seen:[],threadId:'old-session',sessions:['old-session']} as RouteState,save:vi.fn(async()=>{})}
+  const router=new GatewayRouter(backend,{...route,backend:'cursor'},store);cleanup.push(()=>router.close());router.setConnected(true)
+  const raw=Object.assign(new Error('Cannot use this model: private-model; private-token'),{name:'ConfigurationError',code:'BAD_MODEL_NAME'})
+  backend.openSession.mockRejectedValueOnce(new BackendOperationError(backendDiagnostic(raw,'session-resume')))
+  const send=vi.fn(async(_text:string)=>{}),channel:SpectrumInboundMessage={id:'failed-task',text:'hello',send,sendVoice:async()=>{},sendFile:async()=>{},responding:fn=>fn()}
+  await router.receive(channel)
+  expect(backend.openSession).toHaveBeenCalledOnce();expect(backend.startTurn).not.toHaveBeenCalled()
+  expect(store.state.threadId).toBe('old-session');expect(store.state.seen).toContain('failed-task')
+  expect(store.state.tasks?.[0]?.reason).toContain('stage=session-resume')
+  expect(store.state.tasks?.[0]?.reason).toContain('ConfigurationError[BAD_MODEL_NAME]')
+  expect(send).toHaveBeenCalledOnce();expect(send.mock.calls[0]![0]).toContain('模型目录')
+  expect(JSON.stringify(router.snapshot())).not.toMatch(/private-model|private-token/)
+  expect(JSON.stringify(send.mock.calls)).not.toMatch(/private-model|private-token/)
+  const reopened=new GatewayRouter(new Backend(),{...route,backend:'cursor'},store);cleanup.push(()=>reopened.close());reopened.setConnected(true)
+  await reopened.receive(channel)
+  expect(store.state.tasks).toHaveLength(1);expect(send).toHaveBeenCalledOnce()
+  expect(reopened.snapshot().activity.at(-1)?.stage).toBe('duplicate')
+})
+
+it('records sanitized failure stages for desktop admission and failed runs',async()=>{
+  const {backendDiagnostic}=await import('../src/backends/failure.js')
+  const backend=new Backend(),store={state:{seen:[]} as RouteState,save:async()=>{}}
+  const router=new GatewayRouter(backend,route,store);cleanup.push(()=>router.close());router.setConnected(true)
+  const channel:SpectrumInboundMessage={id:'desktop:test',text:'hello',send:async()=>{},sendVoice:async()=>{},sendFile:async()=>{},responding:fn=>fn()}
+  backend.openSession.mockRejectedValueOnce(Object.assign(new Error('private token'),{name:'AuthenticationError',code:'UNAUTHORIZED',message:'authentication failed private token'}))
+  await expect(router.submitDesktop(channel,undefined)).rejects.toThrow()
+  expect(store.state.tasks?.[0]?.reason).toContain('stage=session-create')
+  expect(JSON.stringify(router.snapshot())).not.toContain('private token')
+  const backend2=new Backend(),store2={state:{seen:[]} as RouteState,save:async()=>{}}
+  const router2=new GatewayRouter(backend2,route,store2);cleanup.push(()=>router2.close());router2.setConnected(true)
+  await router2.receive({...channel,id:'run'})
+  backend2.onEvent({type:'completed',sessionId:'session',turnId:'turn',status:'failed',failure:'network',diagnostic:backendDiagnostic({code:'ECONNRESET',message:'private URL'},'turn-stream')})
+  await expect.poll(()=>store2.state.tasks?.[0]?.execution).toBe('failed')
+  expect(store2.state.tasks?.[0]?.reason).toContain('stage=turn-stream')
+  expect(JSON.stringify(router2.snapshot())).not.toContain('private URL')
+})
+it('retains admission diagnostics when worker exit closes the router before rejection arrives',async()=>{
+  const {BackendOperationError,backendDiagnostic}=await import('../src/backends/failure.js')
+  const backend=new Backend(),store={state:{seen:[],threadId:'old-session',sessions:['old-session']} as RouteState,save:vi.fn(async()=>{})}
+  const router=new GatewayRouter(backend,route,store);cleanup.push(()=>router.close());router.setConnected(true)
+  backend.openSession.mockImplementationOnce(async()=>{
+    backend.onClose()
+    throw new BackendOperationError(backendDiagnostic({name:'ConfigurationError',code:'BAD_MODEL_NAME'},'session-resume'))
+  })
+  await router.receive({id:'closed-admission',text:'hello',send:async()=>{},sendVoice:async()=>{},sendFile:async()=>{},responding:fn=>fn()})
+  expect(store.state.tasks?.[0]?.reason).toContain('stage=session-resume')
+  expect(store.state.tasks?.[0]?.reason).toContain('BAD_MODEL_NAME')
+  expect(store.save).toHaveBeenCalled()
+  expect(backend.startTurn).not.toHaveBeenCalled()
+})

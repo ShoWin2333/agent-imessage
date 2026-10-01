@@ -9,14 +9,14 @@ export interface SessionOptions {
   effort?: string
   tools: ObjectValue[]
 }
-export type BackendFailure = 'session-busy' | 'authentication' | 'region-unavailable' | 'timeout' | 'aborted' | 'network' | 'rate-limit' | 'unknown'
+export type BackendFailure = 'session-busy' | 'session-not-found' | 'model-unavailable' | 'local-storage' | 'authentication' | 'region-unavailable' | 'timeout' | 'aborted' | 'network' | 'rate-limit' | 'unknown'
 export type BackendPhase = 'run-created' | 'model-active' | 'generating' | 'tool-running' | 'tool-completed' | 'tool-failed'
 export type BackendEvent =
   | { type: 'progress'; sessionId: string; turnId: string; phase: BackendPhase; itemId?: string; runId?: string; detail?: string }
   | { type: 'commentary'; sessionId: string; turnId: string; id: string; text: string }
   | { type: 'preview'; sessionId: string; turnId: string; id: string; text: string }
   | { type: 'started'; sessionId: string; turnId: string }
-  | { type: 'completed'; sessionId: string; turnId: string; status: 'completed' | 'interrupted' | 'failed'; failure?: BackendFailure }
+  | { type: 'completed'; sessionId: string; turnId: string; status: 'completed' | 'interrupted' | 'failed'; failure?: BackendFailure; diagnostic?: import('./failure.js').BackendDiagnostic }
   | { type: 'message'; sessionId: string; turnId: string; id: string; text: string }
   | { type: 'changes'; sessionId: string; turnId: string; id: string; changes: unknown }
 export interface BackendRequest {
