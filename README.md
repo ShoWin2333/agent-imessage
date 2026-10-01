@@ -127,6 +127,8 @@ npm run test:macos:package -- '/tmp/Agent iMessage.app'
 
 发布构建内置官方 Node 22.23.2（下载后验证固定 SHA-256）、锁文件中的生产依赖、Gateway 和网页资源。需要联网、npm 和 Xcode Command Line Tools 来构建；运行 App 不需要安装 Node，也不依赖源码目录。按构建机器架构生成 Apple Silicon 或 Intel 包，不是通用二进制。输出路径已存在时拒绝覆盖。
 
+官方 Node 归档保存在 `~/Library/Caches/agent-imessage/node/`，也可用 `AGENT_GATEWAY_NODE_CACHE_DIR` 指定缓存目录。缓存文件名包含 Node 版本、平台、架构和固定 SHA-256；每次复用都会重新校验，缺失或损坏时从官方地址重新下载。下载先写入独立临时目录，校验通过后原子发布，并只清理本次临时文件。构建日志会显示缓存路径、命中或重新下载；打包结束不会删除缓存。npm 生产依赖安装仍按锁文件执行。
+
 原生窗口生命周期测试使用专用身份和空配置，避免连接真实渠道：
 
 ```sh
