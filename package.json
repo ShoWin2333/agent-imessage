@@ -52,6 +52,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "audit:prod": "npm audit --omit=dev --audit-level=high",
+    "audit:all": "npm audit --audit-level=moderate",
     "check": "npm run typecheck && npm test && npm run build && npm pack --dry-run --ignore-scripts",
     "prepare": "npm run build",
     "test:codex:live": "node scripts/codex-smoke.mjs",
@@ -79,7 +80,7 @@
     "@types/node": "^24.0.0",
     "@types/qrcode": "^1.5.6",
     "typescript": "6.0.3",
-    "vitest": "^3.2.4"
+    "vitest": "4.1.11"
   },
   "bin": {
     "agent-imessage": "./lib/types/app/cli.js"
