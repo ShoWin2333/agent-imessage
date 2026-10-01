@@ -85,6 +85,7 @@
     "agent-imessage": "./lib/types/app/cli.js"
   },
   "overrides": {
+    "@opentelemetry/core": "2.8.0",
     "@connectrpc/connect-node": {
       "undici": "^6.28.0"
     }
