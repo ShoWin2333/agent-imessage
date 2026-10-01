@@ -157,7 +157,7 @@ export class GatewayRouter {
           task.reason = `建立会话或提交消息失败。${failureText[diagnostic.failure]}\n${diagnosticText(diagnostic)}`
           this.record('error',channel,task.reason)
           this.fail()
-          await this.store.save()
+          await this.saveFailureState(channel)
         }
         throw error
       }
@@ -180,7 +180,7 @@ export class GatewayRouter {
       this.lastActivityAt = Date.now()
       await this.handle(channel, scheduled, isolated)
     })
-    this.incoming = operation.catch(async error => {
+    const recovered = operation.catch(async error => {
       const diagnostic = backendDiagnostic(error, this.active?.sessionId ? 'turn-start' : this.store.state.threadId ? 'session-resume' : 'session-create')
       const detail = `${failureText[diagnostic.failure]}\n${diagnosticText(diagnostic)}`
       this.record('error', channel, detail)
@@ -189,16 +189,27 @@ export class GatewayRouter {
       if (error instanceof SessionInUseError && !this.active?.turnId) {
         this.endActive('failed'); this.active = undefined
         this.ready = false
-        await this.store.save()
+        await this.saveFailureState(channel)
         await this.send(channel, 'This Codex session is in use by another client. Send /new to start a separate Gateway session, or release the session in the other client and retry.').catch(() => {})
         return
       }
       // Do not expose upstream errors, prompts or credentials to the remote channel.
       this.fail()
-      await this.store.save()
+      await this.saveFailureState(channel)
       await this.send(channel, `处理失败（${diagnostic.stage}）。${failureText[diagnostic.failure]}\n此入口已停止，请在本机重新连接。本条消息不会自动重试或重发。`).catch(() => {})
     })
-    return this.incoming
+    // An error in recovery must not prevent the next message from being admitted.
+    this.incoming = recovered.catch(() => {})
+    return recovered
+  }
+
+  private async saveFailureState(channel: ChannelMessage): Promise<void> {
+    try { await this.store.save() }
+    catch (error) {
+      // No retry: storage may still be unavailable. Keep notification independent
+      // of persistence and retain only allowlisted metadata in local activity.
+      this.record('state-save-failed', channel, diagnosticText(backendDiagnostic(error, 'state-save')))
+    }
   }
 
   async close(): Promise<void> { this.record('stopped', this.active?.channel); this.fail(); await this.closing; await this.events; await Promise.allSettled(this.deliveries); clearTimeout(this.historyTimer); this.historyTimer = undefined; this.syncHistory(); await this.store.save() }

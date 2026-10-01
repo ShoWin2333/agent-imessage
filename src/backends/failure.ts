@@ -15,7 +15,7 @@ export function backendFailure(error: unknown): BackendFailure {
   if (/already has active run/i.test(message)) return 'session-busy'
   if (/agent_not_found|AgentNotFoundError|Agent .+ not found/i.test(message)) return 'session-not-found'
   if (/Cannot use this model|BAD_MODEL_NAME|MODEL_BLOCKED/i.test(message)) return 'model-unavailable'
-  if (/SQLITE_|database (?:is )?closed|database is locked/i.test(message)) return 'local-storage'
+  if (/SQLITE_|\b(?:ENOSPC|EACCES|EPERM)\b|database (?:is )?closed|database is locked/i.test(message)) return 'local-storage'
   if (/invalid api key|unauthenticated|unauthorized|authentication failed/i.test(message)) return 'authentication'
   if (/model not available.*provider is not supported in your region|provider is not supported in your region/i.test(message)) return 'region-unavailable'
   if (/deadline.exceeded|timed? ?out|timeout/i.test(message)) return 'timeout'
@@ -28,7 +28,7 @@ export const failureText: Record<BackendFailure, string> = {
   'session-busy': '会话已有任务占用。可发送 /new 新建会话，或在本机处理原任务。',
   'session-not-found': '本地会话不存在，请检查工作目录和会话记录；需要新会话时再使用 /new。',
   'model-unavailable': 'SDK 模型目录不接受所选模型，请刷新模型列表并检查模型 ID 和账号权限。',
-  'local-storage': '本地会话数据库不可用，请检查文件权限、磁盘和占用该会话的进程。',
+  'local-storage': '本地存储不可用，请检查文件权限、磁盘和占用该会话的进程。',
   authentication: '认证失败，请检查对应 Agent 的登录或 API Key。',
   'region-unavailable': '所选模型提供商在当前账号或网络地区不可用，请检查模型和网络配置。',
   timeout: '后端报告请求超时。任务可能已执行部分操作，请检查后再决定是否重试。',
@@ -38,13 +38,13 @@ export const failureText: Record<BackendFailure, string> = {
   unknown: '后端未提供可识别的失败原因，请查看本机活动记录。',
 }
 
-export type BackendStage = 'initialize' | 'session-create' | 'session-resume' | 'worker-refresh' | 'turn-start' | 'turn-stream' | 'turn-wait' | 'cancel' | 'close'
+export type BackendStage = 'initialize' | 'session-create' | 'session-resume' | 'worker-refresh' | 'turn-start' | 'turn-stream' | 'turn-wait' | 'state-save' | 'cancel' | 'close'
 export interface BackendDiagnostic {
   stage: BackendStage
   failure: BackendFailure
   causes: Array<{ name: string; code?: string; status?: number }>
 }
-const stages = new Set<BackendStage>(['initialize','session-create','session-resume','worker-refresh','turn-start','turn-stream','turn-wait','cancel','close'])
+const stages = new Set<BackendStage>(['initialize','session-create','session-resume','worker-refresh','turn-start','turn-stream','turn-wait','state-save','cancel','close'])
 const names = new Set(['Error','TypeError','RangeError','AbortError','ConnectError','CursorSdkError','CursorAgentError','AuthenticationError','RateLimitError','ConfigurationError','AgentBusyError','NetworkError','UnknownAgentError','AgentNotFoundError','SqliteError'])
 const codes = new Set(['agent_not_found','ECONNRESET','ECONNREFUSED','ENOTFOUND','EAI_AGAIN','ETIMEDOUT','EACCES','EPERM','ENOSPC','SQLITE_BUSY','SQLITE_LOCKED','SQLITE_CANTOPEN','SQLITE_READONLY','SQLITE_FULL','SQLITE_CORRUPT','SQLITE_MISUSE','canceled','unknown','invalid_argument','deadline_exceeded','not_found','already_exists','permission_denied','resource_exhausted','failed_precondition','aborted','out_of_range','unimplemented','internal','unavailable','data_loss','unauthenticated','NOT_LOGGED_IN','INVALID_AUTH_ID','AGENT_REQUIRES_LOGIN','AUTH_TOKEN_NOT_FOUND','AUTH_TOKEN_EXPIRED','UNAUTHORIZED','BAD_API_KEY','BAD_USER_API_KEY','BAD_MODEL_NAME','MODEL_BLOCKED','TIMEOUT','RESOURCE_EXHAUSTED','RATE_LIMITED'])
 

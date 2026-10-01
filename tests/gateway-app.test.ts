@@ -11,6 +11,7 @@ import { startServer } from '../src/app/server.js'
 import { GatewayRouter } from '../src/gateway/router.js'
 import type { SpectrumInboundMessage } from '../src/spectrum-runtime.js'
 import type { RouteState } from '../src/gateway/state.js'
+import { SessionInUseError } from '../src/backends/jsonrpc.js'
 class Backend extends BaseBackend {
   initialize=vi.fn(async()=>{})
   openSession=vi.fn(async(o:SessionOptions)=>({id:o.id??'session',cwd:o.cwd}))
@@ -254,4 +255,57 @@ it('retains admission diagnostics when worker exit closes the router before reje
   expect(store.state.tasks?.[0]?.reason).toContain('BAD_MODEL_NAME')
   expect(store.save).toHaveBeenCalled()
   expect(backend.startTurn).not.toHaveBeenCalled()
+})
+
+it('notifies once and keeps the receive queue settled when both state saves fail',async()=>{
+  const backend=new Backend(),store={state:{seen:[]} as RouteState,save:vi.fn(async()=>{})}
+  const router=new GatewayRouter(backend,route,store);router.setConnected(true)
+  cleanup.push(async()=>{store.save.mockResolvedValue(undefined);await router.close()})
+  store.save.mockRejectedValue(Object.assign(new Error('private-token /private/state.json'),{code:'ENOSPC'}))
+  const send=vi.fn(async(_text:string)=>{}),channel:SpectrumInboundMessage={id:'disk-full',text:'hello',send,sendVoice:async()=>{},sendFile:async()=>{},responding:fn=>fn()}
+  await expect(router.receive(channel)).resolves.toBeUndefined()
+  expect(send).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('此入口已停止'))
+  expect(backend.openSession).not.toHaveBeenCalled();expect(backend.startTurn).not.toHaveBeenCalled()
+  await expect(router.receive({...channel,id:'later'})).resolves.toBeUndefined()
+  expect(router.snapshot().activity.at(-1)?.stage).toBe('unavailable')
+  expect(send).toHaveBeenCalledOnce()
+  expect(router.snapshot().activity.some(e=>e.stage==='state-save-failed'&&e.text?.includes('ENOSPC'))).toBe(true)
+  expect(JSON.stringify(router.snapshot())+JSON.stringify(send.mock.calls)).not.toMatch(/private-token|\/private\/state/)
+})
+
+it('keeps a busy session recoverable after its recovery save fails repeatedly',async()=>{
+  const backend=new Backend(),store={state:{seen:[]} as RouteState,save:vi.fn(async()=>{})}
+  const router=new GatewayRouter(backend,route,store);router.setConnected(true)
+  cleanup.push(async()=>{store.save.mockResolvedValue(undefined);await router.close()})
+  store.save.mockResolvedValueOnce(undefined).mockResolvedValueOnce(undefined)
+    .mockRejectedValue(Object.assign(new Error('private-token /private/state.json'),{code:'EACCES'}))
+  backend.openSession.mockRejectedValueOnce(new SessionInUseError())
+  const send=vi.fn(async(_text:string)=>{}),channel:SpectrumInboundMessage={id:'busy',text:'hello',send,sendVoice:async()=>{},sendFile:async()=>{},responding:fn=>fn()}
+  await expect(router.receive(channel)).resolves.toBeUndefined()
+  expect(send).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('session is in use'))
+  expect(backend.startTurn).not.toHaveBeenCalled()
+  expect(router.snapshot().activity.some(e=>e.stage==='state-save-failed'&&e.text?.includes('EACCES'))).toBe(true)
+  expect(JSON.stringify(router.snapshot())+JSON.stringify(send.mock.calls)).not.toMatch(/private-token|\/private\/state/)
+  store.save.mockResolvedValue(undefined)
+  await expect(router.receive({...channel,id:'after-recovery'})).resolves.toBeUndefined()
+  expect(backend.openSession).toHaveBeenCalledTimes(2)
+  expect(backend.startTurn).toHaveBeenCalledExactlyOnceWith('session','hello')
+  expect(store.state.seen).toEqual(['busy','after-recovery'])
+  expect(send).toHaveBeenCalledOnce()
+})
+
+it('preserves the desktop admission error when saving its failure state also fails',async()=>{
+  const backend=new Backend(),store={state:{seen:[]} as RouteState,save:vi.fn(async()=>{})}
+  const router=new GatewayRouter(backend,route,store);router.setConnected(true)
+  cleanup.push(async()=>{store.save.mockResolvedValue(undefined);await router.close()})
+  store.save.mockResolvedValueOnce(undefined).mockRejectedValue(Object.assign(new Error('private storage path'),{code:'EPERM'}))
+  const admissionError=new SessionInUseError()
+  backend.openSession.mockRejectedValueOnce(admissionError)
+  const send=vi.fn(async()=>{}),channel:SpectrumInboundMessage={id:'desktop:save-failure',text:'hello',send,sendVoice:async()=>{},sendFile:async()=>{},responding:fn=>fn()}
+  await expect(router.submitDesktop(channel,undefined)).rejects.toBe(admissionError)
+  expect(router.snapshot().activity.some(e=>e.stage==='state-save-failed'&&e.text?.includes('EPERM'))).toBe(true)
+  expect(JSON.stringify(router.snapshot())).not.toContain('private storage path')
+  await expect(router.receive({...channel,id:'later'})).resolves.toBeUndefined()
+  expect(router.snapshot().activity.at(-1)?.stage).toBe('unavailable')
+  expect(backend.startTurn).not.toHaveBeenCalled();expect(send).not.toHaveBeenCalled()
 })
