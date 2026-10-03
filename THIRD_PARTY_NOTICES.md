@@ -1,5 +1,14 @@
 # Third-party notices
 
+## discord.js
+
+Discord messaging uses the unmodified npm package `discord.js` 14.27.0 and its
+locked dependencies. The upstream project is https://github.com/discordjs/discord.js,
+licensed under Apache License 2.0. Installed packages retain their upstream
+LICENSE files and notices; redistribution must retain those files. The new
+Gateway adapter is project code, not copied upstream source. See
+[Discord integration notes](docs/discord.md) for library selection and references.
+
 ## dsh-im: Weixin iLink protocol reference
 
 The iLink wire format and binding flow in `src/channels/weixin-api.ts` and

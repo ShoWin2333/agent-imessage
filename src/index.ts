@@ -15,3 +15,6 @@ export { IMessageAdapter } from './channels/imessage.js'
 export { WeixinAdapter } from './channels/weixin.js'
 
 export { TelegramAdapter } from './channels/telegram.js'
+
+export { DiscordAdapter, splitDiscordText } from './channels/discord.js'
+export type { DiscordScope, DiscordClientFactory } from './channels/discord.js'

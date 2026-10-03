@@ -38,6 +38,8 @@ try {
   for (const name of ['package.json', 'package-lock.json', 'lib', 'LICENSE', 'THIRD_PARTY_NOTICES.md']) {
     cpSync(join(root, name), join(payload, name), {recursive:true})
   }
+  mkdirSync(join(payload,'docs'), {recursive:true})
+  cpSync(join(root,'docs/discord.md'), join(payload,'docs/discord.md'))
   // Install only the locked production graph; never copy the developer node_modules.
   run('npm', ['ci', '--omit=dev', '--ignore-scripts', '--legacy-peer-deps', '--no-audit', '--no-fund'], {cwd:payload})
   const helpers = join(app, 'Contents/Helpers')
@@ -62,7 +64,9 @@ try {
   }
   signMachO(join(payload, 'node_modules'))
   run('/usr/bin/codesign', ['--force', '--sign', '-', join(helpers, 'node')])
-  writeFileSync(join(app, 'Contents/Resources/build-info.json'), JSON.stringify({node:version, arch:process.arch, app:JSON.parse(readFileSync(join(root,'package.json'),'utf8')).version}, null, 2) + '\n')
+  writeFileSync(join(app, 'Contents/Resources/build-info.json'), JSON.stringify({node:version, arch:process.arch, app:JSON.parse(readFileSync(join(root,'package.json'),'utf8')).version,
+    discord:JSON.parse(readFileSync(join(payload,'node_modules/discord.js/package.json'),'utf8')).version,
+    discordTransportSha256:createHash('sha256').update(readFileSync(join(payload,'lib/types/channels/discord.js'))).digest('hex')}, null, 2) + '\n')
   run('/usr/bin/codesign', ['--force', '--sign', '-', app])
   run('/usr/bin/codesign', ['--verify', '--deep', '--strict', app])
   mkdirSync(dirname(output), {recursive:true})

@@ -2,6 +2,10 @@
 
 A standalone local Agent App / Gateway for iMessage. One native macOS SwiftUI app manages multiple projects backed by **Cursor SDK**, **Codex App Server**, or **headless DSH**. No desktop editor or DSH Web process is required.
 
+Optional Discord messaging uses discord.js and the same local Agent backend, with
+owner-only DMs or a specified server text channel. See [Discord setup](docs/discord.md)
+for bot installation, local token entry, channel binding and testing.
+
 ```text
 iMessage ↔ Photon / Spectrum ↔ Gateway ↔ Backend
                                │        ├─ Cursor official SDK (local sandbox)

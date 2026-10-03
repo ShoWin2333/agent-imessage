@@ -194,6 +194,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         window.minSize = NSSize(width: 620, height: 480)
         window.titlebarAppearsTransparent = true
         window.backgroundColor = .windowBackgroundColor
+        if CommandLine.arguments.contains("--channels") { gatewayStore.selection = "channels" }
         window.contentView = NSHostingView(rootView: GatewayRootView(store: gatewayStore))
         window.center()
         window.setFrameAutosaveName("AgentGatewayMainWindow")

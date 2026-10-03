@@ -5,6 +5,7 @@ import { atomicJson, validateConfig, type AppConfig, type Secrets } from './conf
 import { PluginError } from '../errors.js'
 import { listModels } from '../backends/catalog.js'
 import { photonAccounts, publicPhotonAccounts } from './channel-accounts.js'
+import { discordAccounts, updateDiscord } from './discord.js'
 import { telegramAccounts, updateTelegram } from './telegram.js'
 import { WeixinLogin } from './weixin.js'
 import { WeixinError } from '../channels/weixin-api.js'
@@ -45,7 +46,7 @@ export async function startServer(configFile: string, initial: AppConfig, initia
       res.setHeader('referrer-policy', 'no-referrer')
       res.setHeader('content-security-policy', "default-src 'self'; img-src 'self' data:; frame-ancestors 'none'; form-action 'self'")
       if (req.method === 'GET' && req.url === '/api/state') {
-        const state = { config, revision, telegramAccounts:telegramAccounts(config,secrets), photonAccounts:publicPhotonAccounts(config,secrets), weixinLogin:weixinLogin.snapshot(), weixinAccounts:Object.values(secrets.weixin ?? {}).map(c=>({accountId:c.accountId})), authorization: photonAccount.snapshot(), csrf: token, routes: gateway.snapshot(), hasCursorKey: Boolean(secrets.cursorApiKey || process.env.CURSOR_API_KEY), hasPhotonSecret: Object.fromEntries(config.routes.map(r => [r.id, routeChannels(r).some(c=>c.kind === 'imessage' && Boolean(secrets.photon[photonSecretKey(r,c)] || process.env[c.projectSecretEnv]))])) }
+        const state = { config, revision, discordAccounts:discordAccounts(config,secrets), telegramAccounts:telegramAccounts(config,secrets), photonAccounts:publicPhotonAccounts(config,secrets), weixinLogin:weixinLogin.snapshot(), weixinAccounts:Object.values(secrets.weixin ?? {}).map(c=>({accountId:c.accountId})), authorization: photonAccount.snapshot(), csrf: token, routes: gateway.snapshot(), hasCursorKey: Boolean(secrets.cursorApiKey || process.env.CURSOR_API_KEY), hasPhotonSecret: Object.fromEntries(config.routes.map(r => [r.id, routeChannels(r).some(c=>c.kind === 'imessage' && Boolean(secrets.photon[photonSecretKey(r,c)] || process.env[c.projectSecretEnv]))])) }
         const payload = JSON.stringify(state)
         const etag = '"' + createHash('sha256').update(payload).digest('hex') + '"'
         res.setHeader('etag',etag)
@@ -83,6 +84,16 @@ export async function startServer(configFile: string, initial: AppConfig, initia
         json(res,200,{ok:true}); return
       }
       const work = mutation.then(async () => {
+        if (req.url === '/api/discord/save') {
+          if (input.revision !== revision) { json(res,409,{error:'Configuration changed. Reload before saving.'}); return }
+          const next = await updateDiscord(config,secrets,input)
+          await gateway.replace(next.config,next.secrets,async () => {
+            await atomicJson(`${configFile}.secrets.json`,next.secrets)
+            await atomicJson(configFile,next.config)
+          })
+          config=next.config; secrets=next.secrets; revision++
+          json(res,200,{ok:true,botId:next.botId}); return
+        }
         if (req.url === '/api/telegram/save') {
           if (input.revision !== revision) { json(res,409,{error:'Configuration changed. Reload before saving.'}); return }
           if ('routeId' in input) throw new PluginError('invalid-command','请在 Agent 的消息入口中管理绑定。')
@@ -148,6 +159,12 @@ export async function startServer(configFile: string, initial: AppConfig, initia
                 if (!nextSecrets.telegram?.[channel.botId]) throw new Error('Provide a Telegram Bot Token')
                 const account = nextSecrets.telegramAccounts?.[channel.botId]
                 if (account && account.ownerUserId !== channel.ownerUserId) throw new PluginError('invalid-command','请在消息渠道中修改 Telegram 允许操作的用户。')
+                continue
+              }
+              if (channel.kind === 'discord') {
+                if (!Object.hasOwn(nextSecrets.discord ?? {},channel.botId) || !nextSecrets.discord?.[channel.botId]) throw new Error('Add the Discord bot in channel settings first')
+                const account = nextSecrets.discordAccounts?.[channel.botId]
+                if (account && account.ownerUserId !== channel.ownerUserId) throw new PluginError('invalid-command','Change the allowed Discord owner in channel account settings.')
                 continue
               }
               if (channel.kind === 'weixin') {

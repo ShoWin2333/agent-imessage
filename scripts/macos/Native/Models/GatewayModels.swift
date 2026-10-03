@@ -33,6 +33,45 @@ final class ProjectDraft: ObservableObject, Identifiable {
     }
 }
 
+/// Picker rows use the channel's account identity, never the shared owner user ID.
+struct ChannelAccountOption: Identifiable {
+    let id: String
+    let label: String
+    let boundTo: String?
+    var title: String { label + (boundTo.map { "（已绑定：" + $0 + "）" } ?? "") }
+
+    static func key(_ kind: String) -> String {
+        ["imessage":"projectId","weixin":"accountId","telegram":"botId","discord":"botId"][kind] ?? ""
+    }
+    static func accounts(_ kind: String, state: JSONObject) -> [JSONObject] {
+        state.objects(["imessage":"photonAccounts","weixin":"weixinAccounts","telegram":"telegramAccounts","discord":"discordAccounts"][kind] ?? "")
+    }
+    static func options(_ kind: String, state: JSONObject, draft: ProjectDraft, channelID: String) -> [Self] {
+        let accountKey = key(kind)
+        return accounts(kind, state:state).map { account in
+            let id = account.text(accountKey)
+            let otherRoute = state.object("config").objects("routes").first { route in
+                route.text("id") != draft.id && ProjectDraft(route).channels.contains {
+                    $0.text("kind") == kind && $0.text(accountKey) == id
+                }
+            }
+            let sameAgent = draft.channels.contains {
+                $0.text("id") != channelID && $0.text("kind") == kind && $0.text(accountKey) == id
+            }
+            let bound = otherRoute.map { $0.text("label",$0.text("id")) } ?? (sameAgent ? "当前 Agent 的其他入口" : nil)
+            let label: String
+            if kind == "discord", !account.text("username").isEmpty {
+                label = account.text("username") + " · " + id
+            } else if kind == "telegram", !account.text("username").isEmpty {
+                label = "@" + account.text("username")
+            } else if kind == "imessage" {
+                label = account.text("assignedPhoneNumber") + " · " + id
+            } else { label = id }
+            return Self(id:id,label:label,boundTo:bound)
+        }
+    }
+}
+
 struct ActivityEntry: Identifiable {
     let channel: String
     let kind: String
@@ -66,6 +105,17 @@ enum TelegramFormValidation {
         guard value.range(of:"^[1-9][0-9]{0,15}$",options:.regularExpression) != nil,
               let number = UInt64(value), number <= 9_007_199_254_740_991 else {
             return "请填写你本人的纯数字 Telegram 用户 ID，例如 123456789；不能填写 @用户名、手机号或 Bot ID。"
+        }
+        return nil
+    }
+}
+
+enum DiscordFormValidation {
+    static func ownerError(_ input: String) -> String? {
+        let value = input.trimmingCharacters(in:.whitespacesAndNewlines)
+        guard value.range(of:"^[1-9][0-9]{0,19}$",options:.regularExpression) != nil,
+              UInt64(value) != nil else {
+            return "请填写你本人的 Discord 数字用户 ID：开启开发者模式后，右键你的头像并复制用户 ID。"
         }
         return nil
     }

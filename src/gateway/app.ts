@@ -4,6 +4,7 @@ import { cronMatches, nextRuns } from './cron.js'
 import { createHash, randomUUID } from 'node:crypto'
 import type { ChannelAdapter } from '../channels/types.js'
 import { IMessageAdapter } from '../channels/imessage.js'
+import { DiscordAdapter, type DiscordClientFactory } from '../channels/discord.js'
 import { TelegramAdapter } from '../channels/telegram.js'
 import { WeixinAdapter } from '../channels/weixin.js'
 
@@ -42,7 +43,7 @@ export class Gateway {
   private readonly nextTimes = new Map<string,{minute:number;time:number | undefined}>()
   private readonly updating = new Set<string>()
   private readonly workspaces = new Set<string>()
-  constructor(private config: AppConfig, private secrets: Secrets, private readonly backendFactory = createBackend, private readonly connectionFactory: SpectrumConnectionFactory = createSpectrumConnection) { this.journal = new ScheduleJournal(config.stateDir) }
+  constructor(private config: AppConfig, private secrets: Secrets, private readonly backendFactory = createBackend, private readonly connectionFactory: SpectrumConnectionFactory = createSpectrumConnection, private readonly discordClientFactory?: DiscordClientFactory) { this.journal = new ScheduleJournal(config.stateDir) }
   snapshot() {
     return this.config.routes.map(route => {
       const channels = routeChannels(route).map(channel => {
@@ -76,7 +77,7 @@ export class Gateway {
     const execution = (r: RouteConfig) => { const {label,avatar,schedules,model,effort,speed,...rest} = r; return rest }
     return !next || JSON.stringify(execution(old)) !== JSON.stringify(execution(next)) ||
       (old.backend === 'cursor' && !old.cursorApiKeyEnv && this.secrets.cursorApiKey !== secrets.cursorApiKey) ||
-      routeChannels(old).some(c => c.kind === 'imessage' ? this.secrets.photon[photonSecretKey(old,c)] !== secrets.photon[photonSecretKey(old,c)] : c.kind === 'telegram' ? this.secrets.telegram?.[c.botId] !== secrets.telegram?.[c.botId] : JSON.stringify(this.secrets.weixin?.[c.accountId]) !== JSON.stringify(secrets.weixin?.[c.accountId]))
+      routeChannels(old).some(c => c.kind === 'imessage' ? this.secrets.photon[photonSecretKey(old,c)] !== secrets.photon[photonSecretKey(old,c)] : c.kind === 'telegram' ? this.secrets.telegram?.[c.botId] !== secrets.telegram?.[c.botId] : c.kind === 'discord' ? this.secrets.discord?.[c.botId] !== secrets.discord?.[c.botId] : JSON.stringify(this.secrets.weixin?.[c.accountId]) !== JSON.stringify(secrets.weixin?.[c.accountId]))
   }
   replace(config: AppConfig, secrets: Secrets, persist: () => Promise<void> = async () => {}): Promise<void> {
     return this.enqueue(async () => {
@@ -177,13 +178,15 @@ export class Gateway {
           if (channel.kind === 'weixin' && (!credential || credential.accountId !== channel.accountId)) throw new Error('Bind Weixin first')
           const telegramToken = channel.kind === 'telegram' ? this.secrets.telegram?.[channel.botId] : undefined
           if (channel.kind === 'telegram' && (!telegramToken || telegramToken.split(':')[0] !== channel.botId)) throw new Error('Missing Telegram token')
+          const discordToken = channel.kind === 'discord' && Object.hasOwn(this.secrets.discord ?? {},channel.botId) ? this.secrets.discord![channel.botId] : undefined
+          if (channel.kind === 'discord' && !discordToken) throw new Error('Missing Discord bot token')
           const projectSecret = channel.kind === 'imessage' ? this.secrets.photon[photonSecretKey(route,channel)] || process.env[channel.projectSecretEnv] : undefined
           if (channel.kind === 'imessage' && !projectSecret) throw new Error('Missing Photon secret')
           // Legacy iMessage routes keep their original state and lock names. New bindings
           // have independent backend instances, state, dedupe and approval ownership.
           const legacyIdentity = channel.kind === 'imessage' && channel.id === 'imessage' && route.projectId === channel.projectId && route.senderPhoneNumber === channel.senderPhoneNumber && route.assignedPhoneNumber === channel.assignedPhoneNumber
           const isolated = {...route,cwd,...(channel.kind === 'imessage' ? channel : {projectId:'',projectSecretEnv:'',senderPhoneNumber:'',assignedPhoneNumber:''}),id:route.channels && !legacyIdentity ? createHash('sha256').update(key).digest('hex') : route.id}
-          const identity = route.channels && !legacyIdentity ? JSON.stringify([channel.kind,channel.id,channel.kind === 'weixin' ? [channel.accountId,credential!.ownerUserId] : channel.kind === 'telegram' ? [channel.botId,channel.ownerUserId] : []]) : undefined
+          const identity = route.channels && !legacyIdentity ? JSON.stringify([channel.kind,channel.id,channel.kind === 'weixin' ? [channel.accountId,credential!.ownerUserId] : channel.kind === 'telegram' ? [channel.botId,channel.ownerUserId] : channel.kind === 'discord' ? [channel.botId,channel.ownerUserId,channel.guildId ?? '',channel.channelId ?? ''] : []]) : undefined
           stage = '私有状态存储'
           store = await StateStore.open(this.config.stateDir,isolated,identity)
           this.historyStores.set(key,store)
@@ -199,6 +202,8 @@ export class Gateway {
             adapter = new IMessageAdapter({...channel,projectSecret:projectSecret!},message=>target.receive(message),state=>target.setConnected(state.phase === 'listening'),this.connectionFactory)
           } else if (channel.kind === 'telegram') {
             adapter = new TelegramAdapter({...channel,token:telegramToken!},store,message=>target.receive(message),state=>target.setConnected(state.phase === 'listening'))
+          } else if (channel.kind === 'discord') {
+            adapter = new DiscordAdapter(channel,discordToken!,message=>target.receive(message),state=>target.setConnected(state.phase === 'listening'),this.discordClientFactory)
           } else {
             adapter = new WeixinAdapter(credential!,store,message=>target.receive(message),state=>target.setConnected(state.phase === 'listening'))
           }
