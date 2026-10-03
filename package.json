@@ -41,6 +41,7 @@
     "README.md",
     "README.en.md",
     "SECURITY.md",
+    "docs/discord.md",
     "LICENSE",
     "THIRD_PARTY_NOTICES.md"
   ],
@@ -71,6 +72,7 @@
     "@spectrum-ts/core": "12.7.0",
     "@spectrum-ts/imessage": "12.7.0",
     "better-auth": "1.6.30",
+    "discord.js": "14.27.0",
     "elysia": "1.4.29",
     "qrcode": "^1.5.4",
     "zod": "4.4.3"

@@ -5,11 +5,15 @@ import { z } from 'zod'
 const identifier = z.string().regex(/^[a-zA-Z0-9_-]{1,64}$/)
 const phone = z.string().regex(/^\+[1-9]\d{6,14}$/)
 const env = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/)
+/** Discord IDs are unsigned 64-bit snowflakes; keep them as strings. */
+export const discordId = z.string().refine(value => /^[1-9]\d{0,19}$/.test(value) && BigInt(value) <= 18446744073709551615n)
 export const channelSchema = z.discriminatedUnion('kind', [
   z.object({ id: identifier, kind: z.literal('imessage'), projectId: z.string().min(1), projectSecretEnv: env,
     senderPhoneNumber: phone, assignedPhoneNumber: phone }).strict(),
   z.object({ id: identifier, kind: z.literal('telegram'), botId: z.string().regex(/^[1-9]\d{0,15}$/), ownerUserId: z.string().regex(/^[1-9]\d{0,15}$/) }).strict(),
   z.object({ id: identifier, kind: z.literal('weixin'), accountId: z.string().min(1).max(256) }).strict(),
+  z.object({ id: identifier, kind: z.literal('discord'), botId: discordId, ownerUserId: discordId,
+    guildId: discordId.optional(), channelId: discordId.optional() }).strict(),
 ])
 export type ChannelConfig = z.infer<typeof channelSchema>
 
@@ -47,6 +51,12 @@ export const routeSchema = z.object({
     ctx.addIssue({code:'custom', message:'A project without channels must be disabled'})
   } else if (new Set(route.channels.map(c => c.id)).size !== route.channels.length) {
     ctx.addIssue({code:'custom', message:'Channel IDs must be unique within a project'})
+  }
+  if (route.channels?.some(c => c.kind === 'discord' && Boolean(c.guildId) !== Boolean(c.channelId))) {
+    ctx.addIssue({code:'custom',path:['channels'],message:'Discord server mode requires both guildId and channelId; omit both for owner DM'})
+  }
+  if (route.channels?.some(c => c.kind === 'discord' && c.botId === c.ownerUserId)) {
+    ctx.addIssue({code:'custom',path:['channels'],message:'Discord owner must be a user, not the bot'})
   }
 })
 export type RouteConfig = z.infer<typeof routeSchema>

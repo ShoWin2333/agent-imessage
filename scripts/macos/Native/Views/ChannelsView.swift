@@ -5,6 +5,7 @@ struct NativeChannelsView: View {
     @State private var verificationCode = ""
     var body: some View {
         Form {
+            DiscordChannelsView(store: store)
             TelegramChannelsView(store: store)
             Section("WeChat · 个人微信") {
                 let login = store.state.object("weixinLogin")

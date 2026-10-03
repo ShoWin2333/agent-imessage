@@ -20,6 +20,25 @@ The deployment requires one trusted local OS account. Other processes running as
 
 Report vulnerabilities privately to the repository maintainer. Include a minimal reproduction without real keys, phone numbers or message contents.
 
+## Discord transport
+
+Discord uses discord.js for Gateway and REST behavior. Tokens are verified as bot
+credentials, saved only in the private secrets file and never returned in public
+state. The owner ID is an unsigned 64-bit string. Only owner-authored new text
+messages in the bound DM or exact guild/text channel are admitted; server mode
+also requires an explicit bot mention. Bots, self messages, webhooks, group DMs,
+system events, edits and other destinations are ignored. No privileged Message
+Content intent is requested. All outbound mention parsing is disabled.
+
+One bot can bind to one channel per configuration. Bot/owner/guild/channel identity
+isolates durable sessions and deduplication. Stop aborts pending REST requests and
+fences stale listeners. Startup and transport errors are redacted. Discord media
+uses existing workspace containment validation plus a 10 MiB transport cap.
+Private server channels are recommended: every viewer of a bound channel can read
+results and approvals even though only the owner can submit them. Bot permissions
+and installations in other Gateway processes remain a deployment responsibility.
+See [setup and limitations](docs/discord.md).
+
 ## Telemetry dependency remediation
 
 The production audit's 13 moderate package findings shared one advisory, [GHSA-8988-4f7v-96qf](https://github.com/advisories/GHSA-8988-4f7v-96qf): inbound W3C baggage parsing in `@opentelemetry/core <2.8.0` could allocate excessive memory. These packages are production dependencies through Spectrum and Photon, not development-only dependencies. Presence in the dependency graph does not establish that an untrusted baggage header reaches this Gateway's propagator.

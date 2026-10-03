@@ -5,7 +5,7 @@ struct ChannelAccountBinding: View {
     let kind: String
     let accountID: String
     private var route: JSONObject? {
-        let key = ["imessage":"projectId","weixin":"accountId","telegram":"botId"][kind] ?? ""
+        let key = ["imessage":"projectId","weixin":"accountId","telegram":"botId","discord":"botId"][kind] ?? ""
         return store.state.object("config").objects("routes").first { route in
             ProjectDraft(route).channels.contains { $0.text("kind") == kind && $0.text(key) == accountID }
         }

@@ -2,6 +2,8 @@
 
 独立运行的本地 Agent App / Gateway。用 iMessage 操作本地项目，在 macOS SwiftUI 原生界面 中管理 Cursor、Codex 和 DSH。无需启动 Cursor Desktop、Codex Desktop 或 DSH Web。
 
+可选 Discord 入口使用 discord.js，复用本地 Agent 后端、任务和审批设施；支持仅本人私聊，或指定服务器文字频道中的 @Bot 消息。在消息渠道中添加 Bot，再到 Agent 页绑定。详见 [Discord 配置说明](docs/discord.md)；Token 只在本机安全字段中填写，不要发送到聊天中。
+
 ```text
 iMessage ↔ Photon / Spectrum ↔ Gateway
                               ├─ 路由、授权号码、重连、消息去重
