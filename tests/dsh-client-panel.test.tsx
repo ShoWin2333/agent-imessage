@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import {afterEach,describe,expect,it,vi} from 'vitest'
 import {cleanup,fireEvent,render,screen,waitFor,within,act} from '@testing-library/react'
-import {ChannelPanel,phaseLabel} from '../src/client/Panel.js'
+import {ChannelPanel,phaseLabel,validateBindings} from '../src/client/Panel.js'
 import type {Binding,ClientContext,ConfigForm,FormSnapshot} from '../src/client/contracts.js'
 import {installPanel} from '../src/client/bootstrap.js'
 
@@ -185,4 +185,10 @@ describe('native channel settings panel',()=>{
     const ctx={...f.ctx,remote:{...f.ctx.remote,$mount:vi.fn(async()=>unmount)},configForms:{get:()=>{throw new Error('page failed')}}} as unknown as ClientContext
     await expect(installPanel(ctx,{})).rejects.toThrow('page failed');expect(unmount).toHaveBeenCalledTimes(1)
   })
+})
+it.each(['C:\\workspace\\project','\\\\server\\share\\project'])('saves a Windows directory picker result %s through the actual panel',async cwd=>{
+ const f=fixture();f.picker.mockResolvedValue(cwd);f.show();fireEvent.click(screen.getByRole('button',{name:'选择目录…'}));await waitFor(()=>expect((screen.getByLabelText('项目目录')as HTMLInputElement).value).toBe(cwd));fireEvent.click(screen.getByRole('button',{name:'保存配置'}));await waitFor(()=>expect(f.mutate).toHaveBeenCalledTimes(1));expect(f.mutate.mock.calls[0]![0][0]!.value[0]!.cwd).toBe(cwd)
+})
+it.each(['C:relative','\\relative','\\\\server'])('rejects incomplete or relative Windows path %s in the panel',cwd=>{
+ expect(validateBindings([{...binding(),cwd}])).toContain('绝对项目路径')
 })

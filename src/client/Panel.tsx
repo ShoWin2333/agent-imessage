@@ -1,6 +1,7 @@
 import {useEffect,useState,useSyncExternalStore} from 'react'
 import type {Binding,Catalog,ClientContext,ConfigForm,RuntimeStatus} from './contracts.js'
 import {pluginConfigSchema} from '../plugin/config.js'
+import {absoluteWorkspacePattern} from '../plugin/workspace-path.js'
 import {styles} from './styles.js'
 
 const labels={imessage:'iMessage',telegram:'Telegram',weixin:'微信',discord:'Discord'}
@@ -18,7 +19,7 @@ export function validateBindings(bindings:Binding[]):string|undefined {
   for(const b of bindings){
     if(!/^[A-Za-z0-9_-]{1,64}$/.test(b.id)||ids.has(b.id))return '渠道标识须唯一，限 1–64 个字母、数字、下划线或短横线。'
     ids.add(b.id)
-    if(!b.cwd.startsWith('/'))return `${b.id}：请选择绝对项目路径。`
+    if(!absoluteWorkspacePattern.test(b.cwd))return `${b.id}：请选择绝对项目路径。`
     if(!/^[A-Za-z_][A-Za-z0-9_]*$/.test(b.credentialRef))return `${b.id}：请填写宿主已配置的凭据引用名称。`
     if(!b.permissionPreset.trim())return `${b.id}：请指定宿主已有的权限预设。`
     for(const [field,label] of channelFields[b.channel.kind])if(!['guildId','channelId'].includes(field)&&!b.channel[field]?.trim())return `${b.id}：请填写${label}。`
