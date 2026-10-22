@@ -1,6 +1,5 @@
-node_modules/
+node_modules
 lib/
 coverage/
 *.tgz
-.typert-workspace-*/
 .DS_Store
