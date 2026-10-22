@@ -1,7 +1,4 @@
 {
   "extends": "./tsconfig.base.json",
-  "compilerOptions": {
-    "tsBuildInfoFile": "./node_modules/.cache/tsconfig.client.tsbuildinfo"
-  },
-  "include": ["src/client/**/*.ts", "src/client/**/*.tsx", "src/types.ts", "src/path-shape.ts"]
+  "include": ["src/client/**/*.ts", "src/client/**/*.tsx"]
 }
