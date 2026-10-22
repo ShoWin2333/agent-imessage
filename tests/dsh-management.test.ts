@@ -99,3 +99,11 @@ it('reports rejected external settings without interrupting accepted consumers',
   await manager.update([binding()]);expect(manager.status().configError).toBeUndefined();expect(start).toHaveBeenCalledTimes(1)
   await manager.close()
 })
+it.each(['/workspace/project','C:\\workspace\\project','D:/workspace/project','\\\\server\\share\\project'])('accepts portable absolute workspace %s in native/browser/runtime schemas',cwd=>{
+ const value={bindings:[{...binding(),cwd}]};expect(pluginConfigSchema.parse(value).bindings[0]!.cwd).toBe(cwd)
+ for(const schema of[Config,new Schema(JSON.parse(JSON.stringify(Config)))])expect(schema(value).bindings.get()[0].cwd).toBe(cwd)
+})
+it.each(['relative/project','C:relative','\\relative','\\\\server'])('rejects relative or incomplete workspace %s in all schemas',cwd=>{
+ const value={bindings:[{...binding(),cwd}]};expect(()=>pluginConfigSchema.parse(value)).toThrow()
+ for(const schema of[Config,new Schema(JSON.parse(JSON.stringify(Config)))])expect(()=>schema(value)).toThrow()
+})

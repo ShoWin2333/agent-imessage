@@ -152,15 +152,16 @@ it('shutdown drains blocked recovery and fences all later writes and sends', asy
 })
 it('unload while credential resolution is pending cannot start a late channel', async () => {
   const credential = deferred<{ value: string; source: string } | undefined>()
+  const resolveCredential = vi.fn(() => credential.promise)
   let stop!: () => Promise<void>, closed = false
   const records = new Map<string, unknown>()
   const put = vi.fn(async (key: string, value: unknown) => { if (closed) throw new Error('write after close'); records.set(key, value) })
   const ctx = {
 permissionPresets: { resolve: () => { } }, storageDomain: { open: async () => ({ table: () => ({ get: (key: string) => records.get(key), put }), close: async () => { closed = true } }) },
-    credentials: { resolve: () => credential.promise }, effect: (fn: () => () => Promise<void>) => { stop = fn() },
+    credentials: { resolve: resolveCredential }, effect: (fn: () => () => Promise<void>) => { stop = fn() },
   } as unknown as Context
-  const applying = apply(ctx, { bindings: [binding as any] })
-  await vi.waitFor(() => expect(stop).toBeDefined())
+  const applying = apply(ctx, { bindings: [{...binding,cwd:process.cwd()} as any] })
+  await vi.waitFor(() => expect(resolveCredential).toHaveBeenCalledTimes(1))
   await stop(); credential.resolve({ value: 'synthetic', source: 'test' })
   await expect(applying).resolves.toBeUndefined()
   expect(closed).toBe(true); expect(put).toHaveBeenCalledTimes(1)

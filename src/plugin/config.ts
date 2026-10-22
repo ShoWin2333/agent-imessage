@@ -1,11 +1,12 @@
 import { z } from 'zod'
 import { channelSchema } from '../channels/config.js'
+import { absoluteWorkspacePattern } from './workspace-path.js'
 const reference = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/)
 export const bindingSchema = z.object({
   id: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/),
   enabled: z.boolean().default(false),
   model: z.object({provider:z.string().min(1),model:z.string().min(1),reasoningEffort:z.string().min(1).optional()}).strict().optional(),
-  cwd: z.string().startsWith('/'),
+  cwd: z.string().regex(absoluteWorkspacePattern),
   channel: channelSchema,
   credentialRef: reference,
   // Required deliberately: select a preset already configured in the DSH host.

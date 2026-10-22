@@ -1,4 +1,5 @@
 import Schema from '@deepseek-ai/schemastery'
+import { absoluteWorkspacePattern } from './workspace-path.js'
 
 const id = () => Schema.string().pattern(/^[A-Za-z0-9_-]{1,64}$/).required()
 const text = () => Schema.string().min(1).required()
@@ -12,7 +13,7 @@ const channels = Schema.union([
   Schema.object({ id:id(), kind:Schema.const('discord').required(), botId:snowflake(), ownerUserId:snowflake(), guildId:snowflake().required(false), channelId:snowflake().required(false) }),
 ]).required()
 const binding = Schema.object({
-  id:id(), enabled:Schema.boolean().default(false), cwd:Schema.string().pattern(/^\//).required(),
+  id:id(), enabled:Schema.boolean().default(false), cwd:Schema.string().pattern(absoluteWorkspacePattern).required(),
   credentialRef:Schema.string().pattern(/^[A-Za-z_][A-Za-z0-9_]*$/).required(), permissionPreset:text(), channel:channels,
   model:Schema.object({provider:text(),model:text(),reasoningEffort:Schema.string().min(1)}).extra('default', undefined),
   weixin:Schema.object({ownerUserId:text(),baseUrl:Schema.string().pattern(/^https?:\/\/[^\s]+$/).required()}).extra('default', undefined),
