@@ -19,7 +19,7 @@ const ctx={
 const dispose=await entry.apply(ctx)
 assert.ok(registration)
 assert.equal(registration.options.name,'settings.section')
-assert.equal(registration.options.id,'agent-imessage-channels')
+assert.equal(registration.options.id,'dsh-channels')
 const markup=renderToStaticMarkup(React.createElement(registration.component,{...registration.options.inject(),view:'page',form:undefined}))
 for(const word of ['iMessage','Telegram','Discord','微信','保存配置','尚未配置渠道'])assert.ok(markup.includes(word),`Missing rendered control ${word}`)
 await dispose()

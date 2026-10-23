@@ -12,7 +12,7 @@ import { WorkspaceAnalyzer, WorkspaceTypertGenerator } from '@deepseek-ai/dsh-ty
 
 const projectRoot = resolve(import.meta.dirname, '..')
 const workspace = mkdtempSync(join(projectRoot, '.typert-workspace-'))
-const packageRoot = join(workspace, 'packages', 'agent-imessage')
+const packageRoot = join(workspace, 'packages', 'dsh-channels')
 const protocolRoot = join(workspace, 'packages', 'dsh-typert-protocol')
 
 try {
@@ -85,19 +85,19 @@ export declare function Remote(options: RemoteOptions): RemoteDecorator
     },
     files: [],
     references: [
-      { path: './packages/agent-imessage/tsconfig.json' },
+      { path: './packages/dsh-channels/tsconfig.json' },
       { path: './packages/dsh-typert-protocol/tsconfig.json' },
     ],
   }, null, 2)}\n`)
 
   const generator = new WorkspaceTypertGenerator(workspace)
   const discovered = generator.discover(['host'])
-  const artifacts = generator.generate(['@showin2333/agent-imessage'], ['host'])
-  const artifact = artifacts.find(candidate => candidate.package === '@showin2333/agent-imessage' && candidate.face === 'host')
+  const artifacts = generator.generate(['@showin2333/dsh-channels'], ['host'])
+  const artifact = artifacts.find(candidate => candidate.package === '@showin2333/dsh-channels' && candidate.face === 'host')
   if (artifact === undefined) {
     const model = new WorkspaceAnalyzer({
       root: workspace,
-      packages: ['@showin2333/agent-imessage'],
+      packages: ['@showin2333/dsh-channels'],
       faces: ['host'],
     }).analyze()
     throw new Error(`Typert did not emit channel plugin host exports: ${JSON.stringify({

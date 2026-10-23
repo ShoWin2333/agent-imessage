@@ -1,10 +1,24 @@
-# Agent iMessage · DSH 渠道插件
+# Message Channels · DSH 渠道插件
 
 **长期插件分支：`dsh-plugin`。`main` 保留独立 macOS App；不要将本分支合入 `main`。**
 
 将 iMessage、Telegram、微信 iLink、Discord 消息送入 **DeepSeek Harness（DSH）** 的原生会话，并回传执行结果。当前版本适配 DSH `0.2.1-rc.2`；`engines.dsh` 接受 `>=0.2.1-rc.2 <0.3.0`，开发依赖仍固定在经过验证的 RC。
 
 DSH 负责 Agent、模型、工具、权限、执行队列、取消和会话日志；本插件负责消息渠道、固定身份绑定、去重和回复投递。宿主与浏览器端均为原生 Cordis 插件，没有独立平台、服务安装器或执行后端。
+
+## 安装
+
+需要 DSH `0.2.1-rc.2`（`engines.dsh` 接受 `>=0.2.1-rc.2 <0.3.0`）。iMessage 通道额外要求 macOS 与本机 Messages；Telegram、微信 iLink、Discord 跨平台。
+
+npm 包：`@showin2333/dsh-channels`。安装后以 bundle 形式挂载两条 Cordis 行（`dsh-channels` 与项目分组），浏览器面板由 `dsh.client` 自动发现。
+
+- **直接安装**：DSH → 插件 → 安装，输入 `@showin2333/dsh-channels@1.1.0-dsh.9`。
+- **市场安装**：先启用 `@deepseek-ai/dsh-experimental-plugin-market-bundle`，在 插件 → 发现 → 添加索引源 填入下方地址，再从卡片安装。
+- **本地开发**：`pnpm install && npm run build`，在 profile 的 `dependencies` 中以 `link:` 指向本仓库。
+
+索引地址：`https://cdn.jsdelivr.net/gh/ShoWin2333/agent-imessage@dsh-plugin/market/index.json`
+
+安装后不会自动连接任何渠道：先按「Desktop 管理面板」配置 workspace、权限预设和凭据引用，再显式启用绑定。升级需要先卸载再安装，DSH 目前没有原地更新动作。
 
 ## 当前闭环
 
@@ -37,8 +51,8 @@ DSH 负责 Agent、模型、工具、权限、执行队列、取消和会话日�
 以下为 **示例配置**，不会被本项目自动应用。`credentialRef` 仅引用宿主已有凭据；不要把 Token 或 Secret 写入 YAML。`cwd` 必须是现有绝对路径，`permissionPreset` 必须由宿主预先定义；插件不创建登录或扩大权限。
 
 ```yaml
-- id: agent-imessage-dsh-channels
-  name: '@showin2333/agent-imessage'
+- id: dsh-channels
+  name: '@showin2333/dsh-channels'
   config:
     bindings:
       - id: owner-telegram

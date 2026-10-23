@@ -1,9 +1,10 @@
 {
-  "name": "@showin2333/agent-imessage",
+  "name": "@showin2333/dsh-channels",
   "version": "1.1.0-dsh.9",
   "description": "DeepSeek Harness plugin for iMessage, Telegram, Weixin and Discord",
   "type": "module",
   "license": "MIT",
+  "author": "ShoWin2333",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/ShoWin2333/agent-imessage.git"
@@ -15,6 +16,7 @@
   "keywords": [
     "deepseek-harness",
     "dsh",
+    "dsh-plugin",
     "imessage",
     "telegram",
     "weixin",
@@ -83,7 +85,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "audit:prod": "npm audit --omit=dev --audit-level=high",
-    "check": "npm run build && npm run typecheck && npm test && npm pack --dry-run --ignore-scripts"
+    "check": "npm run build && npm run typecheck && npm test && npm pack --dry-run --ignore-scripts",
+    "prepublishOnly": "npm run check"
   },
   "dependencies": {
     "@spectrum-ts/core": "12.7.0",

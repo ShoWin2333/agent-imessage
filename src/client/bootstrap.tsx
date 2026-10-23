@@ -11,9 +11,9 @@ export async function installPanel(ctx:ClientContext,contribution:unknown):Promi
   const unmount=await ctx.remote.$mount(contribution).catch(error=>{releaseLocale();throw error})
   let releasePage:(()=>void)|undefined
   try {
-    const form=ctx.configForms.get('agent-imessage-dsh-channels')
-    releasePage=ctx.configForms.whileServed(['agent-imessage-dsh-channels'],()=>ctx.slots.inject('settings.section',()=>ctx.slots.register({
-      name:'settings.section',id:'agent-imessage-channels',order:55,
+    const form=ctx.configForms.get('dsh-channels')
+    releasePage=ctx.configForms.whileServed(['dsh-channels'],()=>ctx.slots.inject('settings.section',()=>ctx.slots.register({
+      name:'settings.section',id:'dsh-channels',order:55,
       // A thunk is re-read on every projection, so the navigation label follows the active locale.
       label:()=>(ctx.locale?.bind(NS)??fallbackTranslate)('nav.title'),
       inject:()=>({ctx,channelForm:form}),

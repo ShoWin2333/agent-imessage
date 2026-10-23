@@ -163,7 +163,7 @@ describe('native channel settings panel',()=>{
     const ctx={...f.ctx,remote:{...f.ctx.remote,$mount:async()=>async()=>{}},configForms:{get:()=>f.form,whileServed:(_ids:string[],register:()=>()=>void)=>register()},slots:{inject:(name:string,register:()=>()=>void)=>{slots.push(name);return register()},register:(options:Record<string,unknown>)=>{registrations.push(options);return()=>{}}}} as unknown as ClientContext
     const dispose=await installPanel(ctx,{})
     expect(slots).toEqual(['settings.section']);expect(registrations).toHaveLength(1)
-    expect(registrations[0]).toMatchObject({name:'settings.section',id:'agent-imessage-channels'})
+    expect(registrations[0]).toMatchObject({name:'settings.section',id:'dsh-channels'})
     expect((registrations[0]!.label as ()=>string)()).toBe('消息渠道')
     await dispose()
   })
@@ -177,7 +177,7 @@ describe('native channel settings panel',()=>{
     const pending=installPanel(ctx,metadata)
     expect(mount).toHaveBeenCalledWith(metadata);expect(get).not.toHaveBeenCalled()
     const unmount=vi.fn(async()=>{order.push('remote')});mounted(unmount)
-    const dispose=await pending;expect(get).toHaveBeenCalledWith('agent-imessage-dsh-channels')
+    const dispose=await pending;expect(get).toHaveBeenCalledWith('dsh-channels')
     await Promise.all([dispose(),dispose()]);expect(order).toEqual(['page','remote']);expect(unmount).toHaveBeenCalledTimes(1)
   })
   it('releases mounted remote metadata if page registration fails',async()=>{

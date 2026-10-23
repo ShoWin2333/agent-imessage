@@ -2,7 +2,7 @@
  * Client-owned dictionaries. Plugin Manager metadata lives in `locale/*.json`;
  * these strings cover the settings panel and are registered with `ctx.locale`.
  */
-export const NS = 'agent-imessage'
+export const NS = 'dsh-channels'
 
 const zh: Record<string, string> = {
   'nav.title': '消息渠道',

@@ -1,6 +1,6 @@
 # No channels connect until non-secret bindings are explicitly configured.
 - insert:
-    - id: agent-imessage-dsh-channels
-      name: '@showin2333/agent-imessage'
-    - id: agent-imessage-dsh-projects
-      name: '@showin2333/agent-imessage/project-groups'
+    - id: dsh-channels
+      name: '@showin2333/dsh-channels'
+    - id: dsh-channels-projects
+      name: '@showin2333/dsh-channels/project-groups'

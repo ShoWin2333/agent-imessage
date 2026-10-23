@@ -35,7 +35,7 @@ export const channelDomain = defineDomain({
 
 /** Loading or saving disabled bindings never resolves credentials or starts consumers. */
 export async function apply(ctx: Context, config: Config | { bindings: Volatile<Binding[]> } = {}): Promise<void> {
-  const log = ctx.logger('agent-imessage')
+  const log = ctx.logger('dsh-channels')
   const report = (message: string, details?: unknown) => { log.warn(message); if (details !== undefined) log.warn(details) }
   const read = () => pluginConfigSchema.parse({ bindings: config.bindings && 'get' in config.bindings ? config.bindings.get() : config.bindings ?? [] }).bindings
   const initial = read()

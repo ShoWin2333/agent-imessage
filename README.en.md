@@ -1,4 +1,4 @@
-# Agent iMessage · DSH channel plugin
+# Message Channels · DSH channel plugin
 
 **Long-lived plugin branch: `dsh-plugin`. The independent macOS App stays on `main`; do not merge this branch into `main`.**
 
@@ -7,6 +7,20 @@ A DeepSeek Harness plugin for iMessage, Telegram, Weixin iLink and Discord. Targ
 DSH owns agents, models, tools, permissions, inboxes, cancellation and durable session logs. This plugin owns verified channel bindings, provider-message deduplication and reply delivery. It exposes the Cordis `name / inject / apply` entry point, with no standalone application, backend bridge, desktop shell, service installer or executable CLI.
 
 One read-only Agent tool, `channel_status`, reports each configured channel's enabled flag, connection phase and stable error code, without message content, credentials or session identifiers. The plugin does not load when the Host provides no `tools` service.
+
+## Install
+
+Requires DSH `0.2.1-rc.2` (`engines.dsh` accepts `>=0.2.1-rc.2 <0.3.0`). The iMessage channel additionally requires macOS with Messages; Telegram, Weixin iLink and Discord are cross-platform.
+
+The npm package is `@showin2333/dsh-channels`. Installing it mounts two Cordis rows as a bundle (`dsh-channels` and the project grouping); the browser panel is discovered from `dsh.client`.
+
+- **Direct install**: DSH → Plugins → Install, then enter `@showin2333/dsh-channels@1.1.0-dsh.9`.
+- **Market install**: enable `@deepseek-ai/dsh-experimental-plugin-market-bundle`, then Plugins → Discover → Add index source with the URL below.
+- **Local development**: `pnpm install && npm run build`, then point the profile dependency at this checkout with `link:`.
+
+Market index: `https://cdn.jsdelivr.net/gh/ShoWin2333/agent-imessage@dsh-plugin/market/index.json`
+
+Nothing connects until you configure a workspace, permission preset and credential reference in **Settings → Message Channels** and enable the binding. Upgrading means uninstall followed by install; DSH has no in-place update action yet.
 
 Idle messages enter native DSH follow-up turns; refinements steer the next step only while this channel owns the active turn. Host-originated turns keep their approval and reply ownership. There is no fixed progress-text receipt. Admission waits for inbox durability. Native `claimed` events correlate input IDs with turns; results are delivered after `turn/end` and an explicit flush. `/cancel` and `/stop` cancel current and queued work for this binding. `/status` reports its session; `/help` lists commands.
 

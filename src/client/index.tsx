@@ -1,5 +1,5 @@
 import type {Context} from '@deepseek-ai/cordis'
-import {TYPERT_REMOTE} from '@showin2333/agent-imessage/remote'
+import {TYPERT_REMOTE} from '@showin2333/dsh-channels/remote'
 import {installPanel} from './bootstrap.js'
 import type {ClientContext} from './contracts.js'
 
