@@ -30,6 +30,7 @@ export interface ClientLocale {
   subscribe(listener:()=>void):()=>void
 }
 export interface ClientContext {
+  inject(dependencies:string[],mount:(ctx:ClientContext)=>()=>void):PromiseLike<unknown>&{dispose():Promise<void>}
   configForms:{get(id:string):ConfigForm;whileServed(ids:string[],register:()=>()=>void):()=>void}
   slots:{inject(name:string,register:()=>unknown):()=>void;register(options:Record<string,unknown>,component:unknown):()=>void}
   uiWorkspace:{pickDirectory():Promise<string|null>}

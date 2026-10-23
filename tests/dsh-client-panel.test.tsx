@@ -16,7 +16,7 @@ function fixture(initial:Binding[]=[binding()]){
   const picker=vi.fn(async():Promise<string|null>=>null)
   const models=vi.fn(async()=>({ok:true as const,value:{default:{provider:'host',model:'default'},groups:[{id:'host',name:'宿主',models:[{id:'default',name:'默认模型'},{id:'configured',name:'已配置模型',reasoning:{efforts:[{id:'high',name:'高'}]}}]}],failures:[]}}))
   const status=vi.fn(async()=>({ok:true as const,value:{bindings:initial.map(b=>({id:b.id,phase:'stopped'}))}}))
-  const ctx={remote:{session:{modelCatalog:models},channels:{status}},uiWorkspace:{pickDirectory:picker}} as unknown as ClientContext
+  const ctx={remote:{session:{modelCatalog:models},channels:{status}},uiWorkspace:{pickDirectory:picker},inject(this:ClientContext,_dependencies:string[],mount:(ctx:ClientContext)=>()=>void){const release=mount(this);return Object.assign(Promise.resolve(),{dispose:async()=>{release()}})}} as unknown as ClientContext
   const show=()=>render(<ChannelPanel ctx={ctx} channelForm={form}/>)
   return {form,ctx,mutate,picker,models,status,replace,show,snapshot:()=>snapshot}
 }
