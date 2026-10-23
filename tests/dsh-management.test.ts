@@ -2,12 +2,43 @@ import { expect, it, vi } from 'vitest'
 import Schema from '@deepseek-ai/schemastery'
 import {volatileForm,plainConfig,projectForm} from '../node_modules/@deepseek-ai/dsh-settings/lib/types/schema.js'
 import { Config } from '../src/plugin/schema.js'
-import { ChannelManager, ActivationCleanupError } from '../src/plugin/management.js'
+import { ChannelManager, ChannelsController, ActivationCleanupError } from '../src/plugin/management.js'
 import { bindingKey, pluginConfigSchema, apply } from '../src/plugin/index.js'
 import { legacyCheckpoint, wasLegacyMessage } from '../src/plugin/legacy-checkpoint.js'
 import type { Context } from '@deepseek-ai/cordis'
 const binding = (id = 'a', enabled = true) => pluginConfigSchema.parse({ bindings: [{ id, enabled, cwd:'/tmp', channel:{id,kind:'telegram',botId:id === 'a' ? '123' : '789',ownerUserId:'456'}, credentialRef:'SYNTHETIC_TOKEN',permissionPreset:'workspace-write' }] }).bindings[0]!
 function deferred<T>() { let resolve!:(value:T)=>void;const promise=new Promise<T>(r=>{resolve=r});return {promise,resolve} }
+it('buffers the latest status change while the consumer is paused at a yield and releases on abort',async()=>{
+  const manager=new ChannelManager(async()=>({close:async()=>{}})),abort=new AbortController()
+  const subscribe=vi.spyOn(manager,'subscribe'),release=vi.fn()
+  subscribe.mockImplementation(listener=>{const dispose=ChannelManager.prototype.subscribe.call(manager,listener);return()=>{release();dispose()}})
+  const stream=ChannelsController.prototype.statusStream.call({manager} as unknown as ChannelsController,abort.signal)[Symbol.asyncIterator]()
+  let pending:Promise<IteratorResult<unknown>>|undefined
+  try {
+    expect((await stream.next()).value).toEqual({bindings:[]})
+    manager.rejectConfiguration()
+    manager.rejectConfiguration()
+    let delivered=false
+    pending=stream.next().then(value=>{delivered=true;return value})
+    await new Promise<void>(resolve=>setImmediate(resolve))
+    expect(delivered).toBe(true)
+    expect((await pending).value).toEqual({bindings:[],configError:'config-invalid'})
+    pending=stream.next()
+    abort.abort()
+    expect((await pending).done).toBe(true)
+    expect(release).toHaveBeenCalledTimes(1)
+  } finally {abort.abort();await pending;await stream.return?.();await manager.close()}
+})
+it('unsubscribes immediately when aborted while paused at a yielded status',async()=>{
+  const release=vi.fn(),abort=new AbortController()
+  const manager={status:()=>({bindings:[]}),subscribe:()=>release}
+  const stream=ChannelsController.prototype.statusStream.call({manager} as unknown as ChannelsController,abort.signal)[Symbol.asyncIterator]()
+  await stream.next()
+  abort.abort()
+  expect(release).toHaveBeenCalledTimes(1)
+  expect((await stream.next()).done).toBe(true)
+  expect(release).toHaveBeenCalledTimes(1)
+})
 it('native schema and browser JSON rehydration accept omitted optional objects and default to stopped',()=>{
   const b=binding();const {enabled:_,...raw}=b
   for(const schema of [Config,new Schema(JSON.parse(JSON.stringify(Config)))]){

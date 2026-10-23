@@ -11,6 +11,7 @@ import { UserQuestionError } from '@deepseek-ai/dsh-user-questions'
 import type {} from '@deepseek-ai/dsh-user-approval'
 import type { InteractionHandlers, InteractionScope } from './interaction-types.js'
 import type { NativeHost, NativeSession, NativeResult } from './bridge.js'
+import { ownsSession, type LegacySessionIdentity } from './identity.js'
 
 // DSH 0.2 uses producer-owned message source kinds, without a generic plugin source.
 declare module '@deepseek-ai/dsh-llm' {
@@ -58,12 +59,12 @@ function reasonText(reason: unknown): string {
 }
 
 export class DshNativeHost implements NativeHost {
-  constructor(private readonly ctx: Context, private readonly cwd: string, private readonly permissionPreset: string, private readonly binding: string, private readonly model?: {provider:string;model:string;reasoningEffort?:string | undefined}) { }
+  constructor(private readonly ctx: Context, private readonly cwd: string, private readonly permissionPreset: string, private readonly binding: string, private readonly model?: {provider:string;model:string;reasoningEffort?:string | undefined}, private readonly legacyIdentity?: LegacySessionIdentity) { }
   async inspect(sessionId: string, inputId: string): Promise<NativeResult | undefined> {
     if (!sessionId) return undefined
     const snapshot = await this.ctx.sessionPersistence.stat(SessionId(sessionId))
     if (!snapshot) return undefined
-    if (snapshot.header.cwd !== this.cwd || !sessionId.startsWith(`channels-${this.binding}-`)) throw new Error('Session binding mismatch')
+    if (snapshot.header.cwd !== this.cwd || !ownsSession(sessionId, this.binding, this.legacyIdentity)) throw new Error('Session binding mismatch')
     const handle = await this.ctx.sessionPersistence.open(SessionId(sessionId), 'read')
     try {
       const events = (await handle.read()).events
@@ -78,7 +79,7 @@ export class DshNativeHost implements NativeHost {
     let preset = this.ctx.agentPresets.defaultId
     if (id) {
       const snapshot = await this.ctx.sessionPersistence.stat(SessionId(id))
-      if (!snapshot || snapshot.header.cwd !== this.cwd || !id.startsWith(`channels-${this.binding}-`)) throw new Error('Session binding mismatch')
+      if (!snapshot || snapshot.header.cwd !== this.cwd || !ownsSession(id, this.binding, this.legacyIdentity)) throw new Error('Session binding mismatch')
       preset = snapshot.header.agentPreset ?? preset
       const stored = await this.ctx.sessionPersistence.open(SessionId(id), 'read')
       try {

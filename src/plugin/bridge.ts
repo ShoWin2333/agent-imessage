@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { ChannelInteractions } from './interactions.js'
 import { bounded } from './delivery.js'
+import type { LegacySessionIdentity } from './identity.js'
 import type { InteractionHandlers } from './interaction-types.js'
 import type { ChannelMessage } from '../channels/types.js'
 
@@ -23,7 +24,7 @@ export interface Receipt {
   delivery: 'pending' | 'sending' | 'sent' | 'uncertain'
   result?: NativeResult | undefined
 }
-export interface BindingState { sessionId?: string | undefined; receipts: Receipt[] }
+export interface BindingState { sessionId?: string | undefined; receipts: Receipt[]; legacyIdentity?: LegacySessionIdentity | undefined }
 export interface BindingStore {
   read(): BindingState
   write(value: BindingState): Promise<void>

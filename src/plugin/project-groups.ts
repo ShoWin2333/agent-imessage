@@ -2,7 +2,7 @@ import {realpath} from 'node:fs/promises'
 import type {Context} from '@deepseek-ai/cordis'
 import {Remote,TypertRemoteService} from '@deepseek-ai/dsh-typert-protocol'
 import type {Binding} from './config.js'
-import {bindingKey} from './identity.js'
+import {bindingKey,ownedSessionIds} from './identity.js'
 
 const DOMAIN='dsh_channels_v1'
 interface Workspace {id:string;path:string;title:string;attachSession(id:string):Promise<void>}
@@ -15,13 +15,6 @@ export interface ChannelProject {id:string;cwd:string;title:string;bindingIds:st
 export interface ProjectGroupStatus {projects:ChannelProject[];pending:string[];errors:Array<{bindingId:string;code:string}>}
 /** Match the channel's durable key exactly, including canonical cwd, excluding activation. */
 export function projectBindingKey(binding:Binding):string{return bindingKey(binding)}
-function sessionIds(value:unknown,key:string):string[] {
-  if(!value||typeof value!=='object')return []
-  const row=value as {sessionId?:unknown;receipts?:unknown}
-  const ids:unknown[]=[row.sessionId]
-  if(Array.isArray(row.receipts))for(const receipt of row.receipts)if(receipt&&typeof receipt==='object')ids.push((receipt as {sessionId?:unknown}).sessionId)
-  return [...new Set(ids.filter((id):id is string=>typeof id==='string'&&id.startsWith(`channels-${key}-`)&&id.length>`channels-${key}-`.length))]
-}
 const projectTitle=(id:string)=>/^(.+)-(?:imessage|telegram|weixin|discord)(?:-|$)/.exec(id)?.[1]?.replace(/^./,c=>c.toUpperCase())
 
 /**
@@ -40,7 +33,8 @@ export class ChannelProjectGroups {
   async sessionCreated(id:string):Promise<void>{
     if(this.closed||!/^channels-[a-f0-9]{64}-.+/.test(id))return
     for(const binding of this.enabled()){
-      if(id.startsWith(`channels-${await this.keyOf(binding)}-`)){await this.refresh();return}
+      const key=await this.keyOf(binding),row=this.ctx.storageDomain.get(DOMAIN)?.table('bindings').get(key)
+      if(id.startsWith(`channels-${key}-`)||ownedSessionIds(row,key).includes(id)){await this.refresh();return}
     }
   }
   refresh():Promise<void>{
@@ -77,16 +71,16 @@ export class ChannelProjectGroups {
         const workspace=await this.ctx.workspaceRegistry.create(cwd,projectTitle(binding.id))
         if(!this.active(generation))return
         if(workspace.path!==cwd)throw new Error('Workspace path mismatch')
-        const candidates=sessionIds(domain.table('bindings').get(key),key)
+        const candidates=ownedSessionIds(domain.table('bindings').get(key),key)
         for(const id of candidates){
           if(!this.active(generation))return
           const snapshot=await this.ctx.sessionPersistence.stat(id)
           if(!snapshot?.header.cwd)continue
           if(await this.canonical(snapshot.header.cwd)!==cwd)continue
           // Re-read the authoritative ownership account after every async header/path read.
-          if(!sessionIds(domain.table('bindings').get(key),key).includes(id))continue
+          if(!ownedSessionIds(domain.table('bindings').get(key),key).includes(id))continue
           if(!await this.bindingCurrent(binding.id,key,generation))continue
-          if(!sessionIds(domain.table('bindings').get(key),key).includes(id))continue
+          if(!ownedSessionIds(domain.table('bindings').get(key),key).includes(id))continue
           await workspace.attachSession(id)
         }
         if(await this.bindingCurrent(binding.id,key,generation)){

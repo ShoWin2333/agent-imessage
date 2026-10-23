@@ -11,7 +11,7 @@ import { z } from 'zod'
 import type { ChannelAdapter } from '../channels/types.js'
 import type { RouteState } from '../channels/state.js'
 import { ChannelBridge } from './bridge.js'
-import { bindingKey, legacyBindingKey } from './identity.js'
+import { bindingKey, legacyBindingKey, migrateBindingState } from './identity.js'
 import { wasLegacyMessage } from './legacy-checkpoint.js'
 import { DshNativeHost } from './native.js'
 import { channelStatusTool } from './tool.js'
@@ -28,7 +28,7 @@ export const Config: typeof NativeConfig = NativeConfig
 const receiptSchema = z.object({ id: z.string(), inputId: z.string(), sessionId: z.string(), delivery: z.enum(['pending', 'sending', 'sent', 'uncertain']), result: z.object({ text: z.string(), reason: z.string(), suppressed: z.boolean().optional() }).optional() })
 export const channelDomain = defineDomain({
   name: 'dsh_channels_v1', version: 1, tables: {
-    bindings: domainTable(z.object({ sessionId: z.string().optional(), receipts: z.array(receiptSchema) })),
+    bindings: domainTable(z.object({ sessionId: z.string().optional(), receipts: z.array(receiptSchema), legacyIdentity: z.object({ key: z.string().regex(/^[a-f0-9]{64}$/), sessionIds: z.array(z.string()) }).optional() })),
     adapters: domainTable(z.object({ seen: z.array(z.string()), legacySeen: z.array(z.string()).max(1024).optional(), channelCursor: z.string().optional(), weixinContext: z.string().optional() })),
   }
 })
@@ -66,20 +66,39 @@ export async function apply(ctx: Context, config: Config | { bindings: Volatile<
       }
     }
     const key = bindingKey(binding), legacyKey = legacyBindingKey(binding), table = domain.table('bindings'), adapterTable = domain.table('adapters')
-    // Carry a row created before credential rotation was excluded from binding identity.
+    // Keep original session IDs, granting only exact IDs from this binding's old row.
     if (key !== legacyKey) {
-      if (!table.get(key)) { const previous = table.get(legacyKey); if (previous) await wait(table.put(key, previous)) }
+      const current = table.get(key), migrated = migrateBindingState(binding, current, table.get(legacyKey))
+      if (migrated && migrated !== current) await wait(table.put(key, migrated))
       if (!adapterTable.get(key)) { const previous = adapterTable.get(legacyKey); if (previous) await wait(adapterTable.put(key, previous)) }
     }
     if (!table.get(key)) await wait(table.put(key, { receipts: [] }))
     ensureActive()
-    const bridge = new ChannelBridge(new DshNativeHost(ctx, binding.cwd, binding.permissionPreset, key, binding.model), {
+    const bridge = new ChannelBridge(new DshNativeHost(ctx, binding.cwd, binding.permissionPreset, key, binding.model, table.get(key)?.legacyIdentity), {
       read: () => table.get(key)!, write: value => table.put(key, value),
     })
     bridge.setConnected(false)
     let adapter: ChannelAdapter | undefined
+    let starting: Promise<void> | undefined
+    let startSettled = false
     let closing: Promise<void> | undefined
-    const close = () => closing ??= (async () => { bridge.setConnected(false); await Promise.all([adapter?.stop(), bridge.close()]) })()
+    const close = () => closing ??= (async () => {
+      bridge.setConnected(false)
+      const acquired = adapter
+      const results = await Promise.allSettled([
+        Promise.resolve().then(() => bridge.close()),
+        (async () => {
+          if (!acquired) return
+          if (starting && !startSettled) {
+            // Stop immediately to interrupt startup, then fence resources acquired
+            // by a start implementation after that first stop has completed.
+            await Promise.allSettled([Promise.resolve().then(() => acquired.stop()), starting])
+          }
+          await acquired.stop()
+        })(),
+      ])
+      if (results.some(result => result.status === 'rejected')) throw new Error('Channel cleanup incomplete')
+    })()
     const abort = () => { void close().catch(() => {}) }
     signal.addEventListener('abort', abort, { once: true })
     try {
@@ -97,19 +116,24 @@ export async function apply(ctx: Context, config: Config | { bindings: Volatile<
       const c = binding.channel
       // Adapters load on demand: a Telegram-only deployment never imports Discord or Spectrum.
       if (c.kind === 'imessage') {
-        const { IMessageAdapter } = await import('../channels/imessage.js')
+        const { IMessageAdapter } = await wait(import('../channels/imessage.js'))
+        ensureActive()
         adapter = new IMessageAdapter({ ...c, projectSecret: secret.value }, receive, onState)
       } else if (c.kind === 'telegram') {
-        const { TelegramAdapter } = await import('../channels/telegram.js')
+        const { TelegramAdapter } = await wait(import('../channels/telegram.js'))
+        ensureActive()
         adapter = new TelegramAdapter({ ...c, token: secret.value }, store, receive, onState)
       } else if (c.kind === 'discord') {
-        const { DiscordAdapter } = await import('../channels/discord.js')
+        const { DiscordAdapter } = await wait(import('../channels/discord.js'))
+        ensureActive()
         adapter = new DiscordAdapter(c, secret.value, receive, onState)
       } else {
-        const { WeixinAdapter } = await import('../channels/weixin.js')
+        const { WeixinAdapter } = await wait(import('../channels/weixin.js'))
+        ensureActive()
         adapter = new WeixinAdapter({ accountId: c.accountId, token: secret.value, ...binding.weixin! }, store, receive, onState)
       }
-      await wait(adapter.start()); ensureActive()
+      starting = Promise.resolve().then(() => { ensureActive(); return adapter!.start() }).finally(() => { startSettled = true })
+      await wait(starting); ensureActive()
       return { close: async () => { signal.removeEventListener('abort', abort); await close() } }
     } catch (error) {
       signal.removeEventListener('abort', abort)

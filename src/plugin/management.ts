@@ -125,24 +125,25 @@ export class ChannelsController extends TypertRemoteService {
   @Remote({ mode: 'stream' })
   async *statusStream(signal: AbortSignal): AsyncIterable<{ bindings: BindingStatus[]; configError?: string }> {
     let previous: string | undefined
-    const pending = new Set<() => void>()
-    const release = this.manager.subscribe(() => { for (const resolve of pending) resolve() })
-    const next = () => new Promise<void>(resolve => {
-      const done = () => { pending.delete(done); signal.removeEventListener('abort', done); resolve() }
-      pending.add(done)
-      signal.addEventListener('abort', done, { once: true })
-    })
+    let dirty = true, disposed = false
+    let wake: (() => void) | undefined
+    // Capacity one: changes during a suspended yield retain the latest snapshot.
+    const release = this.manager.subscribe(() => { dirty = true; wake?.() })
+    const stop = () => { if (disposed) return; disposed = true; release(); wake?.() }
+    signal.addEventListener('abort', stop, { once: true })
     try {
       while (!signal.aborted) {
+        dirty = false
         const value = this.manager.status()
         const key = JSON.stringify(value)
         if (key !== previous) { previous = key; yield value }
         if (signal.aborted) return
-        await next()
+        if (!dirty) await new Promise<void>(resolve => { wake = resolve })
+        wake = undefined
       }
     } finally {
-      release()
-      for (const resolve of pending) resolve()
+      signal.removeEventListener('abort', stop)
+      stop()
     }
   }
 }
