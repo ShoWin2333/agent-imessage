@@ -14,10 +14,11 @@ import { ChannelBridge } from './bridge.js'
 import { bindingKey, legacyBindingKey } from './identity.js'
 import { wasLegacyMessage } from './legacy-checkpoint.js'
 import { DshNativeHost } from './native.js'
+import { channelStatusTool } from './tool.js'
 import { pluginConfigSchema, type Binding } from './config.js'
 
 export const name = 'dsh-channels'
-export const inject = ['agents', 'llm', 'sessions', 'sessionPersistence', 'agentPresets', 'agentDefaultModel', 'permissionPresets', 'credentials', 'storageDomain']
+export const inject = ['agents', 'llm', 'sessions', 'sessionPersistence', 'agentPresets', 'agentDefaultModel', 'permissionPresets', 'credentials', 'storageDomain', 'tools']
 export { bindingSchema, pluginConfigSchema } from './config.js'
 export { bindingKey } from './identity.js'
 export type { Binding } from './config.js'
@@ -119,6 +120,10 @@ export async function apply(ctx: Context, config: Config | { bindings: Volatile<
   }, report)
   let closing: Promise<void> | undefined
   const close = () => closing ??= (async () => { stopped = true; await manager.close(); await domain.close() })()
+  ctx.effect(() => ctx.tools.register(channelStatusTool({
+    status: () => manager.status(),
+    enabled: () => new Set(manager.bindings().filter(binding => binding.enabled).map(binding => binding.id)),
+  })))
   ctx.effect(() => close)
   ctx.plugin(ChannelsController, manager)
   const settings = ctx.get('settings')

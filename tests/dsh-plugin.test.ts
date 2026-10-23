@@ -119,10 +119,12 @@ it('validates all four channels, owner/scope/permission changes cannot inherit s
   ]) expect(pluginConfigSchema.safeParse({ bindings: [{ ...binding, channel, weixin: { ownerUserId: 'owner', baseUrl: 'https://ilinkai.weixin.qq.com' } }] }).success).toBe(true)
 })
 it('empty plugin composition is inert; no credential reads or network connections', async () => {
-  let stop!: () => Promise<void>; const close = vi.fn(async () => { }), resolve = vi.fn()
+  let stop!: () => Promise<void>; const close = vi.fn(async () => { }), resolve = vi.fn(), tools = { register: vi.fn((_definition: { name: string }) => () => { }) }
   const logger = { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() }
-  const ctx = { logger: () => logger, plugin: vi.fn(), get: () => undefined, on: vi.fn(), storageDomain: { open: vi.fn(async () => ({ close })) }, effect: (fn: () => () => Promise<void>) => { stop = fn() }, credentials: { resolve } } as unknown as Context
-  await apply(ctx, {}); expect(resolve).not.toHaveBeenCalled(); await stop(); expect(close).toHaveBeenCalled()
+  const ctx = { logger: () => logger, plugin: vi.fn(), get: () => undefined, on: vi.fn(), tools, storageDomain: { open: vi.fn(async () => ({ close })) }, effect: (fn: () => () => Promise<void>) => { stop = fn() }, credentials: { resolve } } as unknown as Context
+  await apply(ctx, {}); expect(resolve).not.toHaveBeenCalled()
+  expect(tools.register).toHaveBeenCalledTimes(1); expect(tools.register.mock.calls[0]![0].name).toBe('channel_status')
+  await stop(); expect(close).toHaveBeenCalled()
 })
 it('native ownership rejects another consumer and cross-workspace sessions', async () => {
   const ctx = { agents: { get: vi.fn(() => ({ id: 'occupied' })) } } as unknown as Context
@@ -170,7 +172,7 @@ it('unload while credential resolution is pending cannot start a late channel', 
   const records = new Map<string, unknown>()
   const put = vi.fn(async (key: string, value: unknown) => { if (closed) throw new Error('write after close'); records.set(key, value) })
   const ctx = {
-logger: () => ({ warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() }), plugin: vi.fn(), get: () => undefined, on: vi.fn(),
+logger: () => ({ warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() }), plugin: vi.fn(), get: () => undefined, on: vi.fn(), tools: { register: vi.fn(() => () => {}) },
 permissionPresets: { resolve: () => { } }, storageDomain: { open: async () => ({ table: () => ({ get: (key: string) => records.get(key), put }), close: async () => { closed = true } }) },
     credentials: { resolve: resolveCredential }, effect: (fn: () => () => Promise<void>) => { stop = fn() },
   } as unknown as Context

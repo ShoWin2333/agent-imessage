@@ -6,6 +6,8 @@ A DeepSeek Harness plugin for iMessage, Telegram, Weixin iLink and Discord. Targ
 
 DSH owns agents, models, tools, permissions, inboxes, cancellation and durable session logs. This plugin owns verified channel bindings, provider-message deduplication and reply delivery. It exposes the Cordis `name / inject / apply` entry point, with no standalone application, backend bridge, desktop shell, service installer or executable CLI.
 
+One read-only Agent tool, `channel_status`, reports each configured channel's enabled flag, connection phase and stable error code, without message content, credentials or session identifiers. The plugin does not load when the Host provides no `tools` service.
+
 Idle messages enter native DSH follow-up turns; refinements steer the next step only while this channel owns the active turn. Host-originated turns keep their approval and reply ownership. There is no fixed progress-text receipt. Admission waits for inbox durability. Native `claimed` events correlate input IDs with turns; results are delivered after `turn/end` and an explicit flush. `/cancel` and `/stop` cancel current and queued work for this binding. `/status` reports its session; `/help` lists commands.
 
 Restart recovery delivers completed unsent results without rerunning prompts. Interrupted old input is quarantined and removed from the resumed inbox before accepting new work. Ambiguous sends are marked `uncertain` and never retried automatically. This does not promise end-to-end exactly-once delivery.

@@ -41,7 +41,7 @@ it('notifies subscribers on each accepted lifecycle transition',async()=>{
 it('disabled binding cannot read credentials or start channels even when the directory is absent',async()=>{
   let close!:()=>Promise<void>;const secret=vi.fn(),domainClose=vi.fn(async()=>{})
   const logger={warn:vi.fn(),error:vi.fn(),info:vi.fn(),debug:vi.fn()}
-  const ctx={logger:()=>logger,plugin:vi.fn(),get:()=>undefined,on:vi.fn(),storageDomain:{open:async()=>({close:domainClose})},credentials:{resolve:secret},effect:(fn:()=>()=>Promise<void>)=>{close=fn()}} as unknown as Context
+  const ctx={logger:()=>logger,plugin:vi.fn(),get:()=>undefined,on:vi.fn(),tools:{register:vi.fn(()=>()=>{})},storageDomain:{open:async()=>({close:domainClose})},credentials:{resolve:secret},effect:(fn:()=>()=>Promise<void>)=>{close=fn()}} as unknown as Context
   await apply(ctx,{bindings:[{...binding('a',false),cwd:'/absent-synthetic-directory'}]});expect(secret).not.toHaveBeenCalled();await close();expect(domainClose).toHaveBeenCalled()
 })
 it('saving another binding preserves unchanged consumers and disabling closes only its owner',async()=>{

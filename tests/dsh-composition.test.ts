@@ -35,6 +35,7 @@ id: session.id, session, ctx, inbox: { clear: vi.fn() }, cancel: vi.fn(), follow
     ctx.provide('agentDefaultModel', { currentSelection: () => ({ provider: 'synthetic', model: 'no-model-call' }) })
     ctx.provide('permissionPresets', { resolve: () => { }, set: () => { } })
     ctx.provide('credentials', { resolve: async () => ({ value: 'synthetic-token', source: 'test' }) })
+    ctx.provide('tools', { register: () => () => { } })
   })
   let polled = false
   const request = vi.spyOn(TelegramApi.prototype, 'request').mockImplementation(async (_token, method, _params, signal) => {
