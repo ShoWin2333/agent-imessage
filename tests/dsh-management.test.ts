@@ -2,12 +2,43 @@ import { expect, it, vi } from 'vitest'
 import Schema from '@deepseek-ai/schemastery'
 import {volatileForm,plainConfig,projectForm} from '../node_modules/@deepseek-ai/dsh-settings/lib/types/schema.js'
 import { Config } from '../src/plugin/schema.js'
-import { ChannelManager, ActivationCleanupError } from '../src/plugin/management.js'
+import { ChannelManager, ChannelsController, ActivationCleanupError } from '../src/plugin/management.js'
 import { bindingKey, pluginConfigSchema, apply } from '../src/plugin/index.js'
 import { legacyCheckpoint, wasLegacyMessage } from '../src/plugin/legacy-checkpoint.js'
 import type { Context } from '@deepseek-ai/cordis'
 const binding = (id = 'a', enabled = true) => pluginConfigSchema.parse({ bindings: [{ id, enabled, cwd:'/tmp', channel:{id,kind:'telegram',botId:id === 'a' ? '123' : '789',ownerUserId:'456'}, credentialRef:'SYNTHETIC_TOKEN',permissionPreset:'workspace-write' }] }).bindings[0]!
 function deferred<T>() { let resolve!:(value:T)=>void;const promise=new Promise<T>(r=>{resolve=r});return {promise,resolve} }
+it('buffers the latest status change while the consumer is paused at a yield and releases on abort',async()=>{
+  const manager=new ChannelManager(async()=>({close:async()=>{}})),abort=new AbortController()
+  const subscribe=vi.spyOn(manager,'subscribe'),release=vi.fn()
+  subscribe.mockImplementation(listener=>{const dispose=ChannelManager.prototype.subscribe.call(manager,listener);return()=>{release();dispose()}})
+  const stream=ChannelsController.prototype.statusStream.call({manager} as unknown as ChannelsController,abort.signal)[Symbol.asyncIterator]()
+  let pending:Promise<IteratorResult<unknown>>|undefined
+  try {
+    expect((await stream.next()).value).toEqual({bindings:[]})
+    manager.rejectConfiguration()
+    manager.rejectConfiguration()
+    let delivered=false
+    pending=stream.next().then(value=>{delivered=true;return value})
+    await new Promise<void>(resolve=>setImmediate(resolve))
+    expect(delivered).toBe(true)
+    expect((await pending).value).toEqual({bindings:[],configError:'config-invalid'})
+    pending=stream.next()
+    abort.abort()
+    expect((await pending).done).toBe(true)
+    expect(release).toHaveBeenCalledTimes(1)
+  } finally {abort.abort();await pending;await stream.return?.();await manager.close()}
+})
+it('unsubscribes immediately when aborted while paused at a yielded status',async()=>{
+  const release=vi.fn(),abort=new AbortController()
+  const manager={status:()=>({bindings:[]}),subscribe:()=>release}
+  const stream=ChannelsController.prototype.statusStream.call({manager} as unknown as ChannelsController,abort.signal)[Symbol.asyncIterator]()
+  await stream.next()
+  abort.abort()
+  expect(release).toHaveBeenCalledTimes(1)
+  expect((await stream.next()).done).toBe(true)
+  expect(release).toHaveBeenCalledTimes(1)
+})
 it('native schema and browser JSON rehydration accept omitted optional objects and default to stopped',()=>{
   const b=binding();const {enabled:_,...raw}=b
   for(const schema of [Config,new Schema(JSON.parse(JSON.stringify(Config)))]){
@@ -28,10 +59,20 @@ it('survives the actual native Settings schema projection and second wire serial
 it('enabled is activation state, while a model change partitions durable binding identity',()=>{
   const b=binding();expect(bindingKey(b)).toBe(bindingKey({...b,enabled:false}))
   expect(bindingKey(b)).not.toBe(bindingKey({...b,model:{provider:'synthetic',model:'other'}}))
+  // Rotating a secret must keep the same channel session and receipts.
+  expect(bindingKey(b)).toBe(bindingKey({...b,credentialRef:'ROTATED_SECRET'}))
+})
+it('notifies subscribers on each accepted lifecycle transition',async()=>{
+  const start=vi.fn(async(_binding:ReturnType<typeof binding>,_signal:AbortSignal,state:(phase:string)=>void)=>{state('listening');return{close:vi.fn(async()=>{})}})
+  const manager=new ChannelManager(start),listener=vi.fn(),release=manager.subscribe(listener)
+  await manager.update([binding()])
+  expect(listener).toHaveBeenCalled()
+  release();await manager.close()
 })
 it('disabled binding cannot read credentials or start channels even when the directory is absent',async()=>{
   let close!:()=>Promise<void>;const secret=vi.fn(),domainClose=vi.fn(async()=>{})
-  const ctx={storageDomain:{open:async()=>({close:domainClose})},credentials:{resolve:secret},effect:(fn:()=>()=>Promise<void>)=>{close=fn()}} as unknown as Context
+  const logger={warn:vi.fn(),error:vi.fn(),info:vi.fn(),debug:vi.fn()}
+  const ctx={logger:()=>logger,plugin:vi.fn(),get:()=>undefined,on:vi.fn(),tools:{register:vi.fn(()=>()=>{})},storageDomain:{open:async()=>({close:domainClose})},credentials:{resolve:secret},effect:(fn:()=>()=>Promise<void>)=>{close=fn()}} as unknown as Context
   await apply(ctx,{bindings:[{...binding('a',false),cwd:'/absent-synthetic-directory'}]});expect(secret).not.toHaveBeenCalled();await close();expect(domainClose).toHaveBeenCalled()
 })
 it('saving another binding preserves unchanged consumers and disabling closes only its owner',async()=>{
@@ -95,7 +136,7 @@ it('preserves opaque Weixin buffers exactly and refuses reply contexts or mixed 
 it('reports rejected external settings without interrupting accepted consumers',async()=>{
   const close=vi.fn(async()=>{}),start=vi.fn(async()=>({close})),manager=new ChannelManager(start)
   await manager.update([binding()]);manager.rejectConfiguration()
-  expect(manager.status().configError).toMatch(/配置无效/);expect(close).not.toHaveBeenCalled();expect(start).toHaveBeenCalledTimes(1)
+  expect(manager.status().configError).toBe('config-invalid');expect(close).not.toHaveBeenCalled();expect(start).toHaveBeenCalledTimes(1)
   await manager.update([binding()]);expect(manager.status().configError).toBeUndefined();expect(start).toHaveBeenCalledTimes(1)
   await manager.close()
 })

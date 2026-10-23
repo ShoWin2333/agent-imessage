@@ -19,7 +19,7 @@ it('loads through real Cordis with native JSON domain, synthetic Telegram ingres
   const creates = vi.fn(async () => ({ agent, dispose: async () => { ctx.emit('agent/disposed', { agent } as never) } }))
   const session = Session.create(SessionId('channels-synthetic'))
   const agent = {
-id: session.id, session, inbox: { clear: vi.fn() }, cancel: vi.fn(), followup: vi.fn((input: any) => {
+id: session.id, session, ctx, inbox: { clear: vi.fn() }, cancel: vi.fn(), followup: vi.fn((input: any) => {
       ctx.emit('agent/inbox/claimed', { agent, message: input, turn: 1 } as never)
       ctx.emit('session/event', session, { type: 'step/start', data: { turn: 1 } } as never)
       ctx.emit('session/event', session, { type: 'assistant/message', data: { turn: 1, message: { content: [{ type: 'text', text: 'offline synthetic reply' }] } } } as never)
@@ -35,6 +35,7 @@ id: session.id, session, inbox: { clear: vi.fn() }, cancel: vi.fn(), followup: v
     ctx.provide('agentDefaultModel', { currentSelection: () => ({ provider: 'synthetic', model: 'no-model-call' }) })
     ctx.provide('permissionPresets', { resolve: () => { }, set: () => { } })
     ctx.provide('credentials', { resolve: async () => ({ value: 'synthetic-token', source: 'test' }) })
+    ctx.provide('tools', { register: () => () => { } })
   })
   let polled = false
   const request = vi.spyOn(TelegramApi.prototype, 'request').mockImplementation(async (_token, method, _params, signal) => {

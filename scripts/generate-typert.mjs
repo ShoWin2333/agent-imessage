@@ -40,6 +40,7 @@ export interface TypertLookup<Host, Wire> { readonly __host?: Host; readonly __w
 export interface TypertContext<Wire> { readonly __wire?: Wire }
 export interface TypertLookupMap {}
 export interface TypertContextMap {}
+type RemoteOptions = { mode?: 'unary' | 'stream' }
 type RemoteDecorator = <This extends object, Args extends unknown[], Result>(
   method: (this: This, ...args: Args) => Result,
   context: ClassMethodDecoratorContext<This, (this: This, ...args: Args) => Result>,
@@ -48,7 +49,8 @@ export declare function Remote<This extends object, Args extends unknown[], Resu
   method: (this: This, ...args: Args) => Result,
   context: ClassMethodDecoratorContext<This, (this: This, ...args: Args) => Result>,
 ): void
-export declare function Remote(exportName: string): RemoteDecorator
+export declare function Remote(exportName: string, options?: RemoteOptions): RemoteDecorator
+export declare function Remote(options: RemoteOptions): RemoteDecorator
 `)
 
   const compilerOptions = {

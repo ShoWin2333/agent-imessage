@@ -20,11 +20,25 @@ export interface Catalog {
   failures:Array<{id:string;message:string}>
 }
 export interface RuntimeStatus {id:string;phase:string;error?:string;sessionId?:string}
+export interface StatusFrame {bindings:RuntimeStatus[];configError?:string}
+export interface ProjectStatus {projects:Array<{id:string;title:string;cwd:string;bindingIds:string[]}>;pending:string[];errors:Array<{bindingId:string;code:string}>}
 export type Result<T>={ok:true;value:T}|{ok:false;error?:{message?:string}}
+export interface ChannelsApi {status():Promise<Result<StatusFrame>>;statusStream?(signal?:AbortSignal):AsyncIterable<StatusFrame>}
+export interface ClientLocale {
+  bind(ns:string):(key:string)=>string
+  register(ns:string,locale:'en'|'zh',dict:Record<string,string>):()=>void
+  subscribe(listener:()=>void):()=>void
+}
 export interface ClientContext {
   configForms:{get(id:string):ConfigForm;whileServed(ids:string[],register:()=>()=>void):()=>void}
   slots:{inject(name:string,register:()=>unknown):()=>void;register(options:Record<string,unknown>,component:unknown):()=>void}
   uiWorkspace:{pickDirectory():Promise<string|null>}
-  remote:{$mount(contribution:unknown):Promise<()=>Promise<void>|void>;session:{modelCatalog():Promise<Result<Catalog>>};channelProjects?:{status():Promise<Result<{projects:Array<{id:string;title:string;cwd:string;bindingIds:string[]}>}>>};channels?:{status():Promise<Result<{bindings:RuntimeStatus[];configError?:string}>>}}
+  locale?:ClientLocale
+  remote:{
+    $mount(contribution:unknown):Promise<()=>Promise<void>|void>
+    session:{modelCatalog():Promise<Result<Catalog>>}
+    channelProjects?:{status():Promise<Result<ProjectStatus>>}
+    channels?:ChannelsApi
+  }
   effect(effect:()=>()=>void,label?:string):unknown
 }

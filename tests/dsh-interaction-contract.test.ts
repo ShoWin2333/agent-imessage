@@ -13,7 +13,7 @@ const qs=[{id:'pick',question:'Synthetic question',options:[{label:'One'},{label
 async function fixture(before?:(ctx:Context)=>void) {
   const ctx=new Context(),session=Session.create(SessionId('channels-binding-synthetic'))
   let live:any
-  const agent={id:session.id,session,inbox:{clear:vi.fn()},cancel:vi.fn(),followup:vi.fn((message:any)=>{
+  const agent={id:session.id,session,ctx,inbox:{clear:vi.fn()},cancel:vi.fn(),followup:vi.fn((message:any)=>{
     session.append('turn/start',{turn:1});ctx.emit('agent/inbox/claimed',{agent,message,turn:1} as never)
   })}
   live=agent

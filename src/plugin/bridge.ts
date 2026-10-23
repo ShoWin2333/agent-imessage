@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { ChannelInteractions } from './interactions.js'
 import { bounded } from './delivery.js'
+import type { LegacySessionIdentity } from './identity.js'
 import type { InteractionHandlers } from './interaction-types.js'
 import type { ChannelMessage } from '../channels/types.js'
 
@@ -23,10 +24,19 @@ export interface Receipt {
   delivery: 'pending' | 'sending' | 'sent' | 'uncertain'
   result?: NativeResult | undefined
 }
-export interface BindingState { sessionId?: string | undefined; receipts: Receipt[] }
+export interface BindingState { sessionId?: string | undefined; receipts: Receipt[]; legacyIdentity?: LegacySessionIdentity | undefined }
 export interface BindingStore {
   read(): BindingState
   write(value: BindingState): Promise<void>
+}
+
+/** Keep every unsettled receipt and the most recent settled ones; older ids are provider-deduped. */
+const SENT_KEEP = 512
+function prune(receipts: Receipt[]): Receipt[] {
+  const sent = receipts.filter(receipt => receipt.delivery === 'sent')
+  if (sent.length <= SENT_KEEP) return receipts
+  const keep = new Set(sent.slice(-SENT_KEEP).map(receipt => receipt.id))
+  return receipts.filter(receipt => receipt.delivery !== 'sent' || keep.has(receipt.id))
 }
 
 /** One verified channel binding. No session adoption, cross-chat switch, or prompt replay. */
@@ -84,7 +94,6 @@ export class ChannelBridge {
       let reply: Receipt | undefined
       await this.serial(async () => {
         if (this.closed || this.store.read().receipts.some(r => r.id === message.id)) return
-        if (this.store.read().receipts.length >= 10000) throw new Error('Receipt capacity reached; archive this binding before accepting more work')
         const text = message.text.trim()
         if (/^\/(approve|deny|answer)(?:\s|$)/.test(text)) {
           let receipt:Receipt={id:message.id,inputId:randomUUID(),sessionId:this.store.read().sessionId ?? '',delivery:'pending',result:{text:'交互回复已接收。',reason:'command'}}
@@ -135,7 +144,7 @@ export class ChannelBridge {
   }
   private async replace(receipt: Receipt): Promise<void> {
     const state = this.store.read()
-    await this.store.write({ ...state, receipts: [...state.receipts.filter(r => r.id !== receipt.id), receipt] })
+    await this.store.write({ ...state, receipts: prune([...state.receipts.filter(r => r.id !== receipt.id), receipt]) })
   }
   private async deliver(receipt: Receipt, message: ChannelMessage): Promise<void> {
     if (!receipt.result || this.closed) return

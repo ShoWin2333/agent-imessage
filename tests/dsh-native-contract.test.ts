@@ -9,7 +9,7 @@ function runtime() {
   const handlers = new Map<string, Set<(...args: any[]) => void>>()
   const emit = (event: string, ...args: any[]) => { for (const fn of handlers.get(event) ?? []) fn(...args) }
   const liveSession = Session.create(SessionId('channels-binding-synthetic'))
-  const agent = { id: liveSession.id, session: liveSession, inbox: { clear: vi.fn() }, cancel: vi.fn(), followup: vi.fn() }
+  const agent = { id: liveSession.id, session: liveSession, inbox: { clear: vi.fn() }, cancel: vi.fn(), followup: vi.fn(), ctx: undefined as unknown as Context }
   const dispose = vi.fn(async () => { emit('agent/disposed', { agent }) })
   const flush = vi.fn(async () => true)
   const ctx = {
@@ -19,6 +19,7 @@ on: (event: string, fn: (...args: any[]) => void) => { if (!handlers.has(event))
     permissionPresets: { resolve: vi.fn(), set: vi.fn() }, sessions: { flush },
     sessionPersistence: { stat: vi.fn(async () => ({ header: { cwd: '/tmp', agentPreset: 'synthetic-preset' } })), open: vi.fn(async () => ({ read: async () => ({ events: [] }), close: vi.fn(async () => { }) })) },
   } as unknown as Context
+  agent.ctx = ctx
   return { ctx, agent, emit, flush, dispose, handlers, host: new DshNativeHost(ctx, '/tmp', 'workspace-write', 'binding') }
 }
 it('uses real DSH Session records for rejected claim and native interrupted-turn repair', () => {

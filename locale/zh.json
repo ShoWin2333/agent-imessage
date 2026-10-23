@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "消息渠道",
+    "description": "把 iMessage、Telegram、微信和 Discord 对话接入 Harness 会话，复用宿主已配置的模型、工具和权限预设。"
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Message Channels",
+    "description": "Connect iMessage, Telegram, Weixin and Discord conversations to Harness sessions, reusing the Host's models, tools and permission presets."
+  }
+}

@@ -2,9 +2,11 @@
 
 **Long-lived plugin branch: `dsh-plugin`. The independent macOS App stays on `main`; do not merge this branch into `main`.**
 
-A DeepSeek Harness plugin for iMessage, Telegram, Weixin iLink and Discord. Targets DSH `0.2.1-rc.2` interfaces.
+A DeepSeek Harness plugin for iMessage, Telegram, Weixin iLink and Discord. Targets the DSH `0.2.1-rc.2` interfaces; `engines.dsh` accepts `>=0.2.1-rc.2 <0.3.0` while dev dependencies stay pinned to the verified RC.
 
 DSH owns agents, models, tools, permissions, inboxes, cancellation and durable session logs. This plugin owns verified channel bindings, provider-message deduplication and reply delivery. It exposes the Cordis `name / inject / apply` entry point, with no standalone application, backend bridge, desktop shell, service installer or executable CLI.
+
+One read-only Agent tool, `channel_status`, reports each configured channel's enabled flag, connection phase and stable error code, without message content, credentials or session identifiers. The plugin does not load when the Host provides no `tools` service.
 
 Idle messages enter native DSH follow-up turns; refinements steer the next step only while this channel owns the active turn. Host-originated turns keep their approval and reply ownership. There is no fixed progress-text receipt. Admission waits for inbox durability. Native `claimed` events correlate input IDs with turns; results are delivered after `turn/end` and an explicit flush. `/cancel` and `/stop` cancel current and queued work for this binding. `/status` reports its session; `/help` lists commands.
 

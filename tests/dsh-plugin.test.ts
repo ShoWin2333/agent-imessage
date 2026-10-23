@@ -73,6 +73,18 @@ sessionId: 'channels-test', receipts: [
   expect(f.host.open).not.toHaveBeenCalled(); expect(f.session.submit).not.toHaveBeenCalled()
   await f.bridge.close()
 })
+it('prunes settled receipts while retaining unsettled and recent ones', async () => {
+  const sent = Array.from({ length: 600 }, (_, index) => ({ id: `sent-${index}`, inputId: `input-${index}`, sessionId: 'channels-test', delivery: 'sent' as const, result: { text: 'settled', reason: 'completed' } }))
+  const f = fixture({ receipts: [...sent, { id: 'pending-one', inputId: 'pending', sessionId: 'channels-test', delivery: 'pending' }] })
+  await f.bridge.receive(message('new'))
+  f.runs[0]!.result.resolve({ text: 'ok', reason: 'completed' })
+  await f.bridge.drain(); await f.bridge.close()
+  const receipts = f.store.read().receipts
+  expect(receipts.some(receipt => receipt.id === 'pending-one')).toBe(true)
+  expect(receipts.some(receipt => receipt.id === 'sent-0')).toBe(false)
+  expect(receipts.some(receipt => receipt.id === 'sent-599')).toBe(true)
+  expect(receipts.filter(receipt => receipt.delivery === 'sent').length).toBeLessThanOrEqual(512)
+})
 it('failed provider send is uncertain and not retried on restart', async () => {
   const f = fixture(), m = message('1'); vi.mocked(m.send).mockRejectedValue(new Error('synthetic transport failure'))
   await f.bridge.receive(m); f.runs[0]!.result.resolve({ text: 'result', reason: 'completed' }); await f.bridge.drain()
@@ -107,9 +119,12 @@ it('validates all four channels, owner/scope/permission changes cannot inherit s
   ]) expect(pluginConfigSchema.safeParse({ bindings: [{ ...binding, channel, weixin: { ownerUserId: 'owner', baseUrl: 'https://ilinkai.weixin.qq.com' } }] }).success).toBe(true)
 })
 it('empty plugin composition is inert; no credential reads or network connections', async () => {
-  let stop!: () => Promise<void>; const close = vi.fn(async () => { }), resolve = vi.fn()
-  const ctx = { storageDomain: { open: vi.fn(async () => ({ close })) }, effect: (fn: () => () => Promise<void>) => { stop = fn() }, credentials: { resolve } } as unknown as Context
-  await apply(ctx, {}); expect(resolve).not.toHaveBeenCalled(); await stop(); expect(close).toHaveBeenCalled()
+  let stop!: () => Promise<void>; const close = vi.fn(async () => { }), resolve = vi.fn(), tools = { register: vi.fn((_definition: { name: string }) => () => { }) }
+  const logger = { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() }
+  const ctx = { logger: () => logger, plugin: vi.fn(), get: () => undefined, on: vi.fn(), tools, storageDomain: { open: vi.fn(async () => ({ close })) }, effect: (fn: () => () => Promise<void>) => { stop = fn() }, credentials: { resolve } } as unknown as Context
+  await apply(ctx, {}); expect(resolve).not.toHaveBeenCalled()
+  expect(tools.register).toHaveBeenCalledTimes(1); expect(tools.register.mock.calls[0]![0].name).toBe('channel_status')
+  await stop(); expect(close).toHaveBeenCalled()
 })
 it('native ownership rejects another consumer and cross-workspace sessions', async () => {
   const ctx = { agents: { get: vi.fn(() => ({ id: 'occupied' })) } } as unknown as Context
@@ -157,6 +172,7 @@ it('unload while credential resolution is pending cannot start a late channel', 
   const records = new Map<string, unknown>()
   const put = vi.fn(async (key: string, value: unknown) => { if (closed) throw new Error('write after close'); records.set(key, value) })
   const ctx = {
+logger: () => ({ warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() }), plugin: vi.fn(), get: () => undefined, on: vi.fn(), tools: { register: vi.fn(() => () => {}) },
 permissionPresets: { resolve: () => { } }, storageDomain: { open: async () => ({ table: () => ({ get: (key: string) => records.get(key), put }), close: async () => { closed = true } }) },
     credentials: { resolve: resolveCredential }, effect: (fn: () => () => Promise<void>) => { stop = fn() },
   } as unknown as Context

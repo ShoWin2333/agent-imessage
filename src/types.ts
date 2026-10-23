@@ -48,3 +48,4 @@ export type RuntimeView =
 
 /** Value-only management contract, without message or credential data. */
 export type { BindingStatus } from './plugin/management.js'
+export type { Binding } from './plugin/config.js'
