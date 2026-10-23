@@ -39,9 +39,10 @@ export class ChannelInteractions {
   private readonly pending = new Map<string,Pending>()
   constructor(private readonly healthy:()=>boolean,private readonly timeoutMs=120000) {}
   async approval(scope:ApprovalInteraction,message:ChannelMessage):Promise<ApprovalOutcome> {
-    if(!scope.reason?.trim()) return 'unavailable' // Never ask for an uninformed grant.
+    const informed = scope.displayReason?.zh?.trim() || scope.displayReason?.en?.trim() || scope.reason?.trim()
+    if(!informed) return 'unavailable' // Never ask for an uninformed grant.
     const token=`a-${randomUUID()}`
-    const prompt=`DSH 单次审批\n会话：${scope.sessionId}\n轮次：${scope.turn}\n工具：${scope.toolName}\n${scope.callId ? `调用：${scope.callId}\n` : ''}原因：${scope.reason}\n\n仅批准这一次请求，不改变宿主权限。\n/approve ${token}\n/deny ${token}\n有效期 ${Math.ceil(this.timeoutMs/1000)} 秒。`
+    const prompt=`DSH 单次审批\n会话：${scope.sessionId}\n轮次：${scope.turn}\n工具：${scope.toolName}\n${scope.callId ? `调用：${scope.callId}\n` : ''}原因：${informed}\n\n仅批准这一次请求，不改变宿主权限。\n/approve ${token}\n/deny ${token}\n有效期 ${Math.ceil(this.timeoutMs/1000)} 秒。`
     if(prompt.length>MAX_PROMPT) return 'unavailable'
     const result=await this.wait(token,'approval',scope,message,prompt)
     return typeof result==='string' ? result : 'unavailable'

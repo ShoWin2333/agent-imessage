@@ -12,6 +12,8 @@ export interface InteractionScope {
 export interface ApprovalInteraction extends InteractionScope {
   toolName: string
   reason?: string | undefined
+  /** Localized reason supplied by the approval service; prefer it over `reason`. */
+  displayReason?: { readonly en: string; readonly [locale: string]: string } | undefined
   callId?: string | undefined
 }
 export interface QuestionInteraction extends InteractionScope { questions: AskUserQuestionItem[] }

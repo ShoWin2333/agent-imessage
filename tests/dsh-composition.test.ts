@@ -19,7 +19,7 @@ it('loads through real Cordis with native JSON domain, synthetic Telegram ingres
   const creates = vi.fn(async () => ({ agent, dispose: async () => { ctx.emit('agent/disposed', { agent } as never) } }))
   const session = Session.create(SessionId('channels-synthetic'))
   const agent = {
-id: session.id, session, inbox: { clear: vi.fn() }, cancel: vi.fn(), followup: vi.fn((input: any) => {
+id: session.id, session, ctx, inbox: { clear: vi.fn() }, cancel: vi.fn(), followup: vi.fn((input: any) => {
       ctx.emit('agent/inbox/claimed', { agent, message: input, turn: 1 } as never)
       ctx.emit('session/event', session, { type: 'step/start', data: { turn: 1 } } as never)
       ctx.emit('session/event', session, { type: 'assistant/message', data: { turn: 1, message: { content: [{ type: 'text', text: 'offline synthetic reply' }] } } } as never)

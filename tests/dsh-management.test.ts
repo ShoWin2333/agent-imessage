@@ -28,10 +28,20 @@ it('survives the actual native Settings schema projection and second wire serial
 it('enabled is activation state, while a model change partitions durable binding identity',()=>{
   const b=binding();expect(bindingKey(b)).toBe(bindingKey({...b,enabled:false}))
   expect(bindingKey(b)).not.toBe(bindingKey({...b,model:{provider:'synthetic',model:'other'}}))
+  // Rotating a secret must keep the same channel session and receipts.
+  expect(bindingKey(b)).toBe(bindingKey({...b,credentialRef:'ROTATED_SECRET'}))
+})
+it('notifies subscribers on each accepted lifecycle transition',async()=>{
+  const start=vi.fn(async(_binding:ReturnType<typeof binding>,_signal:AbortSignal,state:(phase:string)=>void)=>{state('listening');return{close:vi.fn(async()=>{})}})
+  const manager=new ChannelManager(start),listener=vi.fn(),release=manager.subscribe(listener)
+  await manager.update([binding()])
+  expect(listener).toHaveBeenCalled()
+  release();await manager.close()
 })
 it('disabled binding cannot read credentials or start channels even when the directory is absent',async()=>{
   let close!:()=>Promise<void>;const secret=vi.fn(),domainClose=vi.fn(async()=>{})
-  const ctx={storageDomain:{open:async()=>({close:domainClose})},credentials:{resolve:secret},effect:(fn:()=>()=>Promise<void>)=>{close=fn()}} as unknown as Context
+  const logger={warn:vi.fn(),error:vi.fn(),info:vi.fn(),debug:vi.fn()}
+  const ctx={logger:()=>logger,plugin:vi.fn(),get:()=>undefined,on:vi.fn(),storageDomain:{open:async()=>({close:domainClose})},credentials:{resolve:secret},effect:(fn:()=>()=>Promise<void>)=>{close=fn()}} as unknown as Context
   await apply(ctx,{bindings:[{...binding('a',false),cwd:'/absent-synthetic-directory'}]});expect(secret).not.toHaveBeenCalled();await close();expect(domainClose).toHaveBeenCalled()
 })
 it('saving another binding preserves unchanged consumers and disabling closes only its owner',async()=>{
@@ -95,7 +105,7 @@ it('preserves opaque Weixin buffers exactly and refuses reply contexts or mixed 
 it('reports rejected external settings without interrupting accepted consumers',async()=>{
   const close=vi.fn(async()=>{}),start=vi.fn(async()=>({close})),manager=new ChannelManager(start)
   await manager.update([binding()]);manager.rejectConfiguration()
-  expect(manager.status().configError).toMatch(/配置无效/);expect(close).not.toHaveBeenCalled();expect(start).toHaveBeenCalledTimes(1)
+  expect(manager.status().configError).toBe('config-invalid');expect(close).not.toHaveBeenCalled();expect(start).toHaveBeenCalledTimes(1)
   await manager.update([binding()]);expect(manager.status().configError).toBeUndefined();expect(start).toHaveBeenCalledTimes(1)
   await manager.close()
 })

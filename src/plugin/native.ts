@@ -109,9 +109,12 @@ export class DshNativeHost implements NativeHost {
   }
   private bind(handle: AgentHandle): NativeSession {
     const agent = handle.agent
+    // These feeds are scope-filtered: registering on the Agent's own context keeps every
+    // other session's traffic out of this binding and unwinds automatically on disposal.
+    const scoped = agent.ctx
     const pending = new Map<string, { turn?: number; suppressed?: boolean; text: string; resolve: (value: NativeResult) => void; progress: () => void; controller:AbortController; interactions?:InteractionHandlers | undefined }>()
     const leaders = new Map<number, string>()
-    const claimed = this.ctx.on('agent/inbox/claimed', payload => {
+    const claimed = scoped.on('agent/inbox/claimed', payload => {
       if (payload.agent !== agent) return
       // Every native claimant counts, including input from the host UI or scheduler.
       if (!leaders.has(payload.turn)) leaders.set(payload.turn, payload.message.id)
@@ -121,7 +124,7 @@ export class DshNativeHost implements NativeHost {
         input.turn = payload.turn
       }
     })
-    const discarded = this.ctx.on('agent/inbox/discarded', payload => {
+    const discarded = scoped.on('agent/inbox/discarded', payload => {
       if (payload.agent !== agent) return
       finish(payload.message.id, { text: '已取消。', reason: 'interrupted' })
     })
@@ -134,7 +137,7 @@ export class DshNativeHost implements NativeHost {
       // Turn completion is not a durability barrier. No reply before flush.
       void this.flush(agent).then(() => input.resolve(normalize(result)), () => input.resolve(normalize({ text: 'DSH 日志落盘未确认；请检查本机会话。', reason: 'uncertain' })))
     }
-    const events = this.ctx.on('session/event', (session, event) => {
+    const events = scoped.on('session/event', (session, event) => {
       if (session !== agent.session) return
       for (const [id, input] of pending) {
         if (input.turn === undefined) continue
@@ -144,7 +147,7 @@ export class DshNativeHost implements NativeHost {
       }
       if (event.type === 'turn/end') leaders.delete(event.data.turn)
     })
-    const disposed = this.ctx.on('agent/disposed', payload => {
+    const disposed = scoped.on('agent/disposed', payload => {
       if (payload.agent === agent) for (const id of pending.keys()) finish(id, { text: 'DSH 会话已停止。', reason: 'interrupted' })
     })
     const owner = (requestAgent: unknown) => {
@@ -164,7 +167,7 @@ export class DshNativeHost implements NativeHost {
       current:() => {const live=owner(agent);return live?.input===owned.input && live.turn===owned.turn},
     })
     // Delegate first, including handlers registered later. Never race or override the host.
-    const approval = this.ctx.on('approval/request',async (request,next) => {
+    const approval = scoped.on('approval/request',async (request,next) => {
       const owned=owner(request.agent)
       if (!owned?.input.interactions) return next()
       const outcome=await next()
@@ -172,9 +175,9 @@ export class DshNativeHost implements NativeHost {
       const base=scopeFor(owned,request.signal)
       const scope={...base,current:() => base.current() && (this.ctx.approval.overrideOf(agent.session) ?? this.ctx.approval.config.policy ?? 'ask') === 'ask'}
       if (!scope.current() || scope.signal.aborted) return 'cancelled'
-      return owned.input.interactions.approval({...scope,toolName:request.toolName,reason:request.reason,callId:request.callId})
+      return owned.input.interactions.approval({...scope,toolName:request.toolName,reason:request.reason,displayReason:request.displayReason,callId:request.callId})
     })
-    const questions = this.ctx.on('user-questions/request',async (request,next) => {
+    const questions = scoped.on('user-questions/request',async (request,next) => {
       const owned=owner(request.agent)
       if (!owned?.input.interactions) return next()
       try {return await next()} catch (error) {

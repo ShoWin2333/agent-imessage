@@ -2,7 +2,7 @@
 
 **长期插件分支：`dsh-plugin`。`main` 保留独立 macOS App；不要将本分支合入 `main`。**
 
-将 iMessage、Telegram、微信 iLink、Discord 消息送入 **DeepSeek Harness（DSH）** 的原生会话，并回传执行结果。当前版本适配 DSH `0.2.1-rc.2`。
+将 iMessage、Telegram、微信 iLink、Discord 消息送入 **DeepSeek Harness（DSH）** 的原生会话，并回传执行结果。当前版本适配 DSH `0.2.1-rc.2`；`engines.dsh` 接受 `>=0.2.1-rc.2 <0.3.0`，开发依赖仍固定在经过验证的 RC。
 
 DSH 负责 Agent、模型、工具、权限、执行队列、取消和会话日志；本插件负责消息渠道、固定身份绑定、去重和回复投递。宿主与浏览器端均为原生 Cordis 插件，没有独立平台、服务安装器或执行后端。
 
