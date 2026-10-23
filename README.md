@@ -12,7 +12,7 @@ DSH 负责 Agent、模型、工具、权限、执行队列、取消和会话日�
 
 npm 包：`@showin2333/dsh-channels`。安装后以 bundle 形式挂载两条 Cordis 行（`dsh-channels` 与项目分组），浏览器面板由 `dsh.client` 自动发现。
 
-- **直接安装**：DSH → 插件 → 安装，输入 `@showin2333/dsh-channels@1.1.0-dsh.9`。
+- **直接安装**：DSH → 插件 → 安装，输入 `@showin2333/dsh-channels@1.1.0-dsh.10`。
 - **市场安装**：先启用 `@deepseek-ai/dsh-experimental-plugin-market-bundle`，在 插件 → 发现 → 添加索引源 填入下方地址，再从卡片安装。
 - **本地开发**：`pnpm install && npm run build`，在 profile 的 `dependencies` 中以 `link:` 指向本仓库。
 

@@ -14,7 +14,7 @@ Requires DSH `0.2.1-rc.2` (`engines.dsh` accepts `>=0.2.1-rc.2 <0.3.0`). The iMe
 
 The npm package is `@showin2333/dsh-channels`. Installing it mounts two Cordis rows as a bundle (`dsh-channels` and the project grouping); the browser panel is discovered from `dsh.client`.
 
-- **Direct install**: DSH → Plugins → Install, then enter `@showin2333/dsh-channels@1.1.0-dsh.9`.
+- **Direct install**: DSH → Plugins → Install, then enter `@showin2333/dsh-channels@1.1.0-dsh.10`.
 - **Market install**: enable `@deepseek-ai/dsh-experimental-plugin-market-bundle`, then Plugins → Discover → Add index source with the URL below.
 - **Local development**: `pnpm install && npm run build`, then point the profile dependency at this checkout with `link:`.
 
