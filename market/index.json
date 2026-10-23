@@ -20,7 +20,7 @@
   },
   "plugins": [
     {
-      "name": "@showin2333/dsh-channels",
+      "name": "@showin2333/dsh-plugin-channels",
       "title": {
         "en": "Message Channels",
         "zh": "消息渠道"
@@ -52,17 +52,7 @@
       "versions": [
         {
           "version": "1.1.0-dsh.10",
-          "publishTimestamp": 1792746478,
-          "source": {
-            "type": "npm"
-          },
-          "engines": {
-            "dsh": ">=0.2.1-rc.2 <0.3.0"
-          }
-        },
-        {
-          "version": "1.1.0-dsh.9",
-          "publishTimestamp": 1792741565,
+          "publishTimestamp": 1792752759,
           "source": {
             "type": "npm"
           },

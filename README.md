@@ -14,6 +14,8 @@ npm 包：`@showin2333/dsh-plugin-channels`。安装后以 bundle 形式挂载�
 
 原 npm 名称 `@showin2333/dsh-channels` 已迁至此名称。升级保留设置行 ID、渠道绑定与会话记录；先停止旧包，再切换依赖和模块引用，勿同时加载两个包。详见迁移指南。
 
+当前已发布版本为 `1.1.0-dsh.10`；索引仅列出此新包名下实际存在的版本。
+
 - **直接安装**：DSH → 插件 → 安装，输入 `@showin2333/dsh-plugin-channels@1.1.0-dsh.10`。
 - **市场安装**：先启用 `@deepseek-ai/dsh-experimental-plugin-market-bundle`，在 插件 → 发现 → 添加索引源 填入下方地址，再从卡片安装。
 - **本地开发**：`pnpm install && npm run build`，在 profile 的 `dependencies` 中以 `link:` 指向本仓库。

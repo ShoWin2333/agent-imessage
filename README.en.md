@@ -16,6 +16,8 @@ The npm package is `@showin2333/dsh-plugin-channels`. Installing it mounts two C
 
 This package replaces `@showin2333/dsh-channels`. Keep existing row IDs, channel bindings and session records when switching. Stop the old bundle before replacing dependency/module references; do not load both names together. See the migration guide.
 
+The current published release is `1.1.0-dsh.10`; the index lists only versions published under this new package name.
+
 - **Direct install**: DSH → Plugins → Install, then enter `@showin2333/dsh-plugin-channels@1.1.0-dsh.10`.
 - **Market install**: enable `@deepseek-ai/dsh-experimental-plugin-market-bundle`, then Plugins → Discover → Add index source with the URL below.
 - **Local development**: `pnpm install && npm run build`, then point the profile dependency at this checkout with `link:`.
