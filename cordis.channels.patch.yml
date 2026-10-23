@@ -1,6 +1,6 @@
 # No channels connect until non-secret bindings are explicitly configured.
 - insert:
     - id: dsh-channels
-      name: '@showin2333/dsh-channels'
+      name: '@showin2333/dsh-plugin-channels'
     - id: dsh-channels-projects
-      name: '@showin2333/dsh-channels/project-groups'
+      name: '@showin2333/dsh-plugin-channels/project-groups'

@@ -1,5 +1,5 @@
 {
-  "name": "@showin2333/dsh-channels",
+  "name": "@showin2333/dsh-plugin-channels",
   "version": "1.1.0-dsh.10",
   "description": "DeepSeek Harness plugin for iMessage, Telegram, Weixin and Discord",
   "type": "module",

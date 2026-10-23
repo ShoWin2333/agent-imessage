@@ -92,12 +92,12 @@ export declare function Remote(options: RemoteOptions): RemoteDecorator
 
   const generator = new WorkspaceTypertGenerator(workspace)
   const discovered = generator.discover(['host'])
-  const artifacts = generator.generate(['@showin2333/dsh-channels'], ['host'])
-  const artifact = artifacts.find(candidate => candidate.package === '@showin2333/dsh-channels' && candidate.face === 'host')
+  const artifacts = generator.generate(['@showin2333/dsh-plugin-channels'], ['host'])
+  const artifact = artifacts.find(candidate => candidate.package === '@showin2333/dsh-plugin-channels' && candidate.face === 'host')
   if (artifact === undefined) {
     const model = new WorkspaceAnalyzer({
       root: workspace,
-      packages: ['@showin2333/dsh-channels'],
+      packages: ['@showin2333/dsh-plugin-channels'],
       faces: ['host'],
     }).analyze()
     throw new Error(`Typert did not emit channel plugin host exports: ${JSON.stringify({
