@@ -1,0 +1,66 @@
+{
+  "format": 1,
+  "title": {
+    "en": "ShoWin2333's DSH plugins",
+    "zh": "ShoWin2333 的 DSH 插件"
+  },
+  "description": {
+    "en": "Bundles for DeepSeek Harness, starting with native message channels.",
+    "zh": "给 DeepSeek Harness 用的 bundle，首推原生消息渠道。"
+  },
+  "metadata": {
+    "categories": {
+      "channels": {
+        "title": {
+          "en": "Messaging",
+          "zh": "消息渠道"
+        }
+      }
+    }
+  },
+  "plugins": [
+    {
+      "name": "@showin2333/dsh-channels",
+      "title": {
+        "en": "Message Channels",
+        "zh": "消息渠道"
+      },
+      "description": {
+        "en": "Connect iMessage, Telegram, Weixin and Discord conversations to Harness sessions, reusing the Host's models, tools and permission presets.",
+        "zh": "把 iMessage、Telegram、微信和 Discord 对话接入 Harness 会话，复用宿主已配置的模型、工具和权限预设。"
+      },
+      "icon": "icon.svg",
+      "author": "ShoWin2333",
+      "homepage": "https://github.com/ShoWin2333/agent-imessage/tree/dsh-plugin#readme",
+      "repository": {
+        "url": "https://github.com/ShoWin2333/agent-imessage"
+      },
+      "metadata": {
+        "category": "channels",
+        "keywords": [
+          "dsh-plugin",
+          "imessage",
+          "telegram",
+          "weixin",
+          "discord",
+          "agent"
+        ]
+      },
+      "dist-tags": {
+        "latest": "1.1.0-dsh.9"
+      },
+      "versions": [
+        {
+          "version": "1.1.0-dsh.9",
+          "publishTimestamp": 1792741565,
+          "source": {
+            "type": "npm"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.2 <0.3.0"
+          }
+        }
+      ]
+    }
+  ]
+}
