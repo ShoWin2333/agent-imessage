@@ -27,6 +27,12 @@ Credential references are excluded from the current key. On the first upgrade fr
 
 Inventory account/owner/destination identity, existing consumers and credential references first. Stop and verify the corresponding old consumer before enabling its new binding. Transfer only validated dedupe IDs and the provider cursor where necessary, through native storage APIs; Telegram uses a numeric cursor and Weixin preserves its opaque cursor exactly. Keep a local backup and a reversible deployment path. Do not duplicate consumers or replay missed messages to test a deployment.
 
+### Renamed npm bundle
+
+`@showin2333/dsh-channels` replaces the former local `@showin2333/agent-imessage` package. This is a package/registration migration: the storage domain, binding identities and native session IDs remain unchanged. Preserve every binding field, including model and permission selection and credential references; no secret needs to be copied.
+
+Back up the profile and stop the old consumers before switching the selected bundle dependency. Move the old `agent-imessage-dsh-channels` settings to `dsh-channels`, and replace the old `agent-imessage-dsh-projects` registration with `dsh-channels-projects` pointing at `@showin2333/dsh-channels/project-groups`. Remove old-package overrides and any obsolete wrapper reference; installing the new bundle alongside the old one is not a migration. Verify one consumer per channel, unchanged saved session mappings and the Settings page before accepting the cutover. Keep the backup until this verification succeeds.
+
 ## Current limits
 
 Task ingress is text. Adapters retain attachment sending methods, but model-callable media tools and general native scheduled-task delivery are not integrated. Unsupported inbound attachments request a text task rather than executing a partial prompt. Scheduler fixed-session/catch-up semantics do not automatically reproduce an independent application's isolated scheduled tasks. No scheduler migration or automatic replacement is implied.

@@ -12,6 +12,7 @@ vm.runInNewContext(await readFile(new URL('../lib/client.js',import.meta.url),'u
 const snapshot={status:'ready',value:{bindings:[]},revision:1,writable:true}
 const form={getSnapshot:()=>snapshot,subscribe:()=>()=>{},mutate:async()=>{throw new Error('Smoke rendering must not save')}}
 const ctx={
+  inject(_dependencies,mount){const release=mount(this);return Object.assign(Promise.resolve(),{dispose:async()=>release()})},
   remote:{$mount:async()=>async()=>{},session:{modelCatalog:async()=>{throw new Error('Smoke rendering must not fetch models')}}},
   configForms:{get:()=>form,whileServed:(_ids,callback)=>callback()},
   slots:{inject:(_slot,callback)=>callback(),register:(options,component)=>{registration={options,component};return ()=>{}}},
