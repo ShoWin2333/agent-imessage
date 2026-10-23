@@ -10,9 +10,11 @@ DSH 负责 Agent、模型、工具、权限、执行队列、取消和会话日�
 
 需要 DSH `0.2.1-rc.2`（`engines.dsh` 接受 `>=0.2.1-rc.2 <0.3.0`）。iMessage 通道额外要求 macOS 与本机 Messages；Telegram、微信 iLink、Discord 跨平台。
 
-npm 包：`@showin2333/dsh-channels`。安装后以 bundle 形式挂载两条 Cordis 行（`dsh-channels` 与项目分组），浏览器面板由 `dsh.client` 自动发现。
+npm 包：`@showin2333/dsh-plugin-channels`。安装后以 bundle 形式挂载两条 Cordis 行（`dsh-channels` 与项目分组），浏览器面板由 `dsh.client` 自动发现。
 
-- **直接安装**：DSH → 插件 → 安装，输入 `@showin2333/dsh-channels@1.1.0-dsh.9`。
+原 npm 名称 `@showin2333/dsh-channels` 已迁至此名称。升级保留设置行 ID、渠道绑定与会话记录；先停止旧包，再切换依赖和模块引用，勿同时加载两个包。详见迁移指南。
+
+- **直接安装**：DSH → 插件 → 安装，输入 `@showin2333/dsh-plugin-channels@1.1.0-dsh.10`。
 - **市场安装**：先启用 `@deepseek-ai/dsh-experimental-plugin-market-bundle`，在 插件 → 发现 → 添加索引源 填入下方地址，再从卡片安装。
 - **本地开发**：`pnpm install && npm run build`，在 profile 的 `dependencies` 中以 `link:` 指向本仓库。
 
@@ -52,7 +54,7 @@ npm 包：`@showin2333/dsh-channels`。安装后以 bundle 形式挂载两条 Co
 
 ```yaml
 - id: dsh-channels
-  name: '@showin2333/dsh-channels'
+  name: '@showin2333/dsh-plugin-channels'
   config:
     bindings:
       - id: owner-telegram

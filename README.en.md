@@ -12,9 +12,11 @@ One read-only Agent tool, `channel_status`, reports each configured channel's en
 
 Requires DSH `0.2.1-rc.2` (`engines.dsh` accepts `>=0.2.1-rc.2 <0.3.0`). The iMessage channel additionally requires macOS with Messages; Telegram, Weixin iLink and Discord are cross-platform.
 
-The npm package is `@showin2333/dsh-channels`. Installing it mounts two Cordis rows as a bundle (`dsh-channels` and the project grouping); the browser panel is discovered from `dsh.client`.
+The npm package is `@showin2333/dsh-plugin-channels`. Installing it mounts two Cordis rows as a bundle (`dsh-channels` and the project grouping); the browser panel is discovered from `dsh.client`.
 
-- **Direct install**: DSH → Plugins → Install, then enter `@showin2333/dsh-channels@1.1.0-dsh.9`.
+This package replaces `@showin2333/dsh-channels`. Keep existing row IDs, channel bindings and session records when switching. Stop the old bundle before replacing dependency/module references; do not load both names together. See the migration guide.
+
+- **Direct install**: DSH → Plugins → Install, then enter `@showin2333/dsh-plugin-channels@1.1.0-dsh.10`.
 - **Market install**: enable `@deepseek-ai/dsh-experimental-plugin-market-bundle`, then Plugins → Discover → Add index source with the URL below.
 - **Local development**: `pnpm install && npm run build`, then point the profile dependency at this checkout with `link:`.
 
