@@ -5,6 +5,8 @@ import type { RuntimeView } from '../types.js'
 export interface ChannelMessage {
   /** False when the provider cannot deliver native voice messages. */
   nativeVoice?: boolean
+  /** Check the actual payload before native delivery; incompatible audio must use file delivery. */
+  supportsNativeVoice?(media: OutboundMediaPayload): boolean
   origin?: 'desktop'
   /** Durable provider message id. */
   id: string
@@ -14,10 +16,14 @@ export interface ChannelMessage {
   responding<T>(callback: () => Promise<T>): Promise<T>
   /** Send one plain-text message to the same DM. */
   send(text: string): Promise<void>
+  /** Send one image to the same DM, using provider photo delivery when available.
+   * Cancellation is best effort once the provider has accepted an upload; never retry ambiguous delivery.
+   */
+  sendImage?(media: OutboundMediaPayload, signal?: AbortSignal): Promise<void>
   /** Send one file attachment to the same DM. */
-  sendFile(media: OutboundMediaPayload): Promise<void>
+  sendFile(media: OutboundMediaPayload, signal?: AbortSignal): Promise<void>
   /** Send one native audio message to the same DM. */
-  sendVoice(media: OutboundMediaPayload): Promise<void>
+  sendVoice(media: OutboundMediaPayload, signal?: AbortSignal): Promise<void>
 }
 
 export interface ChannelConnection {

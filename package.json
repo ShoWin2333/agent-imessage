@@ -1,6 +1,6 @@
 {
   "name": "@showin2333/dsh-plugin-channels",
-  "version": "1.1.0-dsh.10",
+  "version": "1.1.0-dsh.11",
   "description": "DeepSeek Harness plugin for iMessage, Telegram, Weixin and Discord",
   "type": "module",
   "license": "MIT",
@@ -12,7 +12,7 @@
   "bugs": {
     "url": "https://github.com/ShoWin2333/agent-imessage/issues"
   },
-  "homepage": "https://github.com/ShoWin2333/agent-imessage/tree/dsh-plugin#readme",
+  "homepage": "https://github.com/ShoWin2333/agent-imessage/tree/main#readme",
   "keywords": [
     "deepseek-harness",
     "dsh",
@@ -101,14 +101,18 @@
     "@deepseek-ai/dsh-agent-default-model": "0.2.1-rc.2",
     "@deepseek-ai/dsh-agent-preset-registry": "0.2.1-rc.2",
     "@deepseek-ai/dsh-credentials": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-fs": "0.2.1-rc.2",
     "@deepseek-ai/dsh-llm": "0.2.1-rc.2",
     "@deepseek-ai/dsh-permission-presets": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-sandbox": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-sandbox-policy": "0.2.1-rc.2",
     "@deepseek-ai/dsh-session": "0.2.1-rc.2",
     "@deepseek-ai/dsh-session-persistence": "0.2.1-rc.2",
     "@deepseek-ai/dsh-settings": "0.2.1-rc.2",
     "@deepseek-ai/dsh-storage": "0.2.1-rc.2",
     "@deepseek-ai/dsh-storage-domain": "0.2.1-rc.2",
     "@deepseek-ai/dsh-storage-json": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-subprocess": "0.2.1-rc.2",
     "@deepseek-ai/dsh-tools": "0.2.1-rc.2",
     "@deepseek-ai/dsh-typert-generator": "0.2.1-rc.2",
     "@deepseek-ai/dsh-typert-protocol": "0.2.1-rc.2",

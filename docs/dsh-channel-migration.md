@@ -1,6 +1,6 @@
 # Native DSH channel plugin migration
 
-This branch targets DSH 0.2.1-rc.2 and Cordis 4.0.5. It is the `dsh-plugin` product line; the independent macOS App remains on `main`.
+This branch targets DSH 0.2.1-rc.2 and Cordis 4.0.5. The former `dsh-plugin` product line is now the default `main` branch; the independent macOS App history is preserved in `archive/standalone-macos-main-20261104`. Update raw/CDN index URLs to use `main`, since GitHub branch redirects do not cover every external CDN.
 
 ## Ownership
 
@@ -39,6 +39,6 @@ Back up the profile and stop the old consumers before switching the selected bun
 
 ## Current limits
 
-Task ingress is text. Adapters retain attachment sending methods, but model-callable media tools and general native scheduled-task delivery are not integrated. Unsupported inbound attachments request a text task rather than executing a partial prompt. Scheduler fixed-session/catch-up semantics do not automatically reproduce an independent application's isolated scheduled tasks. No scheduler migration or automatic replacement is implied.
+Task ingress remains text. Channel-owned Agent scopes now register `channel_send_media` for approved workspace-local image/file/audio uploads to their fixed recipient. Media tool calls cannot select another binding or recipient. Per-call media receipts persist sending/sent/uncertain metadata only, never file bytes; recovery quarantines interrupted media sends and does not re-upload them. General native scheduled-task delivery is not integrated. Unsupported inbound attachments request a text task rather than executing a partial prompt. Scheduler fixed-session/catch-up semantics do not automatically reproduce an independent application's isolated scheduled tasks. No scheduler migration or automatic replacement is implied.
 
 The suite uses synthetic channels and denies unmocked network access. Run `npm run check` for both type checks, offline tests, browser artifact smoke rendering, build and package inspection. No real messages, paid model calls, production credentials or private rollout evidence are part of the test suite.

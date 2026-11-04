@@ -57,9 +57,13 @@ export class WeixinAdapter implements ChannelAdapter {
   }
   private message(id: string, text: string, context: string, signal: AbortSignal): ChannelMessage {
     const user = this.credential.ownerUserId
+    // Tencent's 2.4.10 sender still routes audio as FILE. VoiceItem's presence
+    // in shared inbound/outbound types alone does not prove bot voice sending.
     return { id, text, nativeVoice:false,
             send: async value => { for (const part of splitWeixinText(value)) await this.api.send(this.credential,user,context,part,signal) },
-            sendFile: media => this.api.file(this.credential,user,context,media,signal),
+            // Images have a verified native iLink item; they are not file attachments.
+            sendImage: (media, cancellation) => this.api.image(this.credential,user,context,media,cancellation ? AbortSignal.any([signal,cancellation]) : signal),
+            sendFile: (media, cancellation) => this.api.file(this.credential,user,context,media,cancellation ? AbortSignal.any([signal,cancellation]) : signal),
             sendVoice: async () => { throw new Error('Native voice is not supported by this channel; use file delivery') },
             responding: async callback => {
               const typing = new AbortController(), combined = AbortSignal.any([signal,typing.signal])

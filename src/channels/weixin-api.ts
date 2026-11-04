@@ -1,7 +1,7 @@
 import { createCipheriv, createHash, randomBytes, randomUUID } from 'node:crypto'
 import { setTimeout as delay } from 'node:timers/promises'
 import type { WeixinCredential } from '../channels/state.js'
-import type { OutboundMediaPayload } from '../media.js'
+import { DEFAULT_MAX_OUTBOUND_MEDIA_BYTES, type OutboundMediaPayload } from '../media.js'
 
 // iLink wire format referenced from xmanrui/dsh-im (MIT); see THIRD_PARTY_NOTICES.md.
 export const WEIXIN_BASE = 'https://ilinkai.weixin.qq.com/'
@@ -28,6 +28,7 @@ const baseInfo = { channel_version: '2.4.6', bot_agent: 'AgentGateway/1.0.0' }
 export class WeixinApi {
   constructor(private readonly fetcher: typeof fetch = fetch) {}
   async request(base: string, endpoint: string, body: unknown, token = '', signal?: AbortSignal, timeout = 35_000): Promise<Record<string, unknown>> {
+    signal?.throwIfAborted()
     const url = new URL(endpoint, apiBase(base))
     const headers: Record<string,string> = { 'iLink-App-Id':'bot', 'iLink-App-ClientVersion':String((2 << 16) | (4 << 8) | 6) }
     if (body !== undefined) { headers['content-type'] = 'application/json'; headers.AuthorizationType = 'ilink_bot_token'; headers['X-WECHAT-UIN'] = Buffer.from(String(randomBytes(4).readUInt32BE())).toString('base64') }
@@ -93,17 +94,41 @@ export class WeixinApi {
     if (!ticket) return
     await this.request(c.baseUrl,'ilink/bot/sendtyping',{ilink_user_id:user,typing_ticket:ticket,status:1,base_info:baseInfo},c.token,signal,10_000)
   }
+  async image(c: WeixinCredential, user: string, context: string, media: OutboundMediaPayload, signal: AbortSignal) {
+    // Verified against @tencent-weixin/openclaw-weixin 2.4.10:
+    // src/cdn/upload.ts and src/messaging/send.ts (sendImageMessageWeixin).
+    const uploaded = await this.upload(c,user,media,1,signal)
+    await this.sendItems(c,user,context,[{type:2,image_item:{media:uploaded.media,mid_size:uploaded.ciphertextSize}}],signal)
+  }
   async file(c: WeixinCredential, user: string, context: string, media: OutboundMediaPayload, signal: AbortSignal) {
+    const uploaded = await this.upload(c,user,media,3,signal)
+    await this.sendItems(c,user,context,[{type:4,file_item:{file_name:media.name,len:String(uploaded.plaintextSize),media:uploaded.media}}],signal)
+  }
+  private async upload(c: WeixinCredential, user: string, media: OutboundMediaPayload, mediaType: 1 | 3, signal: AbortSignal) {
+    signal.throwIfAborted()
+    if (media.bytes.length > DEFAULT_MAX_OUTBOUND_MEDIA_BYTES) throw new WeixinError('size','微信文件超过大小限制。')
     const bytes = Buffer.from(media.bytes), key = randomBytes(16), filekey = randomBytes(16).toString('hex')
     const cipher = createCipheriv('aes-128-ecb',key,null)
     const encrypted = Buffer.concat([cipher.update(bytes),cipher.final()])
-    const result = await this.request(c.baseUrl,'ilink/bot/getuploadurl',{filekey,media_type:3,to_user_id:user,rawsize:bytes.length,rawfilemd5:createHash('md5').update(bytes).digest('hex'),filesize:encrypted.length,no_need_thumb:true,aeskey:key.toString('hex'),base_info:baseInfo},c.token,signal)
-    const url = new URL(string(result.upload_full_url) || `https://novac2c.cdn.weixin.qq.com/c2c/upload?encrypted_query_param=${encodeURIComponent(string(result.upload_param))}&filekey=${filekey}`)
+    const result = await this.request(c.baseUrl,'ilink/bot/getuploadurl',{filekey,media_type:mediaType,to_user_id:user,rawsize:bytes.length,rawfilemd5:createHash('md5').update(bytes).digest('hex'),filesize:encrypted.length,no_need_thumb:true,aeskey:key.toString('hex'),base_info:baseInfo},c.token,signal)
+    const fullUrl = string(result.upload_full_url), param = string(result.upload_param)
+    if (!fullUrl && !param) throw new WeixinError('upload','微信文件上传失败。')
+    let url: URL
+    try { url = new URL(fullUrl || `https://novac2c.cdn.weixin.qq.com/c2c/upload?encrypted_query_param=${encodeURIComponent(param)}&filekey=${filekey}`) }
+    catch { throw new WeixinError('url','微信上传地址无效。') }
     if (url.origin !== 'https://novac2c.cdn.weixin.qq.com' || url.pathname !== '/c2c/upload' || url.username || url.password) throw new WeixinError('url','微信上传地址无效。')
-    const response = await this.fetcher(url,{method:'POST',headers:{'content-type':'application/octet-stream'},body:new Uint8Array(encrypted),redirect:'error',signal:AbortSignal.any([signal,AbortSignal.timeout(60_000)])})
-    const query = response.headers.get('x-encrypted-param'); await response.body?.cancel()
+    signal.throwIfAborted()
+    let response: Response
+    try {
+      response = await this.fetcher(url,{method:'POST',headers:{'content-type':'application/octet-stream'},body:new Uint8Array(encrypted),redirect:'error',signal:AbortSignal.any([signal,AbortSignal.timeout(60_000)])})
+    } catch {
+      signal.throwIfAborted()
+      throw new WeixinError('upload','微信文件上传失败。')
+    }
+    const query = response.headers.get('x-encrypted-param'); await response.body?.cancel().catch(() => {})
+    signal.throwIfAborted()
     if (!response.ok || !query) throw new WeixinError('upload','微信文件上传失败。')
-    await this.sendItems(c,user,context,[{type:4,file_item:{file_name:media.name,len:String(bytes.length),media:{encrypt_query_param:query,aes_key:Buffer.from(key.toString('hex')).toString('base64'),encrypt_type:1}}}],signal)
+    return {plaintextSize:bytes.length,ciphertextSize:encrypted.length,media:{encrypt_query_param:query,aes_key:Buffer.from(key.toString('hex')).toString('base64'),encrypt_type:1}}
   }
 }
 

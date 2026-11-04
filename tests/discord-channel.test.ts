@@ -3,10 +3,11 @@ import { EventEmitter } from 'node:events'
 import { mkdtemp, realpath, rm, readFile, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { Client, ChannelType, Events, GatewayIntentBits, MessageType, REST, Routes, type ClientOptions, type ClientUser } from 'discord.js'
-import { DiscordAdapter, splitDiscordText, type DiscordScope } from '../src/channels/discord.js'
+import { Client, ChannelType, Events, GatewayIntentBits, MessageType, MessageFlags, REST, Routes, type ClientOptions, type ClientUser } from 'discord.js'
+import { DiscordAdapter, splitDiscordText, supportsDiscordVoice, type DiscordScope } from '../src/channels/discord.js'
 import type { ChannelMessage } from '../src/channels/types.js'
 import * as weixinApi from '../src/channels/weixin-api.js'
+import { opusFixture } from './voice-fixture.js'
 
 const scope: DiscordScope = {id:'discord',kind:'discord',botId:'123456789012345678',ownerUserId:'234567890123456789'}
 const guildScope: DiscordScope = {...scope,guildId:'345678901234567890',channelId:'456789012345678901'}
@@ -62,6 +63,7 @@ it('splits long Discord output losslessly without breaking emoji and bounds path
 it('accepts only the owner DM and rejects bots, webhooks, systems, group DMs and other channels', async () => {
   const {client,onMessage,options} = await adapter()
   expect(options?.intents).toEqual([GatewayIntentBits.DirectMessages])
+  expect(options?.rest).toMatchObject({retries:0})
   for (const invalid of [
     {author:{id:'other',bot:false}}, {author:{id:scope.ownerUserId,bot:true}}, {author:{id:scope.botId,bot:true}},
     {webhookId:'webhook'}, {system:true}, {type:MessageType.ChannelPinnedMessage}, {guildId:guildScope.guildId},
@@ -70,7 +72,7 @@ it('accepts only the owner DM and rejects bots, webhooks, systems, group DMs and
   await Promise.resolve(); expect(onMessage).not.toHaveBeenCalled()
   client.emit(Events.MessageCreate,raw())
   await expect.poll(() => onMessage.mock.calls.length).toBe(1)
-  expect(onMessage.mock.calls[0]![0]).toMatchObject({id:'discord:567890123456789012:678901234567890123',text:'hello',nativeVoice:false})
+  expect(onMessage.mock.calls[0]![0]).toMatchObject({id:'discord:567890123456789012:678901234567890123',text:'hello',nativeVoice:true})
 })
 it('requires an explicit bot mention, exact server and exact channel in server mode', async () => {
   const {client,onMessage,options} = await adapter(guildScope)
@@ -100,6 +102,68 @@ it('chunks output, disables all mentions, sends files, and fences stale delivery
   await value.stop(); expect(signal.aborted).toBe(true)
   await expect(message.send('stale')).rejects.toThrow()
   expect(client.rest.post).toHaveBeenCalledTimes(3)
+})
+it('uploads images as attachments with safe mentions, cancellation, size bounds and no ambiguous retries', async () => {
+  const {value,client,onMessage} = await adapter()
+  client.emit(Events.MessageCreate,raw())
+  await expect.poll(()=>onMessage.mock.calls.length).toBe(1)
+  const image={bytes:Buffer.from('image'),name:'result.png',mimeType:'image/png'}
+  const messages=[onMessage.mock.calls[0]![0],await value.scheduledMessage('image','task')]
+  for (const message of messages) {
+    const cancellation=new AbortController()
+    await message.sendImage!(image,cancellation.signal)
+    const [route,request]=client.rest.post.mock.calls.at(-1)!
+    expect(route).toBe(Routes.channelMessages('567890123456789012'))
+    expect(request).toMatchObject({body:{allowed_mentions:{parse:[],replied_user:false}},files:[{data:image.bytes,name:image.name,contentType:image.mimeType}]})
+    cancellation.abort();expect((request.signal as AbortSignal).aborted).toBe(true)
+    await expect(message.sendImage!({...image,bytes:Buffer.alloc(10*1024*1024+1)})).rejects.toThrow('10 MiB')
+    await expect(message.sendImage!(image,cancellation.signal)).rejects.toThrow()
+  }
+  expect(client.rest.post).toHaveBeenCalledTimes(2)
+  client.rest.post.mockRejectedValueOnce(new Error('private token or ambiguous delivery'))
+  await expect(messages[0]!.sendImage!(image)).rejects.toThrow('Discord attachment delivery failed')
+  expect(client.rest.post).toHaveBeenCalledTimes(3)
+  await value.stop()
+  await expect(messages[0]!.sendImage!(image)).rejects.toThrow()
+  expect(client.rest.post).toHaveBeenCalledTimes(3)
+})
+it('uploads native Discord voice with exact flags and metadata, no content, cancellation and no retry',async()=>{
+  const {value,client,onMessage}=await adapter()
+  client.emit(Events.MessageCreate,raw());await expect.poll(()=>onMessage.mock.calls.length).toBe(1)
+  const media={bytes:opusFixture(),name:'voice.ogg',mimeType:'audio/ogg',voice:{durationSeconds:1,waveform:Buffer.from([1,20,80,200]).toString('base64')}}
+  for (const message of [onMessage.mock.calls[0]![0],await value.scheduledMessage('voice','task')]) {
+    expect(message.nativeVoice).toBe(true);expect(message.supportsNativeVoice!(media)).toBe(true)
+    const cancellation=new AbortController()
+    await message.sendVoice(media,cancellation.signal)
+    const [route,request]=client.rest.post.mock.calls.at(-1)!
+    expect(route).toBe(Routes.channelMessages('567890123456789012'))
+    expect(request.body).toEqual({allowed_mentions:{parse:[],replied_user:false},flags:MessageFlags.IsVoiceMessage,
+      attachments:[{id:'0',filename:'voice.ogg',duration_secs:1,waveform:media.voice.waveform}]})
+    expect(request.files).toEqual([{data:media.bytes,name:media.name,contentType:'audio/ogg'}])
+    cancellation.abort();expect((request.signal as AbortSignal).aborted).toBe(true)
+    await expect(message.sendVoice(media,cancellation.signal)).rejects.toThrow()
+  }
+  expect(client.rest.post).toHaveBeenCalledTimes(2)
+  const message=await value.scheduledMessage('failed','task')
+  client.rest.post.mockRejectedValueOnce(new Error('private token ambiguous delivery'))
+  await expect(message.sendVoice(media)).rejects.toThrow('Discord attachment delivery failed')
+  expect(client.rest.post).toHaveBeenCalledTimes(3)
+  await value.stop();await expect(message.sendVoice(media)).rejects.toThrow();expect(client.rest.post).toHaveBeenCalledTimes(3)
+})
+it('rejects incompatible or missing Discord voice metadata before REST',async()=>{
+  const {value,client}=await adapter(),message=await value.scheduledMessage('voice','task')
+  const media={bytes:opusFixture(),name:'voice.ogg',mimeType:'audio/ogg',voice:{durationSeconds:1,waveform:'AQID'}}
+  for (const invalid of [
+    {...media,name:'voice.wav',mimeType:'audio/wav'}, {...media,name:'voice.mp3',mimeType:'audio/mpeg'},
+    {...media,voice:undefined}, {...media,bytes:Buffer.from('RIFF WAVE')},
+    {...media,voice:{...media.voice,durationSeconds:0}}, {...media,voice:{...media.voice,durationSeconds:2}},
+    {...media,voice:{...media.voice,waveform:''}}, {...media,voice:{...media.voice,waveform:'invalid!'}},
+    {...media,voice:{...media.voice,waveform:Buffer.alloc(257).toString('base64')}},
+  ]) {
+    expect(supportsDiscordVoice(invalid)).toBe(false);expect(message.supportsNativeVoice!(invalid)).toBe(false)
+    await expect(message.sendVoice(invalid)).rejects.toThrow('file delivery')
+  }
+  expect(client.rest.post).not.toHaveBeenCalled()
 })
 it('maintains typing during work and stops its timer on completion', async () => {
   const {value,client} = await adapter()

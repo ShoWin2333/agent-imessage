@@ -1,6 +1,6 @@
 # Message Channels · DSH 渠道插件
 
-**长期插件分支：`dsh-plugin`。`main` 保留独立 macOS App；不要将本分支合入 `main`。**
+**默认分支 `main` 现为 DSH 渠道插件产品线。旧独立 macOS App 已归档至 `archive/standalone-macos-main-20261104`，历史完整保留。**
 
 将 iMessage、Telegram、微信 iLink、Discord 消息送入 **DeepSeek Harness（DSH）** 的原生会话，并回传执行结果。当前版本适配 DSH `0.2.1-rc.2`；`engines.dsh` 接受 `>=0.2.1-rc.2 <0.3.0`，开发依赖仍固定在经过验证的 RC。
 
@@ -20,7 +20,7 @@ npm 包：`@showin2333/dsh-plugin-channels`。安装后以 bundle 形式挂载�
 - **市场安装**：先启用 `@deepseek-ai/dsh-experimental-plugin-market-bundle`，在 插件 → 发现 → 添加索引源 填入下方地址，再从卡片安装。
 - **本地开发**：`pnpm install && npm run build`，在 profile 的 `dependencies` 中以 `link:` 指向本仓库。
 
-索引地址：`https://cdn.jsdelivr.net/gh/ShoWin2333/agent-imessage@dsh-plugin/market/index.json`
+索引地址：`https://cdn.jsdelivr.net/gh/ShoWin2333/agent-imessage@main/market/index.json`
 
 安装后不会自动连接任何渠道：先按「Desktop 管理面板」配置 workspace、权限预设和凭据引用，再显式启用绑定。升级需要先卸载再安装，DSH 目前没有原地更新动作。
 
@@ -36,7 +36,20 @@ npm 包：`@showin2333/dsh-plugin-channels`。安装后以 bundle 形式挂载�
 
 临时凭据绑定当前渠道、精确 Agent 实例和已认领的执行轮次，默认两分钟过期。未确认送达时不能批准；取消、断线、执行结束、卸载及重启都会使其失效。过期或重放命令不进入模型。宿主拒绝、取消、其他错误或 `never` 审批策略不会被渠道覆盖。具体规则见迁移指南。
 
-消息附件的发送方法与渠道分片行为保留。此版的任务入口为文字，媒体工具和原生定时任务集成尚待后续补齐。
+渠道 Agent 新增 `channel_send_media` 工具：`{ "path": "outputs/report.pdf", "kind": "file" }`，`kind` 可选 `image`、`file`、`voice`。只发送当前绑定收件人，不接受任意聊天目标。每次上传先走宿主原生审批，再通过 Agent 自己的文件系统读取绑定工作区内文件；单文件最多 20 MiB（Discord 仍受 10 MiB 上限约束）。发送前持久化投递凭据；超时或中断标为 `uncertain`，不自动重发。
+
+图片优先使用渠道原生图片/附件展示；语音优先原生语音消息，不兼容时明确报告文件降级。`voice` 发送已有音频，不是文字转语音；收取图片/语音并作为任务执行，以及原生定时任务投递，仍不在此版本范围内。
+
+`1.1.0-dsh.11` 的媒体能力（npm 发布完成前，市场索引仍保留上一个已发布版本）：
+
+| 渠道 | 图片 | 语音 |
+| --- | --- | --- |
+| iMessage | 原生附件展示 | 原生语音；Spectrum 完成编码 |
+| Telegram | `sendPhoto` | `sendVoice`；支持 MP3/M4A/Ogg Opus |
+| Discord | 图片附件展示 | Ogg Opus 原生语音，附真实时长与波形 |
+| 微信 iLink | 原生 `image_item` | 当前未验证原生 bot 语音发送，明确降级音频文件 |
+
+Telegram/Discord 的 `voice` 请求会在宿主具备 ffmpeg、Agent 子进程与沙箱能力时，通过受限管道转换为单声道 Ogg Opus，并计算真实波形与时长（最长十分钟）。不写临时文件、不启用网络协议、不自动安装依赖；能力缺失会在结果中说明。微信图片协议依据腾讯官方 `@tencent-weixin/openclaw-weixin@2.4.10` 发布源码核实；共享类型中的语音字段不等于已证实的下行发送能力。网络发送失败不自动改用文件重发。取消已开始的第三方上传是尽力而为，尤其 iMessage SDK 无中途撤回能力。
 
 ## Agent 只读工具
 

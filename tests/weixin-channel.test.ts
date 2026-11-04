@@ -2,6 +2,8 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { mkdtemp, realpath, rm, readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { createDecipheriv, createHash } from 'node:crypto'
+import { DEFAULT_MAX_OUTBOUND_MEDIA_BYTES } from '../src/media.js'
 import { WeixinApi, WeixinError, weixinUrl } from '../src/channels/weixin-api.js'
 import { WeixinAdapter, splitWeixinText } from '../src/channels/weixin.js'
 import { type RouteState } from '../src/channels/state.js'
@@ -49,6 +51,28 @@ it('filters non-owner, bot, wrong-recipient and attachment messages; persists po
   expect(send.mock.calls.every(c=>c[3].length<=1800)).toBe(true)
   await adapter.stop();expect(adapter.state.phase).toBe('stopped')
 })
+it('routes reply and proactive images natively while preserving cancellation and explicit voice fallback',async()=>{
+  const api=new WeixinApi(),messages:ChannelMessage[]=[],state:RouteState={seen:[]}
+  vi.spyOn(api,'updates').mockResolvedValueOnce({msgs:[inbound('image-request','task')]}).mockImplementation(async(_c,_cursor,signal)=>new Promise((_,reject)=>signal.addEventListener('abort',()=>reject(signal.reason),{once:true})))
+  const nativeImage=vi.spyOn(api,'image').mockResolvedValue(undefined),file=vi.spyOn(api,'file').mockResolvedValue(undefined)
+  const adapter=new WeixinAdapter(credential,{state,save:async()=>{}},async m=>{messages.push(m)},()=>{},api)
+  cleanup.push(()=>adapter.stop());await adapter.start();await expect.poll(()=>messages.length).toBe(1)
+  const image={bytes:Buffer.from('image'),name:'result.png',mimeType:'image/png'}
+  for (const message of [messages[0]!,await adapter.scheduledMessage('scheduled:image','job')]) {
+    expect(message.nativeVoice).toBe(false)
+    const cancellation=new AbortController()
+    await message.sendImage!(image,cancellation.signal)
+    expect(nativeImage).toHaveBeenLastCalledWith(credential,credential.ownerUserId,'reply-context',image,expect.any(AbortSignal))
+    const signal=nativeImage.mock.calls.at(-1)![4]
+    cancellation.abort();expect(signal.aborted).toBe(true)
+    await message.sendFile(image)
+    await expect(message.sendVoice(image)).rejects.toThrow('use file delivery')
+  }
+  expect(nativeImage).toHaveBeenCalledTimes(2);expect(file).toHaveBeenCalledTimes(2)
+  nativeImage.mockRejectedValueOnce(new WeixinError('upload','ambiguous delivery'))
+  await expect(messages[0]!.sendImage!(image)).rejects.toThrow('ambiguous delivery')
+  expect(nativeImage).toHaveBeenCalledTimes(3);expect(file).toHaveBeenCalledTimes(2)
+})
 it('marks expired credentials failed instead of endlessly retrying',async()=>{
   const api=new WeixinApi();vi.spyOn(api,'updates').mockRejectedValue(new WeixinError('auth','expired'))
   const adapter=new WeixinAdapter(credential,{state:{seen:[]},save:async()=>{}},async()=>{},()=>{},api)
@@ -73,7 +97,10 @@ it('stops promptly while agent admission is still pending',async()=>{
   await adapter.stop();expect(adapter.state.phase).toBe('stopped');release()
 })
 
-it('uploads encrypted files only to the pinned CDN and sends the returned media reference',async()=>{
+it.each([
+  {name:'result.txt',mimeType:'text/plain'},
+  {name:'result.png',mimeType:'image/png'},
+])('uploads $mimeType as an encrypted file attachment only to the pinned CDN',async media=>{
   const calls:Array<{url:string;init:RequestInit}>=[]
   const api=new WeixinApi((async(url,init)=>{
     calls.push({url:String(url),init:init!})
@@ -81,16 +108,87 @@ it('uploads encrypted files only to the pinned CDN and sends the returned media 
     if (String(url).includes('/c2c/upload')) return new Response('',{headers:{'x-encrypted-param':'download-token'}})
     return Response.json({ret:0})
   }) as typeof fetch)
-  await api.file(credential,credential.ownerUserId,'ctx',{bytes:Buffer.from('hello'),name:'result.txt',mimeType:'text/plain'},new AbortController().signal)
+  await api.file(credential,credential.ownerUserId,'ctx',{bytes:Buffer.from('hello'),...media},new AbortController().signal)
   expect(calls).toHaveLength(3)
   expect(calls[1]!.url).toMatch(/^https:\/\/novac2c.cdn.weixin.qq.com\/c2c\/upload/)
   expect(calls[1]!.init.redirect).toBe('error')
   expect(Buffer.from(calls[1]!.init.body as Uint8Array).toString()).not.toBe('hello')
-  expect(JSON.parse(String(calls[2]!.init.body)).msg).toMatchObject({context_token:'ctx',item_list:[{type:4,file_item:{file_name:'result.txt',len:'5',media:{encrypt_query_param:'download-token'}}}]})
+  expect(JSON.parse(String(calls[0]!.init.body))).toMatchObject({media_type:3,to_user_id:credential.ownerUserId,rawsize:5})
+  expect(JSON.parse(String(calls[2]!.init.body)).msg).toMatchObject({context_token:'ctx',item_list:[{type:4,file_item:{file_name:media.name,len:'5',media:{encrypt_query_param:'download-token'}}}]})
   const malicious=new WeixinApi((async()=>Response.json({upload_full_url:'https://attacker.test/upload'})) as typeof fetch)
   await expect(malicious.file(credential,credential.ownerUserId,'ctx',{bytes:Buffer.from('hello'),name:'result.txt',mimeType:'text/plain'},new AbortController().signal)).rejects.toMatchObject({code:'url'})
 })
 
+// Wire fixture verified from Tencent's published @tencent-weixin/openclaw-weixin
+// 2.4.10: src/cdn/upload.ts, src/api/types.ts, src/messaging/send.ts.
+it('sends native image_type2 with media_type1, base64 hex AES key and ciphertext mid_size',async()=>{
+  const calls:Array<{url:string;init:RequestInit}>=[],bytes=Buffer.from('a'.repeat(16))
+  const api=new WeixinApi((async(url,init)=>{
+    calls.push({url:String(url),init:init!})
+    if (String(url).includes('getuploadurl')) return Response.json({ret:0,upload_param:'upload-token'})
+    if (String(url).includes('/c2c/upload')) return new Response('',{headers:{'x-encrypted-param':'download-token'}})
+    return Response.json({ret:0})
+  }) as typeof fetch)
+  await api.image(credential,credential.ownerUserId,'ctx',{bytes,name:'result.png',mimeType:'image/png'},new AbortController().signal)
+  expect(calls).toHaveLength(3)
+  const upload=JSON.parse(String(calls[0]!.init.body)),ciphertext=Buffer.from(calls[1]!.init.body as Uint8Array)
+  expect(upload).toMatchObject({media_type:1,to_user_id:credential.ownerUserId,rawsize:16,filesize:32,no_need_thumb:true,rawfilemd5:createHash('md5').update(bytes).digest('hex')})
+  expect(upload.aeskey).toMatch(/^[0-9a-f]{32}$/)
+  const decipher=createDecipheriv('aes-128-ecb',Buffer.from(upload.aeskey,'hex'),null)
+  expect(Buffer.concat([decipher.update(ciphertext),decipher.final()])).toEqual(bytes)
+  expect(calls[1]!.init).toMatchObject({method:'POST',redirect:'error',headers:{'content-type':'application/octet-stream'}})
+  expect(calls[1]!.init.headers).not.toHaveProperty('Authorization')
+  expect(JSON.parse(String(calls[2]!.init.body)).msg).toMatchObject({to_user_id:credential.ownerUserId,context_token:'ctx',message_type:2,message_state:2,item_list:[{type:2,image_item:{media:{encrypt_query_param:'download-token',aes_key:Buffer.from(upload.aeskey).toString('base64'),encrypt_type:1},mid_size:32}}]})
+  expect(JSON.parse(String(calls[2]!.init.body)).msg.item_list[0]).not.toHaveProperty('file_item')
+})
+
+it.each(['image','file'] as const)('bounds %s upload bytes and rejects missing or invalid upload locations safely',async method=>{
+  const fetcher=vi.fn(async()=>Response.json({ret:0})),api=new WeixinApi(fetcher as typeof fetch)
+  const media={bytes:Buffer.alloc(DEFAULT_MAX_OUTBOUND_MEDIA_BYTES+1),name:'large.png',mimeType:'image/png'}
+  await expect(api[method](credential,credential.ownerUserId,'ctx',media,new AbortController().signal)).rejects.toMatchObject({code:'size'})
+  expect(fetcher).not.toHaveBeenCalled()
+  media.bytes=Buffer.from('image')
+  await expect(api[method](credential,credential.ownerUserId,'ctx',media,new AbortController().signal)).rejects.toMatchObject({code:'upload',message:'微信文件上传失败。'})
+  expect(fetcher).toHaveBeenCalledTimes(1)
+  for (const url of ['private-invalid-url','https://attacker.test/c2c/upload','https://novac2c.cdn.weixin.qq.com/other','https://user:private@novac2c.cdn.weixin.qq.com/c2c/upload']) {
+    const bad=vi.fn(async()=>Response.json({upload_full_url:url}))
+    await expect(new WeixinApi(bad as typeof fetch)[method](credential,credential.ownerUserId,'ctx',media,new AbortController().signal)).rejects.toMatchObject({code:'url',message:'微信上传地址无效。'})
+    expect(bad).toHaveBeenCalledTimes(1)
+  }
+})
+
+it.each(['image','file'] as const)('preserves cancellation after %s CDN upload and never retries rejected sends',async method=>{
+  const media={bytes:Buffer.from('image'),name:'result.png',mimeType:'image/png'},controller=new AbortController()
+  const cancelled=vi.fn(async(url:unknown)=>{
+    if (String(url).includes('getuploadurl')) return Response.json({ret:0,upload_param:'private-query'})
+    controller.abort();return new Response('',{headers:{'x-encrypted-param':'download-token'}})
+  })
+  await expect(new WeixinApi(cancelled as typeof fetch)[method](credential,credential.ownerUserId,'ctx',media,controller.signal)).rejects.toThrow()
+  expect(cancelled).toHaveBeenCalledTimes(2)
+  const rejected=vi.fn(async(url:unknown)=>{
+    if (String(url).includes('getuploadurl')) return Response.json({ret:0,upload_param:'private-query'})
+    if (String(url).includes('/c2c/upload')) return new Response('',{headers:{'x-encrypted-param':'download-token'}})
+    return Response.json({ret:9,errmsg:'private credential and context'})
+  })
+  await expect(new WeixinApi(rejected as typeof fetch)[method](credential,credential.ownerUserId,'ctx',media,new AbortController().signal)).rejects.toMatchObject({code:'rejected',message:'微信拒绝了请求。'})
+  expect(rejected).toHaveBeenCalledTimes(3)
+})
+
+it.each(['image','file'] as const)('checks cancellation between %s upload phases and never retries ambiguous CDN failures',async method=>{
+  const media={bytes:Buffer.from('image'),name:'result.png',mimeType:'image/png'}
+  const controller=new AbortController(),fetcher=vi.fn(async()=>{controller.abort();return Response.json({ret:0,upload_param:'private-query'})})
+  const api=new WeixinApi(fetcher as typeof fetch)
+  await expect(api[method](credential,credential.ownerUserId,'ctx',media,controller.signal)).rejects.toThrow()
+  expect(fetcher).toHaveBeenCalledTimes(1)
+  await expect(api[method](credential,credential.ownerUserId,'ctx',media,controller.signal)).rejects.toThrow()
+  expect(fetcher).toHaveBeenCalledTimes(1)
+  const ambiguous=vi.fn(async(url:unknown)=>{
+    if (String(url).includes('getuploadurl')) return Response.json({ret:0,upload_param:'private-query'})
+    throw new Error('private-query token or ambiguous upload')
+  })
+  await expect(new WeixinApi(ambiguous as typeof fetch)[method](credential,credential.ownerUserId,'ctx',media,new AbortController().signal)).rejects.toMatchObject({code:'upload',message:'微信文件上传失败。'})
+  expect(ambiguous).toHaveBeenCalledTimes(2)
+})
 it('bounds emoji replies without breaking grapheme clusters',()=>{
   const family='👨‍👩‍👧‍👦',text=family.repeat(400),parts=splitWeixinText(text)
   expect(parts.every(part=>part.length<=1800 && part.length%family.length===0)).toBe(true)

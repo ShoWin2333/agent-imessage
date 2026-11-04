@@ -1,6 +1,6 @@
 # Message Channels · DSH channel plugin
 
-**Long-lived plugin branch: `dsh-plugin`. The independent macOS App stays on `main`; do not merge this branch into `main`.**
+**The default `main` branch now contains the DSH channel plugin. The old standalone macOS App is preserved in `archive/standalone-macos-main-20261104`.**
 
 A DeepSeek Harness plugin for iMessage, Telegram, Weixin iLink and Discord. Targets the DSH `0.2.1-rc.2` interfaces; `engines.dsh` accepts `>=0.2.1-rc.2 <0.3.0` while dev dependencies stay pinned to the verified RC.
 
@@ -22,7 +22,7 @@ The current published release is `1.1.0-dsh.10`; the index lists only versions p
 - **Market install**: enable `@deepseek-ai/dsh-experimental-plugin-market-bundle`, then Plugins → Discover → Add index source with the URL below.
 - **Local development**: `pnpm install && npm run build`, then point the profile dependency at this checkout with `link:`.
 
-Market index: `https://cdn.jsdelivr.net/gh/ShoWin2333/agent-imessage@dsh-plugin/market/index.json`
+Market index: `https://cdn.jsdelivr.net/gh/ShoWin2333/agent-imessage@main/market/index.json`
 
 Nothing connects until you configure a workspace, permission preset and credential reference in **Settings → Message Channels** and enable the binding. Upgrading means uninstall followed by install; DSH has no in-place update action yet.
 
@@ -32,7 +32,7 @@ Restart recovery delivers completed unsent results without rerunning prompts. In
 
 The bundle patch loads an inert plugin until explicit bindings are configured. Bindings specify an existing absolute workspace, channel account and owner, an existing host permission preset, and a credential reference. Tokens never belong in the plugin configuration. One consumer per external account/project is required.
 
-Existing adapters retain owner/destination filtering, typing, text splitting and attachment send methods. The minimal task path is text only. Approvals and questions now use native DSH answerer waterfalls, delegating to host handlers first. Only native unavailable/NO_PROVIDER outcomes can fall back to this exact channel and claimed turn. One-shot tokens expire after two minutes and are invalidated on cancellation, disconnection, turn completion, unload and restart. Commands require explicit tokens; replay and malformed answers never become model prompts. Media tools and native scheduling remain future work.
+Existing adapters retain owner/destination filtering, typing, text splitting and attachment send methods. The minimal task path is text only. Approvals and questions now use native DSH answerer waterfalls, delegating to host handlers first. Only native unavailable/NO_PROVIDER outcomes can fall back to this exact channel and claimed turn. One-shot tokens expire after two minutes and are invalidated on cancellation, disconnection, turn completion, unload and restart. Commands require explicit tokens; replay and malformed answers never become model prompts. Channel-owned Agents can now call `channel_send_media` with `path` (an existing file inside the binding workspace, at most 20 MiB) and `kind` (`image`, `file`, or `voice`). Uploads require native approval and the Agent-composed filesystem; there is no arbitrary recipient parameter. Media receipts are committed before sending and ambiguous delivery is never automatically retried. Voice sends existing audio, not synthesized speech. Native scheduling and multimodal task ingress remain future work.
 
 Desktop includes an independent **Settings → 消息渠道** sidebar section (macOS **⌘,**): four channels, project directory, host model/effort selection, credential references, identity bounds, runtime status, explicit start/stop and revision-aware save/cancel. Choose an Agent/project on the left, then its channel. Running channels support drafts; applying an execution change explicitly reconnects only that channel and retains its old sessions. Saves/cancels are per-channel, with host-default or channel-specific model selection. Native Workspace membership attaches exact plugin-owned sessions and future sessions to their project. New bindings stay disabled. Credential names do not confirm configured values. Runtime rejects invalid external settings before reconciling consumers; rejected persisted settings must be repaired before restart. Settings uses a declarative native schema because executable transforms do not survive the host's second serialization.
 
