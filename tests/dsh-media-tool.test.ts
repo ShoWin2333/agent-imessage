@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, writeFile, symlink, rm, rename } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, symlink, rm, rename, realpath } from 'node:fs/promises'
 import type { FileHandle } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -10,6 +10,7 @@ import { DEFAULT_MAX_OUTBOUND_MEDIA_BYTES, loadOutboundMedia, type OutboundMedia
 const hooks = vi.hoisted(() => ({
   afterOpen: undefined as ((handle: FileHandle) => Promise<void>) | undefined,
   afterStat: undefined as (() => Promise<void>) | undefined,
+  changedAncestor: undefined as string | undefined,
 }))
 vi.mock('node:fs/promises', async (importOriginal) => {
   const fs = await importOriginal<typeof import('node:fs/promises')>()
@@ -19,6 +20,13 @@ vi.mock('node:fs/promises', async (importOriginal) => {
       const handle = await fs.open(...args)
       await hooks.afterOpen?.(handle)
       return handle
+    },
+    lstat: async (...args: Parameters<typeof fs.lstat>) => {
+      const result = await fs.lstat(...args)
+      // Windows cannot replace an ancestor while a descendant handle is open.
+      // Simulate that changed entry to exercise the same fail-closed check there.
+      if (String(args[0]) === hooks.changedAncestor) return { ...result, isDirectory: () => false, isSymbolicLink: () => true }
+      return result
     },
     stat: async (...args: Parameters<typeof fs.stat>) => {
       const result = await fs.stat(...args)
@@ -32,6 +40,7 @@ const tempDirs: string[] = []
 afterEach(async () => {
   hooks.afterOpen = undefined
   hooks.afterStat = undefined
+  hooks.changedAncestor = undefined
   vi.restoreAllMocks()
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))
 })
@@ -210,8 +219,12 @@ describe('workspace outbound media loader', () => {
     let close: ReturnType<typeof vi.spyOn> | undefined
     hooks.afterOpen = async (handle) => {
       close = vi.spyOn(handle, 'close')
-      await rename(path.join(dir, 'folder'), path.join(dir, 'old-folder'))
-      await symlink(outside, path.join(dir, 'folder'))
+      if (process.platform === 'win32') {
+        hooks.changedAncestor = await realpath(path.join(dir, 'folder'))
+      } else {
+        await rename(path.join(dir, 'folder'), path.join(dir, 'old-folder'))
+        await symlink(outside, path.join(dir, 'folder'))
+      }
     }
     await expect(load(dir, 'folder/file.txt')).rejects.toThrow('directory changed')
     expect(close).toHaveBeenCalledOnce()
