@@ -14,9 +14,9 @@ npm 包：`@showin2333/dsh-plugin-channels`。安装后以 bundle 形式挂载�
 
 原 npm 名称 `@showin2333/dsh-channels` 已迁至此名称。升级保留设置行 ID、渠道绑定与会话记录；先停止旧包，再切换依赖和模块引用，勿同时加载两个包。详见迁移指南。
 
-当前已发布版本为 `1.1.0-dsh.10`；索引仅列出此新包名下实际存在的版本。
+当前已发布版本为 `1.1.0-dsh.11`；索引仅列出此新包名下实际存在的版本。
 
-- **直接安装**：DSH → 插件 → 安装，输入 `@showin2333/dsh-plugin-channels@1.1.0-dsh.10`。
+- **直接安装**：DSH → 插件 → 安装，输入 `@showin2333/dsh-plugin-channels@1.1.0-dsh.11`。
 - **市场安装**：先启用 `@deepseek-ai/dsh-experimental-plugin-market-bundle`，在 插件 → 发现 → 添加索引源 填入下方地址，再从卡片安装。
 - **本地开发**：`pnpm install && npm run build`，在 profile 的 `dependencies` 中以 `link:` 指向本仓库。
 
@@ -40,7 +40,7 @@ npm 包：`@showin2333/dsh-plugin-channels`。安装后以 bundle 形式挂载�
 
 图片优先使用渠道原生图片/附件展示；语音优先原生语音消息，不兼容时明确报告文件降级。`voice` 发送已有音频，不是文字转语音；收取图片/语音并作为任务执行，以及原生定时任务投递，仍不在此版本范围内。
 
-`1.1.0-dsh.11` 的媒体能力（npm 发布完成前，市场索引仍保留上一个已发布版本）：
+`1.1.0-dsh.11` 的媒体能力：
 
 | 渠道 | 图片 | 语音 |
 | --- | --- | --- |
