@@ -4,11 +4,12 @@ import { bounded } from './delivery.js'
 import type { LegacySessionIdentity } from './identity.js'
 import type { InteractionHandlers } from './interaction-types.js'
 import type { ChannelMessage } from '../channels/types.js'
+import type { MediaHandler, MediaInteraction, MediaDeliveryResult, StoredMediaReceipt } from './media-delivery.js'
 
 export interface NativeResult { text: string; reason: string; suppressed?: boolean | undefined }
 export interface NativeSession {
   readonly id: string
-  submit(id: string, text: string, progress: () => void, interactions?: InteractionHandlers): { admitted: Promise<void>; result: Promise<NativeResult> }
+  submit(id: string, text: string, progress: () => void, interactions?: InteractionHandlers, media?: MediaHandler): { admitted: Promise<void>; result: Promise<NativeResult> }
   cancel(): void
   close(): Promise<void>
 }
@@ -23,6 +24,7 @@ export interface Receipt {
   sessionId: string
   delivery: 'pending' | 'sending' | 'sent' | 'uncertain'
   result?: NativeResult | undefined
+  media?: StoredMediaReceipt[] | undefined
 }
 export interface BindingState { sessionId?: string | undefined; receipts: Receipt[]; legacyIdentity?: LegacySessionIdentity | undefined }
 export interface BindingStore {
@@ -67,8 +69,12 @@ export class ChannelBridge {
   }
   private async recoverPending(delivery: (id: string) => Promise<ChannelMessage>): Promise<void> {
     {
-      for (const receipt of this.store.read().receipts) {
+      for (let receipt of this.store.read().receipts) {
         if (this.closed) return
+        if (receipt.media?.some(m => m.delivery === 'sending')) {
+          receipt = { ...receipt, media: receipt.media.map(m => m.delivery === 'sending' ? { ...m, delivery: 'uncertain' } : m) }
+          await this.serial(() => this.replace(receipt))
+        }
         if (receipt.delivery === 'sent' || receipt.delivery === 'uncertain') continue
         if (receipt.delivery === 'sending') {
           await this.serial(() => this.replace({ ...receipt, delivery: 'uncertain' }))
@@ -125,7 +131,7 @@ export class ChannelBridge {
           : session.submit(receipt.inputId, message.text, () => {}, {
             approval:request => this.interactions.approval({...request,current:()=>request.current() && generation===this.generation && this.session===session && !this.closed},message),
             question:request => this.interactions.question({...request,current:()=>request.current() && generation===this.generation && this.session===session && !this.closed},message),
-          })
+          }, request => this.sendMedia(receipt.id, session, generation, message, request))
         const job = this.execute(operation.result, receipt, message)
         this.work.add(job)
         void job.finally(() => this.work.delete(job)).catch(() => { })
@@ -142,9 +148,44 @@ export class ChannelBridge {
     await this.serial(() => this.replace(ready))
     if (!this.closed) await this.deliver(ready, message)
   }
+  private async sendMedia(receiptId: string, session: NativeSession, generation: number, message: ChannelMessage, request: MediaInteraction): Promise<MediaDeliveryResult> {
+    const current = () => !this.closed && this.connected && generation === this.generation && this.session === session && request.current() && !request.signal.aborted
+    if (!current()) throw new Error('Channel media delivery scope is no longer active.')
+    const mode = request.kind === 'voice' && (message.nativeVoice === false || message.supportsNativeVoice?.(request.media) === false) ? 'file' : request.kind
+    const item: StoredMediaReceipt = { callId: request.callId, name: request.media.name, bytes: request.media.bytes.byteLength, mode, delivery: 'sending' }
+    const prior = await this.serial(async () => {
+      if (!current()) throw new Error('Channel media delivery scope is no longer active.')
+      const receipt = this.store.read().receipts.find(r => r.id === receiptId)
+      if (!receipt || receipt.inputId !== request.inputId || receipt.sessionId !== request.sessionId) throw new Error('Channel media owner mismatch.')
+      const existing = receipt.media?.find(m => m.callId === request.callId)
+      if (existing) return existing
+      if ((receipt.media?.length ?? 0) >= 32) throw new Error('Media send limit reached for this input (32).')
+      await this.replace({ ...receipt, media: [...(receipt.media ?? []), item] })
+      return undefined
+    })
+    if (prior) return { name: prior.name, bytes: prior.bytes, mode: prior.mode, delivery: prior.delivery === 'sent' ? 'sent' : 'uncertain' }
+    let delivery: 'sent' | 'uncertain' = 'uncertain'
+    try {
+      if (!current()) throw new Error('Channel media delivery cancelled.')
+      const signal = AbortSignal.any([request.signal, this.deliveryStop.signal, AbortSignal.timeout(30000)])
+      const send = mode === 'voice' ? message.sendVoice.bind(message)
+        : mode === 'image' ? (message.sendImage ?? message.sendFile).bind(message) : message.sendFile.bind(message)
+      await bounded(send(request.media, signal), 30000, signal)
+      delivery = 'sent'
+    } catch { /* Ambiguous provider errors are quarantined, never retried. */ }
+    await this.serial(async () => {
+      const receipt = this.store.read().receipts.find(r => r.id === receiptId)
+      if (!receipt) throw new Error('Channel media receipt missing.')
+      await this.replace({ ...receipt, media: receipt.media!.map(m => m.callId === request.callId ? { ...m, delivery } : m) })
+    })
+    return { name: item.name, bytes: item.bytes, mode, delivery,
+      ...(request.kind === 'voice' && mode === 'file' ? { reason: 'This channel or audio payload cannot use native voice; audio-file delivery was selected.' } : {}) }
+  }
   private async replace(receipt: Receipt): Promise<void> {
     const state = this.store.read()
-    await this.store.write({ ...state, receipts: prune([...state.receipts.filter(r => r.id !== receipt.id), receipt]) })
+    const previous = state.receipts.find(r => r.id === receipt.id)
+    const merged = { ...receipt, ...(receipt.media === undefined && previous?.media !== undefined ? { media: previous.media } : {}) }
+    await this.store.write({ ...state, receipts: prune([...state.receipts.filter(r => r.id !== receipt.id), merged]) })
   }
   private async deliver(receipt: Receipt, message: ChannelMessage): Promise<void> {
     if (!receipt.result || this.closed) return

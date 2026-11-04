@@ -1,7 +1,7 @@
 import type { RouteState } from '../channels/state.js'
 import type { RuntimeView } from '../types.js'
 import type { ChannelAdapter, ChannelMessage } from './types.js'
-import { TelegramApi, TelegramError } from './telegram-api.js'
+import { TelegramApi, TelegramError, supportsTelegramVoice } from './telegram-api.js'
 import { pause, record } from './weixin-api.js'
 
 export function splitTelegramText(text: string): string[] {
@@ -51,12 +51,13 @@ export class TelegramAdapter implements ChannelAdapter {
   }
   private message(id: string, text: string, signal: AbortSignal): ChannelMessage {
     const {token,ownerUserId} = this.credential
-    return {id,text,nativeVoice:false,
+    return {id,text,nativeVoice:true,supportsNativeVoice:supportsTelegramVoice,
       send: async value => {
         for (const part of splitTelegramText(value)) await this.api.request(token,'sendMessage',{chat_id:ownerUserId,text:part},signal)
       },
-      sendFile: media => this.api.file(token,ownerUserId,media,signal),
-      sendVoice: async () => { throw new Error('Use file delivery for Telegram audio') },
+      sendImage: (media, cancellation) => this.api.photo(token,ownerUserId,media,cancellation ? AbortSignal.any([signal,cancellation]) : signal),
+      sendFile: (media, cancellation) => this.api.file(token,ownerUserId,media,cancellation ? AbortSignal.any([signal,cancellation]) : signal),
+      sendVoice: (media, cancellation) => this.api.voice(token,ownerUserId,media,cancellation ? AbortSignal.any([signal,cancellation]) : signal),
       responding: async callback => {
         const typing = new AbortController(), combined = AbortSignal.any([signal,typing.signal])
         const work = (async()=>{

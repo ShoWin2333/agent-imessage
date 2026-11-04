@@ -25,7 +25,8 @@ export type { Binding } from './config.js'
 export type Config = z.input<typeof pluginConfigSchema>
 // Native Settings owns revisions, persistence and volatile config publication.
 export const Config: typeof NativeConfig = NativeConfig
-const receiptSchema = z.object({ id: z.string(), inputId: z.string(), sessionId: z.string(), delivery: z.enum(['pending', 'sending', 'sent', 'uncertain']), result: z.object({ text: z.string(), reason: z.string(), suppressed: z.boolean().optional() }).optional() })
+const mediaReceiptSchema = z.object({ callId: z.string(), name: z.string(), bytes: z.number().int().nonnegative(), mode: z.enum(['image', 'file', 'voice']), delivery: z.enum(['sending', 'sent', 'uncertain']) })
+const receiptSchema = z.object({ media: z.array(mediaReceiptSchema).max(32).optional(), id: z.string(), inputId: z.string(), sessionId: z.string(), delivery: z.enum(['pending', 'sending', 'sent', 'uncertain']), result: z.object({ text: z.string(), reason: z.string(), suppressed: z.boolean().optional() }).optional() })
 export const channelDomain = defineDomain({
   name: 'dsh_channels_v1', version: 1, tables: {
     bindings: domainTable(z.object({ sessionId: z.string().optional(), receipts: z.array(receiptSchema), legacyIdentity: z.object({ key: z.string().regex(/^[a-f0-9]{64}$/), sessionIds: z.array(z.string()) }).optional() })),
@@ -74,7 +75,7 @@ export async function apply(ctx: Context, config: Config | { bindings: Volatile<
     }
     if (!table.get(key)) await wait(table.put(key, { receipts: [] }))
     ensureActive()
-    const bridge = new ChannelBridge(new DshNativeHost(ctx, binding.cwd, binding.permissionPreset, key, binding.model, table.get(key)?.legacyIdentity), {
+    const bridge = new ChannelBridge(new DshNativeHost(ctx, binding.cwd, binding.permissionPreset, key, binding.model, table.get(key)?.legacyIdentity, binding.channel.kind), {
       read: () => table.get(key)!, write: value => table.put(key, value),
     })
     bridge.setConnected(false)

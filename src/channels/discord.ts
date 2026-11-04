@@ -1,8 +1,20 @@
-import { Client, ChannelType, Events, GatewayIntentBits, Partials, PermissionFlagsBits, Routes, MessageType, type Message, type ClientOptions } from 'discord.js'
+import { Client, ChannelType, Events, GatewayIntentBits, Partials, PermissionFlagsBits, Routes, MessageType, MessageFlags, type Message, type ClientOptions } from 'discord.js'
 import type { ChannelConfig } from '../channels/config.js'
 import type { ChannelAdapter, ChannelMessage } from './types.js'
 import type { RuntimeView } from '../types.js'
+import type { OutboundMediaPayload } from '../media.js'
 import { pause } from './weixin-api.js'
+import { oggOpusDuration } from './ogg-opus.js'
+
+/** Discord voice needs Opus in Ogg plus real duration and a sampled waveform. */
+export function supportsDiscordVoice(media: OutboundMediaPayload): boolean {
+  if (media.mimeType !== 'audio/ogg' || !media.name.toLowerCase().endsWith('.ogg') || !media.voice) return false
+  const duration = oggOpusDuration(media.bytes), {durationSeconds,waveform} = media.voice
+  if (duration === undefined || !Number.isFinite(durationSeconds) || durationSeconds <= 0 || Math.abs(duration-durationSeconds) > 0.1) return false
+  if (waveform.length > 344 || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(waveform)) return false
+  const samples = Buffer.from(waveform,'base64')
+  return samples.length > 0 && samples.length <= 256 && samples.toString('base64') === waveform
+}
 
 export type DiscordScope = Extract<ChannelConfig, {kind: 'discord'}>
 export type DiscordClientFactory = (options: ClientOptions) => Client
@@ -73,18 +85,27 @@ export class DiscordAdapter implements ChannelAdapter {
       try { await client.rest.post(Routes.channelMessages(destination), {body,signal}) }
       catch { throw new Error('Discord message delivery failed. Check channel permissions and attachment limits.') }
     }
-    return {id,text,nativeVoice:false,
+    const upload = async (media: OutboundMediaPayload, cancellation?: AbortSignal, voice = false) => {
+      ready()
+      const deliverySignal = cancellation ? AbortSignal.any([signal,cancellation]) : signal
+      deliverySignal.throwIfAborted()
+      if (voice && !supportsDiscordVoice(media)) throw new Error('Discord native voice requires Ogg Opus with duration and waveform metadata; use file delivery for incompatible audio')
+      // Conservative default: Discord may impose a smaller account/server limit.
+      if (media.bytes.byteLength > 10 * 1024 * 1024) throw new Error('Discord attachments must be at most 10 MiB')
+      try {
+        await client.rest.post(Routes.channelMessages(destination), {body:{allowed_mentions:noMentions,
+          ...(voice ? {flags:MessageFlags.IsVoiceMessage,attachments:[{id:'0',filename:media.name,duration_secs:media.voice!.durationSeconds,waveform:media.voice!.waveform}]} : {})},
+          files:[{data:media.bytes,name:media.name,contentType:media.mimeType}],signal:deliverySignal})
+      } catch {
+        deliverySignal.throwIfAborted()
+        throw new Error('Discord attachment delivery failed. Check channel permissions and upload limits.')
+      }
+    }
+    return {id,text,nativeVoice:true,supportsNativeVoice:supportsDiscordVoice,
       send: async value => {for (const part of splitDiscordText(value)) await post({content:part,allowed_mentions:noMentions})},
-      sendFile: async media => {
-        ready()
-        // Conservative default: Discord may impose a smaller account/server limit.
-        if (media.bytes.byteLength > 10 * 1024 * 1024) throw new Error('Discord attachments must be at most 10 MiB')
-        try {
-          await client.rest.post(Routes.channelMessages(destination), {body:{allowed_mentions:noMentions},
-            files:[{data:media.bytes,name:media.name,contentType:media.mimeType}],signal})
-        } catch { throw new Error('Discord attachment delivery failed. Check channel permissions and upload limits.') }
-      },
-      sendVoice: async () => {throw new Error('Use file delivery for Discord audio')},
+      sendImage: upload,
+      sendFile: upload,
+      sendVoice: (media, cancellation) => upload(media,cancellation,true),
       responding: async callback => {
         const typing = new AbortController(), combined = AbortSignal.any([signal,typing.signal])
         const work = (async () => {
@@ -120,7 +141,8 @@ export class DiscordAdapter implements ChannelAdapter {
       const client = this.client = this.createClient({
         intents:this.scope.guildId ? [GatewayIntentBits.Guilds,GatewayIntentBits.GuildMessages] : [GatewayIntentBits.DirectMessages],
         partials:[Partials.Channel], allowedMentions:{parse:[],repliedUser:false},
-        rest:{timeout:15_000,retries:2},
+        // Do not replay a message POST after an ambiguous timeout or server failure.
+        rest:{timeout:15_000,retries:0},
       })
       let validated = false, terminal = false, queued = 0
       let queue = Promise.resolve()
