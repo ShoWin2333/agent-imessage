@@ -2,6 +2,12 @@ import { z } from 'zod'
 import { channelSchema } from '../channels/config.js'
 import { absoluteWorkspacePattern } from './workspace-path.js'
 import { bindingIssues, CREDENTIAL_RE, IDENTIFIER_RE, MAX_BINDINGS, ORIGIN_RE } from '../shared/rules.js'
+import {agentGroupIssue,MAX_AGENTS} from '../shared/agents.js'
+
+export const agentGroupSchema=z.object({
+  id:z.string().regex(IDENTIFIER_RE),name:z.string().min(1).max(80),
+  cwd:z.string().regex(absoluteWorkspacePattern),bindingIds:z.array(z.string().regex(IDENTIFIER_RE)).max(MAX_BINDINGS),
+}).strict()
 
 const reference = z.string().regex(CREDENTIAL_RE)
 export const bindingSchema = z.object({
@@ -22,7 +28,9 @@ export const bindingSchema = z.object({
  * Cross-field meaning comes from the shared rules module, which the settings
  * panel also uses, so a saved draft cannot pass one validator and fail the other.
  */
-export const pluginConfigSchema = z.object({ bindings: z.array(bindingSchema).max(MAX_BINDINGS).default([]) }).strict().superRefine((config, ctx) => {
+export const pluginConfigSchema = z.object({ bindings: z.array(bindingSchema).max(MAX_BINDINGS).default([]), agents:z.array(agentGroupSchema).max(MAX_AGENTS).default([]) }).strict().superRefine((config, ctx) => {
+  const agentIssue=agentGroupIssue(config.bindings,config.agents)
+  if(agentIssue)ctx.addIssue({code:'custom',path:['agents'],message:agentIssue})
   for (const issue of bindingIssues(config.bindings)) {
     ctx.addIssue({
       code: 'custom',

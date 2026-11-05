@@ -14,13 +14,20 @@ export const CREDENTIAL_RE = /^[A-Za-z_][A-Za-z0-9_]*$/
 export const PHONE_RE = /^\+[1-9]\d{6,14}$/
 export const TELEGRAM_ID_RE = /^[1-9]\d{0,15}$/
 export const SNOWFLAKE_RE = /^[1-9]\d{0,19}$/
+export const FEISHU_APP_RE = /^cli_[0-9a-fA-F]{16}$/
+export const FEISHU_USER_RE = /^ou_[A-Za-z0-9_-]{1,128}$/
+export const FEISHU_CHAT_RE = /^oc_[A-Za-z0-9_-]{1,128}$/
+export const FEISHU_TENANT_RE = /^[A-Za-z0-9_-]{1,128}$/
 export const ORIGIN_RE = /^https?:\/\/[^\s]+$/
 
-export type ChannelKind = 'imessage' | 'telegram' | 'weixin' | 'discord'
+export type ChannelKind = 'imessage' | 'telegram' | 'weixin' | 'discord' | 'feishu'
 
 export interface RuleChannel {
   readonly id: string
   readonly kind: ChannelKind
+  readonly appId?: string | undefined
+  readonly tenantKey?: string | undefined
+  readonly chatId?: string | undefined
   readonly projectId?: string | undefined
   readonly senderPhoneNumber?: string | undefined
   readonly assignedPhoneNumber?: string | undefined
@@ -67,6 +74,7 @@ const requiredFields: Record<ChannelKind, readonly string[]> = {
   telegram: ['botId', 'ownerUserId'],
   weixin: ['accountId'],
   discord: ['botId', 'ownerUserId'],
+  feishu: ['appId', 'tenantKey', 'ownerUserId', 'chatId'],
 }
 
 const text = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0
@@ -74,7 +82,7 @@ const text = (value: unknown): value is string => typeof value === 'string' && v
 const consumerOf = (channel: RuleChannel): string => {
   const identity = channel.kind === 'imessage' ? channel.projectId
     : channel.kind === 'weixin' ? channel.accountId
-      : channel.botId
+      : channel.kind === 'feishu' ? channel.appId : channel.botId
   return JSON.stringify([channel.kind, identity])
 }
 
@@ -112,6 +120,12 @@ export function bindingIssues(bindings: readonly RuleBinding[]): BindingIssue[] 
       for (const field of ['botId', 'ownerUserId'] as const) {
         const value = channel[field]
         if (text(value) && !TELEGRAM_ID_RE.test(value)) issues.push({ code: 'channel-format', bindingId: id, field })
+      }
+    }
+    if (channel.kind === 'feishu') {
+      for (const [field, pattern] of [['appId',FEISHU_APP_RE],['ownerUserId',FEISHU_USER_RE],['chatId',FEISHU_CHAT_RE],['tenantKey',FEISHU_TENANT_RE]] as const) {
+        const value = channel[field]
+        if (text(value) && !pattern.test(value)) issues.push({code:'channel-format',bindingId:id,field})
       }
     }
     if (channel.kind === 'discord') {

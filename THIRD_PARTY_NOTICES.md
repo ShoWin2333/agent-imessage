@@ -1,5 +1,12 @@
 # Third-party notices
 
+## Feishu Node SDK
+
+Feishu messaging uses the unmodified official `@larksuiteoapi/node-sdk` 1.76.0
+and its locked dependencies. Upstream: https://github.com/larksuite/node-sdk,
+MIT license. Installed packages retain their upstream LICENSE files.
+The channel adapter is project code, not copied upstream source.
+
 ## discord.js
 
 Discord messaging uses the unmodified npm package `discord.js` 14.27.0 and its

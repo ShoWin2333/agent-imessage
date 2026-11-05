@@ -52,7 +52,7 @@ it('native schema and browser JSON rehydration accept omitted optional objects a
 it('survives the actual native Settings schema projection and second wire serialization',()=>{
   const form=volatileForm(Config)!
   const browser=new Schema(JSON.parse(JSON.stringify(form)))
-  expect(browser(projectForm(form,plainConfig(Config({}))))).toEqual({bindings:[]})
+  expect(browser(projectForm(form,plainConfig(Config({}))))).toEqual({bindings:[],agents:[]})
   const b=binding('a',false)
   expect(browser({bindings:[b]}).bindings).toEqual([b])
 })

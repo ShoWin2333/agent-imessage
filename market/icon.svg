@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Message Channels">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Messaging Channels">
   <rect width="64" height="64" rx="14" fill="#0f172a"/>
   <path d="M12 20a6 6 0 0 1 6-6h24a6 6 0 0 1 6 6v11a6 6 0 0 1-6 6H28l-9 8v-8h-1a6 6 0 0 1-6-6V20Z" fill="#38bdf8"/>
   <circle cx="21" cy="25.5" r="2.6" fill="#0f172a"/>

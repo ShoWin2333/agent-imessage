@@ -18,6 +18,7 @@ import { DshNativeHost } from './native.js'
 import { registerSharedApprovals } from './shared-approvals.js'
 import { channelStatusTool } from './tool.js'
 import { pluginConfigSchema, type Binding } from './config.js'
+import type {AgentGroup} from '../shared/agents.js'
 
 export const name = 'dsh-channels'
 export const inject = ['agents', 'llm', 'sessions', 'sessionPersistence', 'agentPresets', 'agentDefaultModel', 'permissionPresets', 'credentials', 'storageDomain', 'tools']
@@ -37,10 +38,10 @@ export const channelDomain = defineDomain({
 })
 
 /** Loading or saving disabled bindings never resolves credentials or starts consumers. */
-export async function apply(ctx: Context, config: Config | { bindings: Volatile<Binding[]> } = {}): Promise<void> {
+export async function apply(ctx: Context, config: Config | { bindings: Volatile<Binding[]>; agents?:Volatile<AgentGroup[]> } = {}): Promise<void> {
   const log = ctx.logger('dsh-channels')
   const report = (message: string, details?: unknown) => { log.warn(message); if (details !== undefined) log.warn(details) }
-  const read = () => pluginConfigSchema.parse({ bindings: config.bindings && 'get' in config.bindings ? config.bindings.get() : config.bindings ?? [] }).bindings
+  const read = () => pluginConfigSchema.parse({ bindings: config.bindings && 'get' in config.bindings ? config.bindings.get() : config.bindings ?? [], agents:config.agents && 'get' in config.agents ? config.agents.get() : config.agents ?? [] }).bindings
   const initial = read()
   const domain = await ctx.storageDomain.open(channelDomain)
   let stopped = false
@@ -127,7 +128,7 @@ export async function apply(ctx: Context, config: Config | { bindings: Volatile<
         if (state.phase === 'listening' && !signal.aborted) void recover().catch(() => {})
       }
       const c = binding.channel
-      // Adapters load on demand: a Telegram-only deployment never imports Discord or Spectrum.
+      // Adapters load on demand: a Telegram-only deployment never imports Discord, Feishu or Spectrum.
       if (c.kind === 'imessage') {
         const { IMessageAdapter } = await wait(import('../channels/imessage.js'))
         ensureActive()
@@ -136,6 +137,10 @@ export async function apply(ctx: Context, config: Config | { bindings: Volatile<
         const { TelegramAdapter } = await wait(import('../channels/telegram.js'))
         ensureActive()
         adapter = new TelegramAdapter({ ...c, token: secret.value }, store, receive, onState)
+      } else if (c.kind === 'feishu') {
+        const { FeishuAdapter } = await wait(import('../channels/feishu.js'))
+        ensureActive()
+        adapter = new FeishuAdapter(c, secret.value, store, receive, onState)
       } else if (c.kind === 'discord') {
         const { DiscordAdapter } = await wait(import('../channels/discord.js'))
         ensureActive()

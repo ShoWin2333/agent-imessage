@@ -15,7 +15,7 @@ export interface ChannelProject {id:string;cwd:string;title:string;bindingIds:st
 export interface ProjectGroupStatus {projects:ChannelProject[];pending:string[];errors:Array<{bindingId:string;code:string}>}
 /** Match the channel's durable key exactly, including canonical cwd, excluding activation. */
 export function projectBindingKey(binding:Binding):string{return bindingKey(binding)}
-const projectTitle=(id:string)=>/^(.+)-(?:imessage|telegram|weixin|discord)(?:-|$)/.exec(id)?.[1]?.replace(/^./,c=>c.toUpperCase())
+const projectTitle=(id:string)=>/^(.+)-(?:imessage|telegram|weixin|discord|feishu)(?:-|$)/.exec(id)?.[1]?.replace(/^./,c=>c.toUpperCase())
 
 /**
  * Independent metadata contribution: never opens histories, agents, transports or the

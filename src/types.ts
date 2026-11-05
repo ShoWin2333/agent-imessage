@@ -57,3 +57,6 @@ export type RuntimeView =
 /** Value-only management contract, without message or credential data. */
 export type { BindingStatus } from './plugin/management.js'
 export type { Binding } from './plugin/config.js'
+
+/** Plugin configuration groups, independent of native DSH Agent/session identities. */
+export type {AgentGroup} from './shared/agents.js'
