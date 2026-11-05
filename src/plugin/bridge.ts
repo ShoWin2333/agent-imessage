@@ -16,7 +16,7 @@ export interface NativeSession {
   close(): Promise<void>
 }
 export interface NativeHost {
-  open(id?: string): Promise<NativeSession>
+  open(id?: string, signal?: AbortSignal): Promise<NativeSession>
   inspect(sessionId: string, inputId: string): Promise<NativeResult | undefined>
 }
 /** Receipts track delivery only. DSH remains the execution and inbox authority. */
@@ -49,7 +49,7 @@ export class ChannelBridge {
   private tail = Promise.resolve()
   private readonly work = new Set<Promise<void>>()
   private readonly receiving = new Set<string>()
-  private readonly deliveryStop = new AbortController()
+  private readonly bindingStop = new AbortController()
   private closed = false
   private generation = 0
   private connected = true
@@ -128,7 +128,7 @@ export class ChannelBridge {
         }
         if (!this.session || this.session.isLive?.() === false) {
           await this.session?.close()
-          this.session = await this.host.open(this.store.read().sessionId)
+          this.session = await this.host.open(this.store.read().sessionId, this.bindingStop.signal)
         }
         const state = this.store.read()
         await this.store.write({ ...state, sessionId: this.session.id })
@@ -175,7 +175,7 @@ export class ChannelBridge {
     let delivery: 'sent' | 'uncertain' = 'uncertain'
     try {
       if (!current()) throw new Error('Channel media delivery cancelled.')
-      const signal = AbortSignal.any([request.signal, this.deliveryStop.signal, AbortSignal.timeout(30000)])
+      const signal = AbortSignal.any([request.signal, this.bindingStop.signal, AbortSignal.timeout(30000)])
       const send = mode === 'voice' ? message.sendVoice.bind(message)
         : mode === 'image' ? (message.sendImage ?? message.sendFile).bind(message) : message.sendFile.bind(message)
       await bounded(send(request.media, signal), 30000, signal)
@@ -208,14 +208,14 @@ export class ChannelBridge {
     })
     if (!claimed) return
     let delivery: Receipt['delivery'] = 'sent'
-    try { await bounded(message.send(receipt.result.text || `DSH 已结束：${receipt.result.reason}`), 30000, this.deliveryStop.signal) }
+    try { await bounded(message.send(receipt.result.text || `DSH 已结束：${receipt.result.reason}`), 30000, this.bindingStop.signal) }
     catch { delivery = 'uncertain' }
     // A crash or failed commit here leaves 'sending'; recovery quarantines it.
     await this.serial(() => this.replace({ ...receipt, delivery }))
   }
   async drain(): Promise<void> { await this.tail; await Promise.all([...this.work]); await this.tail }
   async close(): Promise<void> {
-    this.closed = true; this.generation++; this.interactions.cancel(); this.deliveryStop.abort()
+    this.closed = true; this.generation++; this.interactions.cancel(); this.bindingStop.abort()
     this.session?.cancel()
     await this.tail
     this.session?.cancel()

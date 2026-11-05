@@ -60,6 +60,25 @@ it('resume clears quarantined native inbox before new input, flushes it, preserv
   session.cancel(); expect(f.agent.cancel).not.toHaveBeenCalled()
   await session.close()
 })
+
+it.each(['create','resume'] as const)('forwards a creation-only cancellation signal to %s and detaches it after success', async mode => {
+  const f=runtime(),binding=new AbortController()
+  const session=await f.host.open(mode==='resume'?'channels-binding-synthetic':undefined,binding.signal)
+  const options=(mode==='resume'?vi.mocked(f.ctx.agents.resume):vi.mocked(f.ctx.agents.create)).mock.calls[0]![0]
+  expect(options.signal).toBeInstanceOf(AbortSignal)
+  expect(options.signal).not.toBe(binding.signal)
+  binding.abort(new Error('Binding stopped after open'))
+  expect(options.signal?.aborted).toBe(false)
+  await session.close()
+})
+
+it('refuses an already cancelled opening before touching the native factory', async () => {
+  const f=runtime(),binding=new AbortController()
+  binding.abort(new Error('Binding already stopped'))
+  await expect(f.host.open(undefined,binding.signal)).rejects.toThrow('Binding already stopped')
+  expect(f.ctx.agents.create).not.toHaveBeenCalled()
+  expect(f.ctx.agents.resume).not.toHaveBeenCalled()
+})
 it('shares the exact desktop-opened session without clearing or cancelling desktop work', async () => {
   const f = runtime()
   const agent = f.agent as typeof f.agent & { status: string; steer: ReturnType<typeof vi.fn> }

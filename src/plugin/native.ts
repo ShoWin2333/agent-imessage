@@ -80,7 +80,19 @@ export class DshNativeHost implements NativeHost {
     }
     finally { await handle.close() }
   }
-  async open(id?: string): Promise<NativeSession> {
+  async open(id?: string, bindingSignal?: AbortSignal): Promise<NativeSession> {
+    // Root ownership must not make an unfinished creation outlive its binding.
+    // Detach explicitly after open: SDK cancellation is creation-only, and a
+    // later transport stop must not reach the successfully shared Agent.
+    const creation = new AbortController()
+    const abort = () => creation.abort(bindingSignal?.reason)
+    bindingSignal?.addEventListener('abort', abort, { once: true })
+    if (bindingSignal?.aborted) abort()
+    try { return await this.openSession(id, creation.signal) }
+    finally { bindingSignal?.removeEventListener('abort', abort) }
+  }
+  private async openSession(id: string | undefined, signal: AbortSignal): Promise<NativeSession> {
+    signal.throwIfAborted()
     if (id) {
       if (!ownsSession(id, this.binding, this.legacyIdentity)) throw new Error('Session binding mismatch')
       const live = this.ctx.agents.get(SessionId(id))
@@ -89,12 +101,14 @@ export class DshNativeHost implements NativeHost {
     let selection = this.model ? {provider:this.model.provider,model:this.model.model,...(this.model.reasoningEffort === undefined ? {} : {reasoningEffort:ReasoningEffortId(this.model.reasoningEffort)})} : this.ctx.agentDefaultModel.currentSelection()
     let preset = this.ctx.agentPresets.defaultId
     if (id) {
-      const snapshot = await this.ctx.sessionPersistence.stat(SessionId(id))
+      const snapshot = await this.ctx.sessionPersistence.stat(SessionId(id), { signal })
+      signal.throwIfAborted()
       if (!snapshot || snapshot.header.cwd !== this.cwd || !ownsSession(id, this.binding, this.legacyIdentity)) throw new Error('Session binding mismatch')
       preset = snapshot.header.agentPreset ?? preset
-      const stored = await this.ctx.sessionPersistence.open(SessionId(id), 'read')
+      const stored = await this.ctx.sessionPersistence.open(SessionId(id), 'read', { signal })
       try {
-        const events = (await stored.read()).events
+        const events = (await stored.read(0, undefined, { signal })).events
+        signal.throwIfAborted()
         const config = foldRequestHeader(events)?.config
         if (config) selection = { provider: config.provider, model: config.model, ...(config.reasoningEffort === undefined ? {} : { reasoningEffort: config.reasoningEffort }) }
         for (const event of events) if (event.type === 'agent-preset/selected') preset = event.data.agentPreset ?? this.ctx.agentPresets.defaultId
@@ -102,15 +116,18 @@ export class DshNativeHost implements NativeHost {
     }
     this.ctx.permissionPresets.resolve(this.permissionPreset)
     const setup = async (agentCtx: Context) => {
+      signal.throwIfAborted()
       await this.ctx.agentPresets.mount(agentCtx, preset)
+      signal.throwIfAborted()
       installModelSelection(agentCtx, { current: selection, assembled: undefined })
     }
     const options = { provider: selection.provider, model: selection.model }
     let handle: AgentHandle
     try {
-      handle = id ? await this.lifetime.agents.resume({ resumeSessionId: SessionId(id), agentOptions: options, setup })
-        : await this.lifetime.agents.create({ sessionId: SessionId(`channels-${this.binding}-${randomUUID()}`), meta: { cwd: this.cwd, agentPreset: preset }, agentOptions: options, setup })
+      handle = id ? await this.lifetime.agents.resume({ resumeSessionId: SessionId(id), agentOptions: options, setup, signal })
+        : await this.lifetime.agents.create({ sessionId: SessionId(`channels-${this.binding}-${randomUUID()}`), meta: { cwd: this.cwd, agentPreset: preset }, agentOptions: options, setup, signal })
     } catch (error) {
+      signal.throwIfAborted()
       // Desktop can claim the session while the plugin is reading its saved state.
       const live = id && error instanceof Error && error.name === 'SessionAlreadyOwnedError'
         ? this.ctx.agents.get(SessionId(id)) : undefined
@@ -118,10 +135,12 @@ export class DshNativeHost implements NativeHost {
       throw error
     }
     try {
+      signal.throwIfAborted()
       // New sessions select an existing host permission preset; resumed sessions retain their durable policy.
       if (!id) this.ctx.permissionPresets.set(handle.agent.session, this.permissionPreset)
       if (id) handle.agent.inbox.clear() // Quarantined old inputs must never wake behind a new prompt.
       await this.flush(handle.agent)
+      signal.throwIfAborted()
       return this.bind(handle.agent, handle)
     } catch (error) { await handle.dispose(); throw error }
   }
