@@ -71,7 +71,9 @@ function ChannelEditor({ctx,form,t}:{ctx:ClientContext;form:ConfigForm;t:Transla
  const dirty=Boolean(edit&&!same(edit.value,edit.base)),conflict=Boolean(edit&&!same(edit.base,current))
  const status=runtime.find(s=>s.id===id),selected=binding?.model?JSON.stringify([binding.model.provider,binding.model.model]):''
  const model=catalog?.groups.find(g=>g.id===binding?.model?.provider)?.models.find(m=>m.id===binding?.model?.model)
- const project=projects.find(p=>p.bindingIds.includes(id)&&p.cwd===group?.cwd)
+ // Host project membership is authoritative and may use a canonical path. Drafts and
+ // the Agent default must not override the selected channel’s actual ownership.
+ const project=current?projects.find(p=>p.bindingIds.includes(id)):undefined
  const statusMessage=(code:string)=>{const text=t(`status.${code}`);return text===`status.${code}`?code:text}
  useEffect(()=>{let live=true;void ctx.remote.session.modelCatalog().then(result=>{if(!live)return;if(result.ok)setCatalog(result.value);else setModelsError(t('error.models'))},()=>{if(live)setModelsError(t('error.modelsUnavailable'))});return()=>{live=false}},[ctx,t])
  // Push Host lifecycle transitions; only fall back to one read when an older Host has no stream.
@@ -157,12 +159,17 @@ function ChannelEditor({ctx,form,t}:{ctx:ClientContext;form:ConfigForm;t:Transla
   if(!removal)return
   const latest=form.getSnapshot(),rows=latest.value?.bindings??[],agents=resolveAgentGroups(rows,latest.value?.agents)
   const agent=agents.find(g=>g.id===removal.agent.id)
-  // The confirmation covers an exact group and exact saved channels, never a later replacement.
-  if(!same(agent,removal.agent)||removal.rows.some(row=>!same(rows.find(b=>b.id===row.id),row))){setRemoval(null);fail(t('error.agentStale'));return}
-  const removedIds=new Set([...removal.rows.map(row=>row.id),...removal.draftIds])
-  const nextAgents=removal.kind==='agent'?agents.filter(g=>g.id!==removal.agent.id):agents.map(g=>({...g,bindingIds:g.bindingIds.filter(key=>!removedIds.has(key))}))
-  if(await write(latest,rows.filter(b=>!removedIds.has(b.id)),nextAgents)){
-   setEdits(previous=>Object.fromEntries(Object.entries(previous).filter(([key])=>!removedIds.has(key))))
+  const confirmedIds=new Set(removal.rows.map(row=>row.id))
+  // A local-only draft may have become a saved channel in another Agent since
+  // confirmation. It was never confirmed for Host removal: require a fresh review.
+  const savedDraft=removal.draftIds.some(key=>!confirmedIds.has(key)&&rows.some(row=>row.id===key))
+  if(savedDraft||!same(agent,removal.agent)||removal.rows.some(row=>!same(rows.find(b=>b.id===row.id),row))){setRemoval(null);fail(t('error.agentStale'));return}
+  const nextAgents=removal.kind==='agent'?agents.filter(g=>g.id!==removal.agent.id):agents.map(g=>({...g,bindingIds:g.bindingIds.filter(key=>!confirmedIds.has(key))}))
+  // Only explicitly confirmed saved rows affect Host configuration. Draft ids
+  // participate solely in local cleanup, after the revision-checked save succeeds.
+  if(await write(latest,rows.filter(b=>!confirmedIds.has(b.id)),nextAgents)){
+   const localIds=new Set([...confirmedIds,...removal.draftIds])
+   setEdits(previous=>Object.fromEntries(Object.entries(previous).filter(([key])=>!localIds.has(key))))
    setRemoval(null);setSelectedId('');setNotice(t('notice.removed'))
   }
  }
@@ -179,7 +186,7 @@ function ChannelEditor({ctx,form,t}:{ctx:ClientContext;form:ConfigForm;t:Transla
   <div className="dsh-channel-toolbar"><button disabled={busy||!writable||groups.length>=MAX_AGENTS} onClick={()=>setNewAgent({name:'',cwd:''})}>{t('action.addAgent')}</button></div>
   {newAgent&&<form className="dsh-channel-card" aria-label={t('agent.create')} onSubmit={event=>{event.preventDefault();void createAgent()}}><fieldset disabled={busy} style={{border:0,padding:0,margin:0}}><div className="dsh-channel-grid"><Field label={t('agent.name')} value={newAgent.name} set={name=>setNewAgent(previous=>previous?{...previous,name}:previous)}/><label className="dsh-channel-field">{t('agent.cwd')}<div className="dsh-channel-path"><input aria-label={t('agent.cwd')} value={newAgent.cwd} onChange={event=>{const cwd=event.target.value;setNewAgent(previous=>previous?{...previous,cwd}:previous)}}/><button type="button" onClick={()=>void chooseAgentDirectory()}>{t('action.choose')}</button></div></label></div><p className="dsh-channel-muted">{t('agent.hint')}</p><div className="dsh-channel-actions"><button type="button" onClick={()=>setNewAgent(null)}>{t('action.cancel')}</button><button className="dsh-channel-primary" disabled={!writable}>{t('action.createAgent')}</button></div></fieldset></form>}
   <div className="dsh-agent-layout"><nav className="dsh-agent-tabs" aria-label={t('agentGroups')}>{groups.map(g=><button key={g.id} aria-pressed={g.id===group?.id} onClick={()=>{setSelectedAgentId(g.id);setSelectedId(g.bindingIds[0]??'');setConfirmation(null);setRemoval(null);setNotice('')}}><strong>{g.name}</strong><span>{g.bindingIds.length} {t('channelsUnit')}</span></button>)}</nav><div className="dsh-agent-detail">
-  {group&&<header className="dsh-agent-header"><div className="dsh-channel-heading"><h3>{group.name}</h3><button disabled={busy||!writable} onClick={()=>requestRemoval('agent')}>{t('action.removeAgent')}</button></div><p className="dsh-channel-path-text">{group.cwd||t('project.none')}</p><p className="dsh-channel-muted">{project?`${t('project.owned')}${project.title} · ${project.id}`:t('project.pending')} {t('model.inheritHint')}</p></header>}
+  {group&&<header className="dsh-agent-header"><div className="dsh-channel-heading"><h3>{group.name}</h3><button disabled={busy||!writable} onClick={()=>requestRemoval('agent')}>{t('action.removeAgent')}</button></div><p className="dsh-channel-path-text">{t('agent.cwd')}：{group.cwd||t('project.none')}</p><p className="dsh-channel-muted">{t('agent.cwdHint')}</p><p className="dsh-channel-muted">{t('model.inheritHint')}</p></header>}
   <div className="dsh-channel-toolbar"><div className="dsh-channel-actions">{Object.entries(labels).map(([kind,key])=><button key={kind} disabled={busy||baseRows.length>=32||!writable||!group} onClick={()=>add(kind as Binding['channel']['kind'])}>＋ {t(key)}</button>)}</div><span className="dsh-channel-muted">{baseRows.length} / 32 {t('channelsUnit')}</span></div>
   {snapshot.status!=='ready'&&<p className="dsh-channel-notice">{snapshot.value?t('syncing'):t('reading')}</p>}
   {notice&&<p role={failure?'alert':'status'} className={`dsh-channel-notice ${failure?'dsh-channel-error':''}`}>{notice}</p>}
@@ -191,6 +198,7 @@ function ChannelEditor({ctx,form,t}:{ctx:ClientContext;form:ConfigForm;t:Transla
   {binding&&<article className="dsh-channel-card" key={id}>
    <div className="dsh-channel-heading"><h3>{t(labels[binding.channel.kind])} <span className="dsh-channel-badge">{phaseLabel(status?.phase,current?.enabled??false,t)}</span></h3><button disabled={busy||dirty||!current||!writable} onClick={()=>current&&void commit(id,{...current,enabled:!current.enabled},current)}>{current?.enabled?t('action.stop'):t('action.start')}</button></div>
    <p className="dsh-channel-muted">{current?.enabled?t('notice.running'):t('notice.stopped')} {t('notice.identity')}</p>
+   <p className="dsh-channel-muted">{project?`${t('project.owned')}${project.title} · ${project.id} · ${project.cwd}`:t('project.pending')}</p>
    {conflict&&<p role="alert" className="dsh-channel-notice dsh-channel-error">{t('notice.conflict')}</p>}
    {status?.error&&<p role="alert" className="dsh-channel-notice dsh-channel-error">{statusMessage(status.error)}</p>}
    <fieldset disabled={busy||!writable} style={{border:0,padding:0,margin:0}}><div className="dsh-channel-grid">

@@ -198,6 +198,7 @@ describe('native channel settings panel',()=>{
   })
   it('removes the last channel while retaining its empty Agent across reopen',async()=>{
     const original=binding(),f=fixture([original]);f.show()
+    fireEvent.change(screen.getByLabelText('凭据引用（宿主已配置）'),{target:{value:'UNSAVED_REF'}})
     fireEvent.click(screen.getByRole('button',{name:'移除渠道'}))
     const dialog=screen.getByRole('dialog',{name:'移除配置'})
     expect(dialog.textContent).toContain(original.id);expect(dialog.textContent).toContain('会话历史、宿主凭据和项目文件保留')
@@ -239,6 +240,40 @@ describe('native channel settings panel',()=>{
     const existing={id:'explicit',name:'Agent',cwd:'/tmp/project',bindingIds:[binding().id]}
     act(()=>f.replace([binding(),{...binding(),id:'new-channel',channel:{...binding().channel,id:'new-channel',botId:'999'}}],8,[{...existing,bindingIds:[binding().id,'new-channel']}]))
     fireEvent.click(screen.getByRole('button',{name:'确认移除配置'}));await screen.findByRole('alert')
+    expect(f.mutate).not.toHaveBeenCalled()
+  })
+  it.each(['移除渠道','移除 Agent'])('rejects %s when another Agent saved a formerly local draft id after confirmation',async action=>{
+    const other={...emptyAgent,id:'agent-other',name:'Other',cwd:'/tmp/other'}
+    const f=fixture([],[emptyAgent,other]);f.show()
+    fireEvent.click(screen.getByRole('button',{name:'＋ 飞书'}))
+    const draftId=(screen.getByLabelText('渠道标识') as HTMLInputElement).value
+    fireEvent.click(screen.getByRole('button',{name:action}))
+    expect(screen.getByRole('dialog').textContent).toContain('没有连接需要停止')
+    const external={...binding(),id:draftId,cwd:'/tmp/other',enabled:true,channel:{...binding().channel,id:draftId}}
+    // The confirmed Agent and its saved rows remain unchanged; only the other Agent gains this id.
+    act(()=>f.replace([external],8,[emptyAgent,{...other,bindingIds:[draftId]}]))
+    fireEvent.click(screen.getByRole('button',{name:'确认移除配置'}))
+    await screen.findByText('Agent 或渠道配置已变化。请核对当前配置后重新操作。')
+    expect(f.mutate).not.toHaveBeenCalled();expect(screen.queryByRole('dialog')).toBeNull()
+    expect(f.snapshot().value).toEqual({bindings:[external],agents:[emptyAgent,{...other,bindingIds:[draftId]}]})
+  })
+  it('shows the selected channel’s Host project independently of the Agent default or an unsaved directory draft',async()=>{
+    const a={...binding(),id:'channel-a',enabled:true,cwd:'/tmp/channel-a',channel:{...binding().channel,id:'channel-a'}}
+    const b={...binding(),id:'channel-b',enabled:true,cwd:'/tmp/channel-b',channel:{id:'channel-b',kind:'discord' as const,botId:'1234',ownerUserId:'5678'}}
+    const f=fixture([a,b],[{...emptyAgent,cwd:'/tmp/default',bindingIds:[a.id,b.id]}])
+    f.ctx.remote.channelProjects={status:async()=>({ok:true,value:{projects:[
+      {id:'project-a',title:'Channel A',cwd:'/canonical/channel-a',bindingIds:[a.id]},
+      {id:'project-b',title:'Channel B',cwd:'/canonical/channel-b',bindingIds:[b.id]},
+    ],pending:[],errors:[]}})}
+    f.show()
+    await screen.findByText('DSH 项目：Channel A · project-a · /canonical/channel-a')
+    expect(screen.getByText('默认项目目录：/tmp/default')).toBeTruthy()
+    expect(screen.getByText('仅供新增渠道预填；已有渠道保留各自目录。')).toBeTruthy()
+    fireEvent.change(screen.getByLabelText('项目目录'),{target:{value:'/tmp/unsaved'}})
+    expect(screen.getByText('DSH 项目：Channel A · project-a · /canonical/channel-a')).toBeTruthy()
+    fireEvent.click(within(screen.getByRole('navigation',{name:'Agent 所属渠道'})).getByRole('button',{name:'Discord'}))
+    expect(screen.getByText('DSH 项目：Channel B · project-b · /canonical/channel-b')).toBeTruthy()
+    expect(screen.queryByText('DSH 项目：Channel A · project-a · /canonical/channel-a')).toBeNull()
     expect(f.mutate).not.toHaveBeenCalled()
   })
   it('merges unrelated updates during removal and preserves unrelated draft values',async()=>{
