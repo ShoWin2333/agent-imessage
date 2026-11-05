@@ -119,9 +119,14 @@ export class DshNativeHost implements NativeHost {
       signal.throwIfAborted()
       await this.ctx.agentPresets.mount(agentCtx, preset)
       signal.throwIfAborted()
-      installModelSelection(agentCtx, { current: selection, assembled: undefined })
+      // 0.2.1 consumes this entry-point-owned state. 0.2.2 owns model
+      // selection on the Agent and ignores the extra argument. A shared
+      // call signature keeps both public installers type-safe.
+      const state = { current: selection, assembled: undefined }
+      const install: (ctx: Context, selectionState: typeof state) => () => void = installModelSelection
+      install(agentCtx, state)
     }
-    const options = { provider: selection.provider, model: selection.model }
+    const options = { ...selection }
     let handle: AgentHandle
     try {
       handle = id ? await this.lifetime.agents.resume({ resumeSessionId: SessionId(id), agentOptions: options, setup, signal })

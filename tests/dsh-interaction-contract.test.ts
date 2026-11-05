@@ -2,6 +2,8 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import Projections from '@deepseek-ai/dsh-session-projection'
+import { installNativeTestExecutor, executeTestTool } from './native-sdk.js'
 import Tools, { defineTool } from '@deepseek-ai/dsh-tools'
 import ApprovalService, { setApprovalPolicy, type ApprovalOutcome } from '@deepseek-ai/dsh-user-approval'
 import UserQuestionService, { UserQuestionError } from '@deepseek-ai/dsh-user-questions'
@@ -25,7 +27,7 @@ async function fixture(before?:(ctx:Context)=>void, { input = 'synthetic', chann
     ctx.provide('sessions',{flush:async()=>true})
     ctx.provide('agentDefaultModel',{currentSelection:()=>({provider:'synthetic',model:'never-called'})})
     ctx.provide('agentPresets',{defaultId:'synthetic',mount:async()=>{},serviceFor:()=>undefined})
-    ctx.provide('systemPrompt', { tools: () => () => {} })
+    ctx.provide('systemPrompt', { tools: () => () => {}, context: () => () => {}, getContextOrder: () => 0 })
     ctx.provide('fs', {
       resolve: async (path: string) => ({ displayPath: path }),
       processPath: (target: { displayPath: string }) => target.displayPath,
@@ -35,8 +37,10 @@ async function fixture(before?:(ctx:Context)=>void, { input = 'synthetic', chann
     } as never)
     ctx.provide('permissionPresets',{resolve:()=>{},set:()=>{}})
   })
+  const projections=await ctx.plugin(Projections)
   const approval=await ctx.plugin(ApprovalService,{policy:'ask'}),questions=await ctx.plugin(UserQuestionService)
   const tools = await ctx.plugin(Tools)
+  const executor = await installNativeTestExecutor(ctx)
   before?.(ctx)
   // Match the installed plugin: approval is available via get(), but is not
   // a declared injection on the context that constructs DshNativeHost.
@@ -57,7 +61,7 @@ async function fixture(before?:(ctx:Context)=>void, { input = 'synthetic', chann
   const executeMedia = (kind: 'voice' | 'file' | 'image') => ctx.tools.get('channel_send_media')!.execute(
     { kind, path: 'sample.mp3' }, { agent, callId: 'synthetic-call', signal: new AbortController().signal } as never,
   )
-  cleanup.push(async()=>{removeApproval();broker.cancel();await native.close();await operation?.result;await plugin.dispose();await tools.dispose();await questions.dispose();await approval.dispose();await services.dispose()})
+  cleanup.push(async()=>{removeApproval();broker.cancel();await native.close();await operation?.result;await plugin.dispose();await executor.dispose();await tools.dispose();await questions.dispose();await approval.dispose();await projections.dispose();await services.dispose()})
   const token=()=>send.mock.calls.at(-1)![0].match(/\/(?:approve|answer) ([A-Za-z0-9_-]+)/)![1]!
   const ready=async()=>{await vi.waitFor(()=>expect(send).toHaveBeenCalled());await Promise.resolve();await Promise.resolve()}
   return {ctx,agent,session,native,broker,send,message,token,ready,media,executeMedia,unregister:removeApproval,replace:()=>{live={...agent}}}
@@ -288,7 +292,7 @@ it.each(['channel', 'desktop', 'review-denied', 'guard-denied', 'never'] as cons
   if (route === 'never') setApprovalPolicy(f.session, 'never')
   const caller = new AbortController()
   try {
-    const result = f.ctx.tools.execute({ agent: f.agent as never, callId: 'synthetic-native-pipeline' as never,
+    const result = executeTestTool(f.ctx, { agent: f.agent as never, callId: 'synthetic-native-pipeline' as never,
       name: 'synthetic_reviewed', arguments: {}, signal: caller.signal })
     if (route === 'channel' || route === 'desktop' || route === 'guard-denied') {
       await f.ready()

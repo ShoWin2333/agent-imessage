@@ -235,7 +235,19 @@ it('queues channel input behind a host-owned turn instead of steering or owning 
  const response={turn:21,step:1,message:{content:[{type:'text',text:'channel response'}]}};live.session.append('assistant/message',response as never,{surfaceOp:'append'});f.emit('session/event',live.session,{type:'assistant/message',data:response});live.session.append('turn/end',{turn:21,reason:{kind:'completed'}});f.emit('session/event',live.session,{type:'turn/end',data:{turn:21,reason:{kind:'completed'}}})
  const result=await operation.result;expect(result).toEqual({text:'channel response',reason:'completed'});expect(resultFromEvents(live.session.snapshotEvents(),'channel')).toEqual(result);await session.close()
 })
-it('resumes the saved channel session with its last native request model without creating another session',async()=>{
- const f=runtime();vi.mocked(f.ctx.sessionPersistence.open).mockResolvedValue({read:async()=>({events:[{type:'request/header',data:{header:{config:{provider:'synthetic-codex',model:'synthetic-sol',reasoningEffort:'high'}}}}]}),close:vi.fn(async()=>{})} as never)
- const session=await f.host.open('channels-binding-synthetic');expect(f.ctx.agents.create).not.toHaveBeenCalled();expect(f.ctx.agents.resume).toHaveBeenCalledWith(expect.objectContaining({resumeSessionId:'channels-binding-synthetic',agentOptions:{provider:'synthetic-codex',model:'synthetic-sol'}}));await session.close()
+it.each([undefined,'high'] as const)('resumes the saved native model and effort instead of the binding default (effort %s)',async reasoningEffort=>{
+ const f=runtime(),selection={provider:'synthetic-codex',model:'synthetic-sol',...(reasoningEffort?{reasoningEffort}:{})}
+ vi.mocked(f.ctx.sessionPersistence.open).mockResolvedValue({read:async()=>({events:[{type:'request/header',data:{header:{config:selection}}}]}),close:vi.fn(async()=>{})} as never)
+ const host=new DshNativeHost(f.ctx,'/tmp','workspace-write','binding',{provider:'binding',model:'other',reasoningEffort:'inherited'})
+ const session=await host.open('channels-binding-synthetic')
+ expect(f.ctx.agents.create).not.toHaveBeenCalled()
+ expect(f.ctx.agents.resume).toHaveBeenCalledWith(expect.objectContaining({resumeSessionId:'channels-binding-synthetic',agentOptions:selection}))
+ await session.close()
+})
+
+it.each([undefined,'high'] as const)('passes the full selected model to new native Agents (effort %s)',async reasoningEffort=>{
+ const f=runtime(),selection={provider:'configured',model:'selected',...(reasoningEffort?{reasoningEffort}:{})}
+ const session=await new DshNativeHost(f.ctx,'/tmp','workspace-write','binding',selection).open()
+ expect(f.ctx.agents.create).toHaveBeenCalledWith(expect.objectContaining({agentOptions:selection}))
+ await session.close()
 })

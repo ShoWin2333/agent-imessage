@@ -4,6 +4,7 @@ import vm from 'node:vm'
 import { afterEach, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
+import Projections from '@deepseek-ai/dsh-session-projection'
 import ApprovalService, { setApprovalPolicy, type ApprovalOutcome } from '@deepseek-ai/dsh-user-approval'
 import { ChannelInteractions } from '../src/plugin/interactions.js'
 import { registerSharedApprovals } from '../src/plugin/shared-approvals.js'
@@ -33,10 +34,11 @@ async function fixture() {
     c.provide('uiSession', { registerPendingInteraction: () => (card: NativeCard) => {
       cards.set(card.key, card); return () => cards.delete(card.key)
     } } as never)
-    c.provide('slots', { inject: (_name: string, register: () => void) => register(), register: () => () => {} } as never)
-    c.provide('locale', { register: () => () => {} } as never)
+    c.provide('slots', { inject: (_name: string, register: () => void) => register(), register: () => () => {}, registerFactory: () => () => {} } as never)
+    c.provide('locale', { register: () => () => {}, registerFactory: () => () => {} } as never)
   })
   const clientUi = await client.plugin({ inject: ui.inject, apply: ui.apply })
+  const projections = await ctx.plugin(Projections)
   const approval = await ctx.plugin(ApprovalService, { policy: 'ask' })
   ctx.on('approval/request', request => listener.call(client, request, async () => 'unavailable'))
   const broker = new ChannelInteractions(() => true), update = vi.fn(async (_outcome: string) => {})
@@ -44,7 +46,7 @@ async function fixture() {
   const message = { sendApproval } as unknown as ChannelMessage
   const unregister = registerSharedApprovals(ctx, request => request.agent === agent,
     (request, settled) => broker.approval(request, message, settled))
-  cleanup.push(async () => { unregister(); broker.cancel(); await clientUi.dispose(); await services.dispose(); await approval.dispose() })
+  cleanup.push(async () => { unregister(); broker.cancel(); await clientUi.dispose(); await services.dispose(); await approval.dispose(); await projections.dispose() })
   const request = (signal?: AbortSignal) => ctx.approval.request(Object.freeze({
     agent: agent as never, toolName: 'write', reason: 'Synthetic write', ...(signal ? { signal } : {}),
   }))
