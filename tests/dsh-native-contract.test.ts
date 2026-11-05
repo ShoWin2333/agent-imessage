@@ -8,13 +8,14 @@ function deferred<T>() { let resolve!: (value: T) => void; const promise = new P
 function runtime() {
   const handlers = new Map<string, Set<(...args: any[]) => void>>()
   const emit = (event: string, ...args: any[]) => { for (const fn of handlers.get(event) ?? []) fn(...args) }
-  const liveSession = Session.create(SessionId('channels-binding-synthetic'))
-  const agent = { id: liveSession.id, session: liveSession, inbox: { clear: vi.fn() }, cancel: vi.fn(), followup: vi.fn(), ctx: undefined as unknown as Context }
+  const id = SessionId('channels-binding-synthetic')
+  const liveSession = Session.create(id, [], { ...Session.create(id).header, cwd: '/tmp' })
+  const agent = { id: liveSession.id, session: liveSession, inbox: { clear: vi.fn(), remove: vi.fn(() => true) }, cancel: vi.fn(), followup: vi.fn(), ctx: undefined as unknown as Context }
   const dispose = vi.fn(async () => { emit('agent/disposed', { agent }) })
   const flush = vi.fn(async () => true)
   const ctx = {
 on: (event: string, fn: (...args: any[]) => void) => { if (!handlers.has(event)) handlers.set(event, new Set()); handlers.get(event)!.add(fn); return () => handlers.get(event)!.delete(fn) },
-    agents: { get: vi.fn(() => undefined), create: vi.fn(async () => ({ agent, dispose })), resume: vi.fn(async () => ({ agent, dispose })) },
+    agents: { get: vi.fn(() => undefined), roots: vi.fn(() => [agent]), create: vi.fn(async () => ({ agent, dispose })), resume: vi.fn(async () => ({ agent, dispose })) },
     agentDefaultModel: { currentSelection: () => ({ provider: 'synthetic', model: 'no-paid-model' }) }, agentPresets: { defaultId: 'synthetic-preset', mount: vi.fn() },
     permissionPresets: { resolve: vi.fn(), set: vi.fn() }, sessions: { flush },
     sessionPersistence: { stat: vi.fn(async () => ({ header: { cwd: '/tmp', agentPreset: 'synthetic-preset' } })), open: vi.fn(async () => ({ read: async () => ({ events: [] }), close: vi.fn(async () => { }) })) },
@@ -59,6 +60,54 @@ it('resume clears quarantined native inbox before new input, flushes it, preserv
   session.cancel(); expect(f.agent.cancel).toHaveBeenCalledWith({ kind: 'user' })
   await session.close()
 })
+it('shares the exact desktop-opened session without clearing or cancelling desktop work', async () => {
+  const f = runtime()
+  const agent = f.agent as typeof f.agent & { status: string; steer: ReturnType<typeof vi.fn> }
+  agent.status = 'running'
+  agent.steer = vi.fn()
+  vi.mocked(f.ctx.agents.get).mockReturnValue(agent as never)
+  agent.session.append('turn/start', { turn: 1 })
+
+  const session = await f.host.open(agent.id)
+  expect(f.ctx.agents.resume).not.toHaveBeenCalled()
+  expect(agent.inbox.clear).not.toHaveBeenCalled()
+  const operation = session.submit('telegram-input', 'Telegram request', () => {})
+  await operation.admitted
+  expect(agent.followup).toHaveBeenCalledOnce()
+  expect(agent.steer).not.toHaveBeenCalled()
+
+  session.cancel()
+  expect(agent.inbox.remove).toHaveBeenCalledWith('telegram-input')
+  expect(agent.cancel).not.toHaveBeenCalled()
+  expect(await operation.result).toMatchObject({ reason: 'interrupted' })
+  await session.close()
+  expect(f.dispose).not.toHaveBeenCalled()
+  expect(session.isLive?.()).toBe(false)
+})
+
+it('reuses the matching desktop Agent when the desktop wins the resume race', async () => {
+  const f = runtime()
+  vi.mocked(f.ctx.agents.resume).mockImplementationOnce(async () => {
+    vi.mocked(f.ctx.agents.get).mockReturnValue(f.agent as never)
+    throw Object.assign(new Error('Synthetic concurrent resume'), { name: 'SessionAlreadyOwnedError' })
+  })
+  const session = await f.host.open(f.agent.id)
+  expect(session.id).toBe(f.agent.id)
+  expect(f.agent.inbox.clear).not.toHaveBeenCalled()
+  await session.close()
+  expect(f.dispose).not.toHaveBeenCalled()
+})
+
+it('does not attach to a desktop Agent outside the binding workspace or root scope', async () => {
+  const f = runtime()
+  vi.mocked(f.ctx.agents.get).mockReturnValue(f.agent as never)
+  const otherWorkspace = new DshNativeHost(f.ctx, '/different', 'workspace-write', 'binding')
+  await expect(otherWorkspace.open(f.agent.id)).rejects.toThrow('Session binding mismatch')
+  vi.mocked(f.ctx.agents.roots).mockReturnValue([])
+  await expect(f.host.open(f.agent.id)).rejects.toThrow('Session binding mismatch')
+  expect(f.ctx.agents.resume).not.toHaveBeenCalled()
+})
+
 it('rejects wrong binding identity even when workspace matches; closes read handles', async () => {
   const f = runtime()
   await expect(f.host.open('channels-other-binding-synthetic')).rejects.toThrow('mismatch')

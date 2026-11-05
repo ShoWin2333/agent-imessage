@@ -129,7 +129,7 @@ it('empty plugin composition is inert; no credential reads or network connection
 it('native ownership rejects another consumer and cross-workspace sessions', async () => {
   const ctx = { agents: { get: vi.fn(() => ({ id: 'occupied' })) } } as unknown as Context
   const host = new DshNativeHost(ctx, '/tmp', 'workspace-write', 'binding')
-  await expect(host.open('occupied')).rejects.toThrow('already owned')
+  await expect(host.open('occupied')).rejects.toThrow('Session binding mismatch')
 })
 it('replayed old cancel cannot cancel a new task', async () => {
   const f = fixture(); await f.bridge.receive(message('cancel', '/cancel'))

@@ -2,13 +2,15 @@ import { randomUUID } from 'node:crypto'
 import { ChannelInteractions } from './interactions.js'
 import { bounded } from './delivery.js'
 import type { LegacySessionIdentity } from './identity.js'
-import type { InteractionHandlers } from './interaction-types.js'
+import type { ApprovalOutcome } from '@deepseek-ai/dsh-user-approval'
+import type { ApprovalInteraction, InteractionHandlers } from './interaction-types.js'
 import type { ChannelMessage } from '../channels/types.js'
 import type { MediaHandler, MediaInteraction, MediaDeliveryResult, StoredMediaReceipt } from './media-delivery.js'
 
 export interface NativeResult { text: string; reason: string; suppressed?: boolean | undefined }
 export interface NativeSession {
   readonly id: string
+  isLive?(): boolean
   submit(id: string, text: string, progress: () => void, interactions?: InteractionHandlers, media?: MediaHandler): { admitted: Promise<void>; result: Promise<NativeResult> }
   cancel(): void
   close(): Promise<void>
@@ -54,6 +56,10 @@ export class ChannelBridge {
   private readonly interactions = new ChannelInteractions(() => this.connected && !this.closed)
   constructor(private readonly host: NativeHost, private readonly store: BindingStore) { }
   setConnected(healthy: boolean): void {this.connected=healthy;if(!healthy)this.interactions.cancel()}
+  async approveShared(scope: ApprovalInteraction, destination: () => Promise<ChannelMessage>, settled: Promise<ApprovalOutcome>): Promise<ApprovalOutcome> {
+    if (!this.connected || this.closed || this.store.read().sessionId !== scope.sessionId) return 'unavailable'
+    return this.interactions.approval(scope, await destination(), settled)
+  }
   private serial<T>(fn: () => Promise<T>): Promise<T> {
     const next = this.tail.then(fn)
     this.tail = next.then(() => { }, () => { })
@@ -120,7 +126,10 @@ export class ChannelBridge {
           reply = receipt
           return
         }
-        this.session ??= await this.host.open(this.store.read().sessionId)
+        if (!this.session || this.session.isLive?.() === false) {
+          await this.session?.close()
+          this.session = await this.host.open(this.store.read().sessionId)
+        }
         const state = this.store.read()
         await this.store.write({ ...state, sessionId: this.session.id })
         const receipt: Receipt = { id: message.id, inputId: randomUUID(), sessionId: this.session.id, delivery: 'pending' }

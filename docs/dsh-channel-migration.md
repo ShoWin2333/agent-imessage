@@ -10,11 +10,11 @@ Credentials are references into the existing native provider. New bindings are d
 
 ## Native contracts
 
-- `agents.create` creates a channel-owned session; a saved session ID resumes with `agents.resume`. The exact binding prefix and workspace are verified before resume. Other consumers' live Agents are never adopted.
-- Idle input uses `agent.followup`. Further input in a channel-owned active turn uses `agent.steer`, consumed at a native step boundary. Input arriving during a host-owned turn is queued as its own followup, without taking over host approval or reply ownership. Native driver closing/abort races determine the admitted turn; the plugin never compensates by submitting twice.
+- `agents.create` creates a channel-owned session; a saved session ID resumes with `agents.resume`. The exact binding prefix and workspace are verified before resume. If the desktop already opened that exact root Agent, the plugin uses the live session and leaves its lifecycle with the desktop.
+- Idle input uses `agent.followup`. Further input in a channel-owned active turn uses `agent.steer`, consumed at a native step boundary. Input arriving during a host-owned turn is queued as its own followup, without taking over reply ownership. Native driver closing/abort races determine the admitted turn; the plugin never compensates by submitting twice.
 - `agent/inbox/claimed` binds exact input IDs to turns. The first claimant is the fixed reply/interaction owner; same-turn channel refinements receive durable suppressed receipts. `session/event` supplies assistant messages and terminal boundaries. `turn/end` is followed by an explicit persistence flush before delivery.
 - Admission flush completes before the external cursor advances. Native inbox splices reconstruct claim/cancel state during restart recovery. Interrupted or uncertain work is never automatically resubmitted.
-- Cancellation uses the native Agent API. Host approval/question handlers run first. Channel fallback is permitted only for native unavailable/no-provider outcomes, with exact Agent/input/turn identity, expiring one-use tokens and fail-closed cancellation/disconnection/restart behavior.
+- Cancellation uses the native Agent API. For a session bound to Telegram, Weixin, iMessage, or Discord in private chat, one DSH tool approval can be answered in the desktop or in its bound private chat. The first valid answer wins. Discord server bindings route approval to the entry point that started the turn. Questions fall back from the host only on native no-provider outcomes. Channel interactions use exact Agent/input/turn identity, expiring one-use tokens and fail-closed cancellation/disconnection/restart behavior.
 - Delivery is pending, sending, sent or uncertain. A send interrupted by a crash is quarantined rather than retried. No fixed progress text is sent; adapters retain typing where supported.
 
 ## Session and project continuity

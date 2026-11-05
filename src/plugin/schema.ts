@@ -16,6 +16,8 @@ const channels = Schema.union([
 const binding = Schema.object({
   id:id(), enabled:Schema.boolean().default(false), cwd:Schema.string().pattern(absoluteWorkspacePattern).required(),
   credentialRef:Schema.string().pattern(CREDENTIAL_RE).required(), permissionPreset:text(), channel:channels,
+  // Accepted for upgrades only. The approval router ignores this former exception.
+  directTelegramVoice:Schema.boolean().required(false),
   model:Schema.object({provider:text(),model:text(),reasoningEffort:Schema.string().min(1)}).extra('default', undefined),
   weixin:Schema.object({ownerUserId:text(),baseUrl:Schema.string().pattern(ORIGIN_RE).required()}).extra('default', undefined),
 })

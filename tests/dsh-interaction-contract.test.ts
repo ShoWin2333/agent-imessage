@@ -1,16 +1,19 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
+import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import Tools from '@deepseek-ai/dsh-tools'
 import ApprovalService, { setApprovalPolicy, type ApprovalOutcome } from '@deepseek-ai/dsh-user-approval'
 import UserQuestionService, { UserQuestionError } from '@deepseek-ai/dsh-user-questions'
 import { DshNativeHost } from '../src/plugin/native.js'
+import { registerSharedApprovals } from '../src/plugin/shared-approvals.js'
 import { ChannelInteractions } from '../src/plugin/interactions.js'
 import type { ChannelMessage } from '../src/channels/types.js'
 
 const cleanup:Array<()=>Promise<void>>=[]
 afterEach(async()=>{for(const close of cleanup.splice(0).reverse())await close()})
 const qs=[{id:'pick',question:'Synthetic question',options:[{label:'One'},{label:'Two'}]}]
-async function fixture(before?:(ctx:Context)=>void) {
+async function fixture(before?:(ctx:Context)=>void, { input = 'synthetic', channel = 'discord', submit = true, shared = channel !== 'discord' } = {}) {
   const ctx=new Context(),session=Session.create(SessionId('channels-binding-synthetic'))
   let live:any
   const agent={id:session.id,session,ctx,inbox:{clear:vi.fn()},cancel:vi.fn(),followup:vi.fn((message:any)=>{
@@ -21,20 +24,145 @@ async function fixture(before?:(ctx:Context)=>void) {
     ctx.provide('agents',{get:()=>live,roots:()=>[live],create:async()=>({agent,dispose:async()=>{ctx.emit('agent/disposed',{agent} as never);live=undefined}})})
     ctx.provide('sessions',{flush:async()=>true})
     ctx.provide('agentDefaultModel',{currentSelection:()=>({provider:'synthetic',model:'never-called'})})
-    ctx.provide('agentPresets',{defaultId:'synthetic',mount:async()=>{}})
+    ctx.provide('agentPresets',{defaultId:'synthetic',mount:async()=>{},serviceFor:()=>undefined})
+    ctx.provide('systemPrompt', { tools: () => () => {} })
+    ctx.provide('fs', {
+      resolve: async (path: string) => ({ displayPath: path }),
+      processPath: (target: { displayPath: string }) => target.displayPath,
+      contains: () => true,
+      stat: async () => ({ type: 'file', size: 4 }),
+      readBytes: async () => Buffer.from('test'),
+    } as never)
     ctx.provide('permissionPresets',{resolve:()=>{},set:()=>{}})
   })
   const approval=await ctx.plugin(ApprovalService,{policy:'ask'}),questions=await ctx.plugin(UserQuestionService)
+  const tools = await ctx.plugin(Tools)
   before?.(ctx)
-  const native=await new DshNativeHost(ctx,'/tmp','workspace-write','binding').open()
+  // Match the installed plugin: approval is available via get(), but is not
+  // a declared injection on the context that constructs DshNativeHost.
+  let pluginContext!: Context
+  const plugin = await ctx.plugin({
+    inject: ['agents', 'sessions', 'agentDefaultModel', 'agentPresets', 'permissionPresets'],
+    apply(context: Context) { pluginContext = context },
+  })
+  const native=await new DshNativeHost(pluginContext,'/tmp','workspace-write','binding',undefined,undefined,channel,()=>shared).open()
   const broker=new ChannelInteractions(()=>true),send=vi.fn(async(_text:string)=>{}),message={send} as unknown as ChannelMessage
   const handlers={approval:(request:any)=>broker.approval(request,message),question:(request:any)=>broker.question(request,message)}
-  const operation=native.submit('owned','synthetic',()=>{},handlers);await operation.admitted
-  cleanup.push(async()=>{broker.cancel();await native.close();await operation.result;await questions.dispose();await approval.dispose();await services.dispose()})
-  const token=()=>send.mock.calls.at(-1)![0].match(/\/(?:approve|answer) ([aq]-[a-f0-9-]+)/)![1]!
+  const media = vi.fn(async () => ({ delivery: 'sent' as const, name: 'sample.mp3', bytes: 4, mode: 'voice' as const }))
+  const removeApproval = shared ? registerSharedApprovals(pluginContext, ({ agent: requested }) => requested === live && requested === agent,
+    (request, settled) => broker.approval(request, message, settled)) : () => {}
+  const operation = submit ? native.submit('owned', input, () => {}, handlers, media) : undefined
+  await operation?.admitted
+  if (!submit) session.append('turn/start', { turn: 1 })
+  const executeMedia = (kind: 'voice' | 'file' | 'image') => ctx.tools.get('channel_send_media')!.execute(
+    { kind, path: 'sample.mp3' }, { agent, callId: 'synthetic-call', signal: new AbortController().signal } as never,
+  )
+  cleanup.push(async()=>{removeApproval();broker.cancel();await native.close();await operation?.result;await plugin.dispose();await tools.dispose();await questions.dispose();await approval.dispose();await services.dispose()})
+  const token=()=>send.mock.calls.at(-1)![0].match(/\/(?:approve|answer) ([A-Za-z0-9_-]+)/)![1]!
   const ready=async()=>{await vi.waitFor(()=>expect(send).toHaveBeenCalled());await Promise.resolve();await Promise.resolve()}
-  return {ctx,agent,session,native,broker,send,token,ready,replace:()=>{live={...agent}}}
+  return {ctx,agent,session,native,broker,send,message,token,ready,media,executeMedia,replace:()=>{live={...agent}}}
 }
+it.each([
+  ['telegram', 'mobile'], ['telegram', 'desktop'], ['discord', 'mobile'], ['discord', 'desktop'],
+] as const)('shares one %s upload approval, answered on %s', async (channel, winner) => {
+  const desktop = Promise.withResolvers<ApprovalOutcome>()
+  const showDesktop = vi.fn((_request: { signal?: AbortSignal }) => desktop.promise)
+  const f = await fixture(ctx => { ctx.on('approval/request', showDesktop) }, { input: '请给我发一段语音。', channel, shared: true })
+  const closeCard = vi.fn(async () => {})
+  f.message.sendApproval = vi.fn(async () => closeCard)
+  const result = f.executeMedia('voice')
+  await vi.waitFor(() => expect(f.message.sendApproval).toHaveBeenCalledOnce())
+  expect(showDesktop).toHaveBeenCalledOnce()
+  expect(f.media).not.toHaveBeenCalled()
+  const [, token] = vi.mocked(f.message.sendApproval).mock.calls[0]!
+  const [{ signal }] = showDesktop.mock.calls[0]!
+  await Promise.resolve()
+  await Promise.resolve()
+  if (winner === 'mobile') f.broker.reply(`/approve ${token}`)
+  else desktop.resolve('allowed-once')
+  await expect(result).resolves.toMatchObject({ delivery: 'sent' })
+  expect(signal?.aborted).toBe(true)
+  expect(closeCard).toHaveBeenCalledExactlyOnceWith('allowed-once')
+  expect(() => f.broker.reply(`/deny ${token}`)).toThrow('失效')
+  desktop.resolve('rejected')
+  expect(f.media).toHaveBeenCalledOnce()
+  const events = f.session.snapshotEvents()
+  expect(events.filter(e => e.type === 'approval/asked')).toHaveLength(1)
+  expect(events.filter(e => e.type === 'approval/decided').map(e => e.data.outcome)).toEqual(['allowed-once'])
+})
+
+it.each(['weixin', 'imessage'])('shares a %s text approval with desktop and rejects reuse', async channel => {
+  for (const winner of ['mobile', 'desktop']) {
+    const desktop = Promise.withResolvers<ApprovalOutcome>()
+    const showDesktop = vi.fn(() => desktop.promise)
+    const f = await fixture(ctx => { ctx.on('approval/request', showDesktop) }, { channel, submit: winner === 'desktop', shared: true })
+    const result = f.ctx.approval.request({ agent: f.agent as never, toolName: 'write', reason: 'Write synthetic file' })
+    await f.ready()
+    expect(showDesktop).toHaveBeenCalledOnce()
+    const code = f.token()
+    expect(code).toMatch(/^[A-Za-z0-9_-]{8}$/)
+    expect(f.send.mock.calls[0]?.[0]).toContain('也可在 DSH 桌面处理')
+    const expected = winner === 'mobile' ? 'rejected' : 'allowed-once'
+    if (winner === 'mobile') f.broker.reply(`/deny ${code}`)
+    else desktop.resolve('allowed-once')
+    expect(await result).toBe(expected)
+    expect(() => f.broker.reply(`/approve ${code}`)).toThrow('失效')
+    desktop.resolve('allowed-once')
+    const events = f.session.snapshotEvents()
+    expect(events.filter(e => e.type === 'approval/asked')).toHaveLength(1)
+    expect(events.filter(e => e.type === 'approval/decided').map(e => e.data.outcome)).toEqual([expected])
+  }
+})
+
+it('shows a desktop-started approval in Telegram even before any channel input is submitted', async () => {
+  const desktop = Promise.withResolvers<ApprovalOutcome>()
+  const showDesktop = vi.fn(() => desktop.promise)
+  const f = await fixture(ctx => { ctx.on('approval/request', showDesktop) }, { channel: 'telegram', submit: false })
+  const ask = () => f.ctx.approval.request({ agent: f.agent as never, toolName: 'write', reason: 'Write synthetic file' })
+  const result = ask()
+  await f.ready()
+  expect(showDesktop).toHaveBeenCalledOnce()
+  f.broker.reply(`/deny ${f.token()}`)
+  expect(await result).toBe('rejected')
+  desktop.resolve('allowed-once')
+  expect(f.session.snapshotEvents().filter(e => e.type === 'approval/decided').map(e => e.data.outcome)).toEqual(['rejected'])
+})
+
+it('keeps the desktop answer available if Telegram delivery fails', async () => {
+  const desktop = Promise.withResolvers<ApprovalOutcome>()
+  const f = await fixture(ctx => { ctx.on('approval/request', () => desktop.promise) }, { channel: 'telegram' })
+  f.send.mockRejectedValueOnce(new Error('Telegram offline'))
+  const result = f.ctx.approval.request({ agent: f.agent as never, toolName: 'write', reason: 'Write synthetic file' })
+  await f.ready()
+  desktop.resolve('allowed-once')
+  expect(await result).toBe('allowed-once')
+})
+
+it('withdraws both prompts when the DSH session changes to never', async () => {
+  const showDesktop = vi.fn((request: { signal?: AbortSignal }) => new Promise<ApprovalOutcome>(resolve => {
+    request.signal?.addEventListener('abort', () => resolve('cancelled'), { once: true })
+  }))
+  const f = await fixture(ctx => { ctx.on('approval/request', showDesktop) }, { channel: 'telegram' })
+  const result = f.ctx.approval.request({ agent: f.agent as never, toolName: 'write', reason: 'Write synthetic file' })
+  await f.ready()
+  const token = f.token()
+  setApprovalPolicy(f.session, 'never')
+  f.ctx.emit('session/event', f.session, f.session.snapshotEvents().at(-1)!)
+  expect(await result).toBe('cancelled')
+  expect(showDesktop.mock.calls[0]?.[0].signal?.aborted).toBe(true)
+  expect(() => f.broker.reply(`/approve ${token}`)).toThrow('失效')
+})
+
+it('never auto-approves a voice request under the shared DSH policy', async () => {
+  const showDesktop = vi.fn(async (): Promise<ApprovalOutcome> => 'allowed-once')
+  const f = await fixture(ctx => { ctx.on('approval/request', showDesktop) }, { input: '发语音', channel: 'telegram' })
+  setApprovalPolicy(f.session, 'never')
+  await expect(f.executeMedia('voice')).rejects.toThrow('not approved')
+  expect(showDesktop).not.toHaveBeenCalled()
+  expect(f.send).not.toHaveBeenCalled()
+  expect(f.media).not.toHaveBeenCalled()
+})
+
 it('uses real native approval policy/audit; never bypasses never, then allows exactly once',async()=>{
   const f=await fixture()
   setApprovalPolicy(f.session,'never')
@@ -49,22 +177,41 @@ it('uses real native approval policy/audit; never bypasses never, then allows ex
   expect(events.filter(e=>e.type==='approval/decided').map(e=>e.data.outcome)).toEqual(['rejected','allowed-once'])
   expect(events.filter(e=>e.type==='approval/policy')).toHaveLength(2)
 })
-it.each(['before','after'] as const)('preserves host approval outcome for handler registered %s channel handler',async order=>{
-  const host=(ctx:Context)=>{ctx.on('approval/request',async()=> 'rejected')}
-  const f=await fixture(order==='before'?host:undefined);if(order==='after')host(f.ctx)
-  expect(await f.ctx.approval.request({agent:f.agent as never,toolName:'write',reason:'Synthetic action'})).toBe('rejected')
-  expect(f.send).not.toHaveBeenCalled()
+it.each(['before', 'after'] as const)('routes by turn even when the desktop handler registers %s the channel handler', async order => {
+  const desktop = vi.fn(async (): Promise<ApprovalOutcome> => 'allowed-once')
+  const registerDesktop = (ctx: Context) => { ctx.on('approval/request', desktop) }
+  const f = await fixture(order === 'before' ? registerDesktop : undefined)
+  if (order === 'after') registerDesktop(f.ctx)
+
+  const desktopInput = createUserMessage({ content: [{ type: 'text', text: 'Desktop input' }], source: { kind: 'user' } })
+  const ask = () => f.ctx.approval.request({ agent: f.agent as never, toolName: 'write', reason: 'Write synthetic file' })
+  f.ctx.emit('agent/inbox/claimed', { agent: f.agent, message: desktopInput, turn: 1 } as never)
+  const channelResult = ask()
+  await f.ready()
+  expect(desktop).not.toHaveBeenCalled()
+  const token = f.token()
+  f.broker.reply(`/deny ${token}`)
+  expect(await channelResult).toBe('rejected')
+  expect(() => f.broker.reply(`/approve ${token}`)).toThrow('失效')
+
+  f.session.append('turn/end', { turn: 1, reason: { kind: 'completed' } })
+  f.ctx.emit('session/event', f.session, f.session.snapshotEvents().at(-1)!)
+  f.session.append('turn/start', { turn: 2 })
+  f.ctx.emit('agent/inbox/claimed', { agent: f.agent, message: desktopInput, turn: 2 } as never)
+  expect(await ask()).toBe('allowed-once')
+  expect(desktop).toHaveBeenCalledOnce()
+  expect(f.send).toHaveBeenCalledOnce()
 })
-it.each(['allowed-once','cancelled'] as ApprovalOutcome[])('keeps native host %s without a channel prompt',async outcome=>{
-  const f=await fixture(ctx=>{ctx.on('approval/request',async()=>outcome)})
-  expect(await f.ctx.approval.request({agent:f.agent as never,toolName:'write',reason:'Synthetic action'})).toBe(outcome)
-  expect(f.send).not.toHaveBeenCalled()
+
+it('fails closed when the channel prompt cannot be delivered', async () => {
+  const desktop = vi.fn(async (): Promise<ApprovalOutcome> => 'allowed-once')
+  const f = await fixture(ctx => { ctx.on('approval/request', desktop) })
+  f.send.mockRejectedValueOnce(new Error('Synthetic send failure'))
+  expect(await f.ctx.approval.request({ agent: f.agent as never, toolName: 'write', reason: 'Write synthetic file' })).toBe('unavailable')
+  expect(f.send).toHaveBeenCalledOnce()
+  expect(desktop).not.toHaveBeenCalled()
 })
-it('host approval failure fails closed and never creates an alternate channel grant',async()=>{
-  const f=await fixture();f.ctx.on('approval/request',async()=>{throw new Error('synthetic host failure')})
-  expect(await f.ctx.approval.request({agent:f.agent as never,toolName:'write',reason:'Synthetic action'})).toBe('unavailable')
-  expect(f.send).not.toHaveBeenCalled()
-})
+
 it.each(['before','after'] as const)('preserves host question answer registered %s channel handler',async order=>{
   const answer={answers:[{id:'pick',selected:['Two']}]}
   const host=(ctx:Context)=>{ctx.on('user-questions/request',async()=>answer)}
@@ -81,14 +228,6 @@ it('does not fall back for unrelated native question errors',async()=>{
   const f=await fixture();f.ctx.on('user-questions/request',async()=>{throw new UserQuestionError('host rejected','HOST_REFUSED')})
   await expect(f.ctx.userQuestions.ask({agent:f.agent as never,questions:qs})).rejects.toMatchObject({code:'HOST_REFUSED'})
   expect(f.send).not.toHaveBeenCalled()
-})
-it('does not race a pending host approval; rechecks ownership after delegation',async()=>{
-  let release!:(v:ApprovalOutcome)=>void
-  const f=await fixture();f.ctx.on('approval/request',()=>new Promise(resolve=>{release=resolve}))
-  const result=f.ctx.approval.request({agent:f.agent as never,toolName:'write',reason:'Synthetic action'})
-  await vi.waitFor(()=>expect(release).toBeDefined());expect(f.send).not.toHaveBeenCalled()
-  f.native.cancel();release('unavailable')
-  expect(await result).toBe('cancelled');expect(f.send).not.toHaveBeenCalled()
 })
 it('replaced Agent with the same ID cannot consume an old approval capability',async()=>{
   const f=await fixture(),result=f.ctx.approval.request({agent:f.agent as never,toolName:'write',reason:'Synthetic action'})

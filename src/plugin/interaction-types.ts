@@ -9,7 +9,7 @@ export interface InteractionScope {
   signal: AbortSignal
   current(): boolean
 }
-export interface ApprovalInteraction extends InteractionScope {
+export interface ApprovalInteraction extends Omit<InteractionScope, 'inputId'> {
   toolName: string
   reason?: string | undefined
   /** Localized reason supplied by the approval service; prefer it over `reason`. */

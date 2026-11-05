@@ -20,6 +20,7 @@ export class IMessageAdapter implements ChannelAdapter {
     this.supervisor = new SpectrumSupervisor(factory,{reconnectMinMs:1000,reconnectMaxMs:60_000,
       onMessage:message=>onMessage(withImageTransport(message)),onState})
   }
+  approvalMessage() { return this.scheduledMessage('approval', '') }
   async scheduledMessage(id: string, text: string) { return withImageTransport(await this.supervisor.scheduledMessage(id, text)) }
   get state() { return this.supervisor.state }
   start() { return this.supervisor.restart(this.config) }

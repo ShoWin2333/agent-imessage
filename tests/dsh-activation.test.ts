@@ -13,6 +13,8 @@ async function setup(options:{importGate?:ReturnType<typeof deferred<void>>;star
       active=false
       start=vi.fn(async()=>{await options.startGate?.promise;this.active=true})
       stop=vi.fn(async()=>{this.active=false})
+      scheduledMessage=vi.fn()
+      approvalMessage=vi.fn()
       constructor(){constructed();instances.push(this)}
     }}
   })
@@ -27,7 +29,7 @@ async function setup(options:{importGate?:ReturnType<typeof deferred<void>>;star
   const ctx={
     logger:()=>({warn:vi.fn()}),permissionPresets:{resolve:vi.fn()},credentials:{resolve:vi.fn(async()=>({value:'synthetic'}))},
     storageDomain:{open:async()=>({table:(name:string)=>{let rows=tables.get(name);if(!rows){rows=new Map();tables.set(name,rows)}return {get:(key:string)=>rows!.get(key),put:async(key:string,value:unknown)=>{rows!.set(key,value)}}},close:domainClose})},
-    effect:(fn:()=>()=>Promise<void>|void)=>{effects.push(fn())},tools:{register:()=>()=>{}},get:()=>undefined,on:vi.fn(),
+    effect:(fn:()=>()=>Promise<void>|void)=>{effects.push(fn())},tools:{register:()=>()=>{}},get:()=>undefined,on:vi.fn(()=>()=>{}),
     plugin:(_controller:unknown,value:ChannelManager)=>{manager=value},
   } as unknown as Context
   const applying=apply(ctx,{bindings:[binding]})

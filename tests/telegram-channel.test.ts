@@ -44,6 +44,42 @@ it('accepts only owner private text, ignores edited updates, rejects attachment 
   await adapter.stop()
   await expect(adapter.scheduledMessage('no','no')).rejects.toThrow('not connected')
 })
+it('renders approval buttons and accepts callbacks only from the owner on the bot’s private message', async () => {
+  const token = 'a-12345678-abcd-4123-9123-123456789abc'
+  const click = (update_id: number, fromId = 456, chatType = 'private', authorId = 123, data = `dsh:approve:${token}`) => ({
+    update_id,
+    callback_query: {
+      id: String(update_id), data, from: { id: fromId, is_bot: false },
+      message: { chat: { id: 456, type: chatType }, from: { id: authorId, is_bot: true } },
+    },
+  })
+  const { adapter, store, messages, request } = setup([
+    inbound(1), click(2, 999), click(3, 456, 'group'), click(4, 456, 'private', 999),
+    click(5, 456, 'private', 123, '/approve forged'), click(6),
+  ])
+  await adapter.start()
+  await expect.poll(() => store.state.channelCursor).toBe('7')
+  expect(messages.map(({ id, text }) => [id, text])).toEqual([
+    ['telegram:1', 'task'], ['telegram-callback:6', `/approve ${token}`],
+  ])
+  expect(request.mock.calls.filter(c => c[1] === 'answerCallbackQuery').map(c => c[2])).toEqual([
+    { callback_query_id: '5' }, { callback_query_id: '6' },
+  ])
+  request.mockResolvedValueOnce({ message_id: 42 })
+  const settle = await messages[0]!.sendApproval!('Approve this one action', token, new AbortController().signal)
+  expect(request).toHaveBeenLastCalledWith(credential.token, 'sendMessage', {
+    chat_id: '456', text: 'Approve this one action', reply_markup: { inline_keyboard: [[
+      { text: '批准一次', callback_data: `dsh:approve:${token}` },
+      { text: '拒绝', callback_data: `dsh:deny:${token}` },
+    ]] },
+  }, expect.any(AbortSignal))
+  await settle?.('rejected')
+  expect(request).toHaveBeenLastCalledWith(credential.token, 'editMessageText', {
+    chat_id: '456', message_id: 42, text: 'Approve this one action\n\n已拒绝',
+    reply_markup: { inline_keyboard: [] },
+  }, expect.any(AbortSignal))
+})
+
 it('routes image, file and native voice sends for inbound and proactive owner messages',async()=>{
   const {api,adapter,messages}=setup([inbound(1)])
   const photo=vi.spyOn(api,'photo').mockResolvedValue(undefined),file=vi.spyOn(api,'file').mockResolvedValue(undefined),voice=vi.spyOn(api,'voice').mockResolvedValue(undefined)
@@ -103,6 +139,16 @@ it('stops promptly during pending backend admission',async()=>{
   await adapter.start();await expect.poll(()=>receive.mock.calls.length).toBe(1)
   await adapter.stop();expect(adapter.state.phase).toBe('stopped');release()
 })
+it('distinguishes a DSH admission failure from Telegram polling without exposing the error', async () => {
+  const receive = vi.fn(async () => { throw new Error(credential.token) })
+  const { adapter, store } = setup([inbound(1)], receive)
+  await adapter.start()
+  await expect.poll(() => adapter.state.phase).toBe('retrying')
+  expect(adapter.state).toMatchObject({ retryReason: 'telegram-admission' })
+  expect(JSON.stringify(adapter.state)).not.toContain(credential.token)
+  expect(store.state.channelCursor).toBeUndefined()
+})
+
 it.each([401,403,409])('surfaces terminal Telegram error %s without token leakage',async code=>{
   const {adapter,request}=setup([])
   request.mockRejectedValue(new TelegramError(code))

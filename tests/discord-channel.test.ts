@@ -21,7 +21,7 @@ class FakeClient extends EventEmitter {
   login = vi.fn(async (_token: string) => {this.ready = true; return token})
   destroy = vi.fn(async () => {this.ready = false})
   isReady = () => this.ready
-  rest = {post:vi.fn(async (_route: string, _data: Record<string,unknown>) => ({}))}
+  rest = {post:vi.fn(async (_route: string, _data: Record<string,unknown>) => ({})),patch:vi.fn(async (_route: string, _data: Record<string,unknown>) => ({}))}
   users = {createDM:vi.fn(async (_id: string) => ({id:'567890123456789012',type:ChannelType.DM,recipientId:_id}))}
   channels = {fetch:vi.fn(async (_id: string) => ({id:guildScope.channelId!,guildId:guildScope.guildId!,type:ChannelType.GuildText,permissionsFor:() => ({has:() => true})}))}
 }
@@ -84,6 +84,53 @@ it('requires an explicit bot mention, exact server and exact channel in server m
   await expect.poll(() => onMessage.mock.calls.length).toBe(1)
   expect(onMessage.mock.calls[0]![0].text).toBe('/status')
 })
+it('exposes the owner DM for shared approvals without forwarding them to a server', async () => {
+  const dm = await adapter()
+  const prompt = await dm.value.approvalMessage!()
+  await prompt.send('Private approval')
+  expect(dm.client.rest.post).toHaveBeenCalledWith(Routes.channelMessages('567890123456789012'), expect.objectContaining({
+    body: expect.objectContaining({ content: 'Private approval' }),
+  }))
+  const server = await adapter(guildScope)
+  expect(server.value.approvalMessage).toBeUndefined()
+  expect(server.client.rest.post).not.toHaveBeenCalled()
+})
+
+it('renders Discord approval buttons, admits only the bound owner click, and clears the card', async () => {
+  const {value,client,onMessage} = await adapter()
+  const prompt = await value.approvalMessage!()
+  const token = 'a-12345678-abcd-4123-9123-123456789abc'
+  const cardId = '678901234567890123'
+  client.rest.post.mockResolvedValueOnce({id:cardId})
+  const settle = await prompt.sendApproval!('Approve this one action',token,new AbortController().signal)
+  expect(client.rest.post).toHaveBeenCalledWith(Routes.channelMessages('567890123456789012'),expect.objectContaining({
+    body:expect.objectContaining({content:'Approve this one action',components:[{type:1,components:[
+      {type:2,style:3,label:'批准一次',custom_id:`dsh:approve:${token}`},
+      {type:2,style:4,label:'拒绝',custom_id:`dsh:deny:${token}`},
+    ]}]}),
+  }))
+  const deferUpdate = vi.fn(async()=>{})
+  const click = {id:'789012345678901234',guildId:null,channelId:'567890123456789012',
+    user:{id:scope.ownerUserId,bot:false},message:{author:{id:scope.botId,bot:true}},
+    customId:`dsh:deny:${token}`,isButton:()=>true,deferUpdate}
+  for (const invalid of [
+    {user:{id:'other',bot:false}}, {channelId:'other'}, {guildId:guildScope.guildId},
+    {message:{author:{id:'other',bot:true}}}, {customId:'unrelated'}, {isButton:()=>false},
+  ]) client.emit(Events.InteractionCreate,{...click,...invalid})
+  await Promise.resolve()
+  expect(onMessage).not.toHaveBeenCalled()
+  expect(deferUpdate).not.toHaveBeenCalled()
+  client.emit(Events.InteractionCreate,click)
+  expect(deferUpdate).toHaveBeenCalledOnce()
+  await vi.waitFor(()=>expect(onMessage).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+    id:`discord-button:${click.id}`,text:`/deny ${token}`,
+  })))
+  await settle?.('allowed-once')
+  expect(client.rest.patch).toHaveBeenCalledWith(Routes.channelMessage(click.channelId,cardId),expect.objectContaining({
+    body:expect.objectContaining({content:'Approve this one action\n\n已批准一次',components:[]}),
+  }))
+})
+
 it('chunks output, disables all mentions, sends files, and fences stale delivery after stop', async () => {
   const {value,client} = await adapter()
   const message = await value.scheduledMessage('schedule','task')
