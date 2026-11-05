@@ -26,8 +26,8 @@
         "zh": "Messaging Channels"
       },
       "description": {
-        "en": "Connect iMessage, Telegram, Weixin and Discord conversations to Harness sessions, reusing the Host's models, tools and permission presets.",
-        "zh": "把 iMessage、Telegram、微信和 Discord 对话接入 Harness 会话，复用宿主已配置的模型、工具和权限预设。"
+        "en": "Connect iMessage, Telegram, Weixin, Discord and Feishu conversations to Harness sessions, reusing the Host's models, tools and permission presets.",
+        "zh": "把 iMessage、Telegram、微信、Discord 和飞书对话接入 Harness 会话，复用宿主已配置的模型、工具和权限预设。"
       },
       "icon": "icon.svg",
       "author": "ShoWin2333",
@@ -43,7 +43,8 @@
           "telegram",
           "weixin",
           "discord",
-          "agent"
+          "agent",
+          "feishu"
         ]
       },
       "dist-tags": {

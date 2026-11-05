@@ -2,7 +2,7 @@
 
 **The default `main` branch now contains the DSH channel plugin. The old standalone macOS App is preserved in `archive/standalone-macos-main-20261104`.**
 
-A DeepSeek Harness plugin for iMessage, Telegram, Weixin iLink, Discord and Feishu. The upcoming `1.1.0-dsh.12` source is tested against DSH `0.2.1-rc.2`, `0.2.1-rc.5` and `0.2.2-rc.1`, the three explicitly declared supported versions. Development dependencies stay pinned to the older baseline, with an isolated check for the newer SDK.
+A DeepSeek Harness plugin for iMessage, Telegram, Weixin iLink, Discord and Feishu. The `1.1.0-dsh.13` source is tested against DSH `0.2.1-rc.2`, `0.2.1-rc.5` and `0.2.2-rc.1`, the three explicitly declared supported versions. Development dependencies stay pinned to the older baseline, with an isolated check for the newer SDK.
 
 DSH owns agents, models, tools, permissions, inboxes, cancellation and durable session logs. This plugin owns verified channel bindings, provider-message deduplication and reply delivery. It exposes the Cordis `name / inject / apply` entry point, with no standalone application, backend bridge, desktop shell, service installer or executable CLI.
 
@@ -10,15 +10,15 @@ One read-only Agent tool, `channel_status`, reports each configured channel's en
 
 ## Install
 
-The published `1.1.0-dsh.11` release targets DSH `0.2.1-rc.2`. DSH `0.2.2-rc.1` requires a build containing the compatibility changes, which have not been published. The iMessage channel additionally requires macOS with Messages; Telegram, Weixin iLink, Discord and Feishu are cross-platform.
+This release supports DSH `0.2.1-rc.2`, `0.2.1-rc.5` and `0.2.2-rc.1`. The iMessage channel additionally requires macOS with Messages; Telegram, Weixin iLink, Discord and Feishu are cross-platform.
 
 The npm package is `@showin2333/dsh-plugin-channels`. Installing it mounts two Cordis rows as a bundle (`dsh-channels` and the project grouping); the browser panel is discovered from `dsh.client`.
 
 This package replaces `@showin2333/dsh-channels`. Keep existing row IDs, channel bindings and session records when switching. Stop the old bundle before replacing dependency/module references; do not load both names together. See the migration guide.
 
-The current published release is `1.1.0-dsh.11`; the index lists only versions published under this new package name.
+This release is `1.1.0-dsh.13`; the market index is updated after npm publication has been verified.
 
-- **Direct install**: DSH → Plugins → Install, then enter `@showin2333/dsh-plugin-channels@1.1.0-dsh.11`.
+- **Direct install**: DSH → Plugins → Install, then enter `@showin2333/dsh-plugin-channels@1.1.0-dsh.13`.
 - **Market install**: enable `@deepseek-ai/dsh-experimental-plugin-market-bundle`, then Plugins → Discover → Add index source with the URL below.
 - **Local development**: `pnpm install && npm run build`, then point the profile dependency at this checkout with `link:`.
 
@@ -42,7 +42,7 @@ Agent groups are persistent plugin configuration. **Add Agent** saves a name and
 
 The separate `agents` array stores `id`, `name`, `cwd` and `bindingIds` (at most 32 groups). Bindings without metadata retain the previous prefix/directory grouping until the next save persists it. Group metadata never enters binding identity, preserving channel IDs, session keys, deduplication and receive cursors. Groups and bindings are submitted in one revision-checked Settings transaction; changed targets invalidate a pending removal confirmation. Only saved channels listed in the confirmation may be removed from Host configuration. Local draft ids are used only for draft cleanup; a draft id concurrently saved as a channel requires a fresh confirmation.
 
-Feishu self-built apps use the official SDK websocket and accept only the configured tenant/owner/private chat. App Secrets stay in Host credential references. This branch has offline verification only; it is not published or live-tested. See [Feishu setup and limits](docs/feishu.md).
+Feishu self-built apps use the official SDK websocket and accept only the configured tenant/owner/private chat. App Secrets stay in Host credential references. Feishu has offline verification only and has not been tested with a real Feishu account or tenant. See [Feishu setup and limits](docs/feishu.md).
 
 See the [configuration examples](README.md) and [migration guide](docs/dsh-channel-migration.md). To validate locally:
 
