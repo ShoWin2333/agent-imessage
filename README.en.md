@@ -2,7 +2,7 @@
 
 **The default `main` branch now contains the DSH channel plugin. The old standalone macOS App is preserved in `archive/standalone-macos-main-20261104`.**
 
-A DeepSeek Harness plugin for iMessage, Telegram, Weixin iLink and Discord. The source is tested against DSH `0.2.1-rc.2`, `0.2.1-rc.5` and `0.2.2-rc.1`, the three explicitly declared supported versions. Development dependencies stay pinned to the older baseline, with an isolated check for the newer SDK.
+A DeepSeek Harness plugin for iMessage, Telegram, Weixin iLink and Discord. The upcoming `1.1.0-dsh.12` source is tested against DSH `0.2.1-rc.2`, `0.2.1-rc.5` and `0.2.2-rc.1`, the three explicitly declared supported versions. Development dependencies stay pinned to the older baseline, with an isolated check for the newer SDK.
 
 DSH owns agents, models, tools, permissions, inboxes, cancellation and durable session logs. This plugin owns verified channel bindings, provider-message deduplication and reply delivery. It exposes the Cordis `name / inject / apply` entry point, with no standalone application, backend bridge, desktop shell, service installer or executable CLI.
 
