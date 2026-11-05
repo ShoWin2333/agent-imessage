@@ -13,16 +13,14 @@ import type {} from '@deepseek-ai/dsh-fs'
 import type {} from '@deepseek-ai/dsh-subprocess'
 import type {} from '@deepseek-ai/dsh-sandbox'
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
-import { prepareVoiceMedia } from './audio-preparation.js'
+import { sendApprovedMedia } from './approved-media.js'
 import type { InteractionHandlers, InteractionScope } from './interaction-types.js'
 import type { NativeHost, NativeSession, NativeResult, NativePreferences } from './bridge.js'
 import { ownsSession, type LegacySessionIdentity } from './identity.js'
-import {qqbotSendFileTool,qqbotDescribeImageTool,describeQQImage} from './qqbot-tools.js'
-import type {ToolRunContext,ToolDispatchExecution} from '@deepseek-ai/dsh-tools'
-import {installQQPresentation,commandLink,type QQPresentationOptions} from './qqbot-presentation.js'
-import {QQBOT_VERSION} from '../shared/qqbot-version.js'
+import {installQQAgent} from './qqbot-agent.js'
+import type {ToolDispatchExecution} from '@deepseek-ai/dsh-tools'
+import type {QQPresentationOptions} from './qqbot-presentation.js'
 import { channelMediaTool, type ChannelMediaArgs } from './media-tool.js'
-import { loadOutboundMedia, DEFAULT_MAX_OUTBOUND_MEDIA_BYTES } from '../media.js'
 import type { MediaHandler } from './media-delivery.js'
 
 // DSH 0.2 uses producer-owned message source kinds, without a generic plugin source.
@@ -73,43 +71,6 @@ function reasonText(reason: unknown): string {
 export class DshNativeHost implements NativeHost {
   private preferences:NativePreferences={}
   configure(preferences:NativePreferences){this.preferences=preferences}
-  async command(text:string,sessionId:string|undefined,preferences:NativePreferences){
-    const [verb,...args]=text.trim().split(/\s+/),value=args.join(' ')
-    const agent=sessionId&&ownsSession(sessionId,this.binding,this.legacyIdentity)?this.ctx.agents.get(SessionId(sessionId)):undefined
-    if(verb==='/bot-settings')return {text:`Messaging Channels ${QQBOT_VERSION}\nDSH → 账号菜单 → 设置 → Messaging Channels → 当前 Agent → QQ Bot 设置。\n流式输出：${this.qqOptions.streaming!==false?'开':'关'}；工具成功结果：${this.qqOptions.showToolResults?'显示':'隐藏'}；声明文件自动交付：${this.qqOptions.sendPresentedFiles!==false?'开（每份仍需审批）':'关'}。\n凭据状态和手动配置也在该设置页；聊天不接收密钥。`}
-    if(verb==='/bot-status'){
-      const events=agent?.session.snapshotEvents()??[],selection=agent?.model.current()??preferences.model??this.model??this.ctx.agentDefaultModel.currentSelection()
-      const last=events.at(-1)
-      return {text:`📊 会话状态 · ${QQBOT_VERSION}\n会话：${sessionId??'尚未创建'}\n运行：${agent?.status??'未加载'}\n模型：${selection?`${selection.provider}/${selection.model}`:'宿主默认'}\nPreset：${preferences.preset??this.ctx.agentPresets.defaultId}\n用户消息：${events.filter(e=>e.type==='user/message').length}\n最后活动：${last?new Date(last.time).toISOString():'—'}`}
-    }
-    if(verb==='/compact'){
-      if(!agent)return {text:'当前无活跃会话。'}
-      if(agent.status!=='idle')return {text:'正在生成中，无法压缩。'}
-      const compaction=((this.ctx.agentPresets as unknown as {serviceFor(agent:Agent,name:string):unknown}).serviceFor(agent,'compaction')??agent.ctx.get('compaction')) as {compactNow(context:unknown,signal:AbortSignal):Promise<{shadowedSeqs:unknown[]}|null>}|undefined
-      if(!compaction)return {text:'当前 Agent preset 未提供 compaction 服务。'}
-      const result=await compaction.compactNow({session:agent.session,options:agent.options,runMaintenance:agent.runMaintenance.bind(agent)},new AbortController().signal)
-      await this.flush(agent);return {text:`已压缩 ${result?.shadowedSeqs.length??0} 条历史记录。`}
-    }
-    if(verb==='/preset'){
-      const presets=await this.ctx.agentPresets.list()
-      if(!value)return {text:`当前：${preferences.preset??this.ctx.agentPresets.defaultId}\n${presets.map(p=>commandLink(`/preset ${p.id}`,p.id)).join('\n')}`}
-      const preset=['reset','default'].includes(value)?this.ctx.agentPresets.defaultId:value
-      const resolved=await this.ctx.agentPresets.resolve(preset)
-      if(resolved.broken)return {text:'所选 Agent preset 不可用。'}
-      return {text:`Agent preset 已选择：${preset}；新会话生效。权限审批仍使用原有配置。`,preferences:{...preferences,preset}}
-    }
-    const nativeModel=agent?.model
-    const selection=nativeModel?.current()??preferences.model??this.model??this.ctx.agentDefaultModel.currentSelection()
-    if(!value){
-      const providers=await this.ctx.llm.listProviders(),models=await Promise.all(providers.map(async p=>(await this.ctx.llm.listModels(p.id)).map(m=>commandLink(`/model ${p.id}/${m.id}`,m.name??`${p.id}/${m.id}`))))
-      return {text:`### 模型配置\n当前：${selection?`${selection.provider}/${selection.model}`:'宿主默认'}\n可用模型（点击切换）：\n${models.flat().join('\n')}\n手动指定：/model provider/model`}
-    }
-    const split=value.indexOf('/'),provider=split<0?selection!.provider:value.slice(0,split),model=split<0?value:value.slice(split+1)
-    if(!(await this.ctx.llm.listModels(provider)).some(m=>m.id===model))return {text:'模型不在宿主目录中。'}
-    const next={provider,model}
-    if(agent){agent.model.select(next);await this.flush(agent)}
-    return {text:`模型已选择：${provider}/${model}；保留会话上下文。`,preferences:{...preferences,model:next}}
-  }
   constructor(private readonly ctx: Context, private readonly cwd: string, private readonly permissionPreset: string, private readonly binding: string, private readonly model?: {provider:string;model:string;reasoningEffort?:string | undefined}, private readonly legacyIdentity?: LegacySessionIdentity, private readonly channelKind?: string, private readonly lifetime: Context = ctx, private readonly qqVision?:{provider:string;model:string}|undefined,private readonly qqOptions:QQPresentationOptions&{streaming?:boolean}={}) { }
   async inspect(sessionId: string, inputId: string): Promise<NativeResult | undefined> {
     if (!sessionId) return undefined
@@ -282,67 +243,18 @@ export class DshNativeHost implements NativeHost {
     const sendChannelMedia = async (args:ChannelMediaArgs, exec:Pick<ToolDispatchExecution,'agent'|'callId'|'signal'>) => {
       const owned = owner(exec.agent)
       if (!owned?.input.media) throw new Error('Media sending requires an active channel-owned turn.')
-      const scope = scopeFor(owned, exec.signal)
-      const ensureCurrent = () => { if (!scope.current() || scope.signal.aborted) throw new Error('Media send cancelled or channel turn ended.') }
-      ensureCurrent()
-      const approval = this.ctx.get('approval')
-      if (!approval) throw new Error('Media upload approval is unavailable.')
-      const reason = `Upload ${args.kind} file ${args.path} to this channel's configured recipient.`
-      const mediaKind = { image: '图片', file: '文件', voice: '语音' }[args.kind]
-      const outcome = await approval.request({ agent, toolName: 'channel_send_media', callId: exec.callId, reason,
-        displayReason: { en: reason, zh: `将工作区中的${mediaKind}「${args.path}」发送到当前渠道。` }, signal: scope.signal })
-      if (outcome !== 'allowed-once') throw new Error('Media upload was not approved.')
-      ensureCurrent()
-      // Desktop can provide fs outside the preset. Use the Agent’s visible DSH
-      // service in that case, while keeping an isolated preset provider first.
-      const reader = this.ctx.agentPresets.serviceFor(agent, 'fs') ?? scoped.get('fs')
-      if (!reader) throw new Error('The channel Agent has no filesystem provider for media reads.')
-      let media = await loadOutboundMedia({ rawPath: args.path, kind: args.kind === 'voice' ? 'audio' : args.kind,
-        workspaceCwd: this.cwd, maxBytes: DEFAULT_MAX_OUTBOUND_MEDIA_BYTES, signal: scope.signal, reader })
-      ensureCurrent()
-      let preparationNote: string | undefined
-      if (args.kind === 'voice' && this.channelKind === 'telegram') {
-        const presets = this.ctx.agentPresets
-        const policy = presets.serviceFor(agent, 'sandboxPolicy')?.resolve({ session: agent.session })
-        const subprocess = presets.serviceFor(agent, 'subprocess'), sandbox = presets.serviceFor(agent, 'sandbox')
-        const prepared = await prepareVoiceMedia(media, {
-          ...(subprocess ? { subprocess } : {}), ...(sandbox ? { sandbox } : {}),
-          ...(policy ? { policy } : {}), cwd: this.cwd,
-        }, scope.signal)
-        media = prepared.media
-        if (prepared.status === 'unavailable') preparationNote = prepared.note
-        ensureCurrent()
-      }
-      // Commit the tool call and approval before any external media side effect.
-      await this.flush(agent)
-      ensureCurrent()
-      const result = await owned.input.media({ ...scope, callId: exec.callId, kind: args.kind, media })
-      return preparationNote && result.mode === 'file' ? { ...result, reason: preparationNote } : result
+      return sendApprovedMedia(this.ctx, { agent, cwd:this.cwd, args, callId:exec.callId,
+        scope:scopeFor(owned, exec.signal), deliver:owned.input.media, flush:()=>this.flush(agent), channelKind:this.channelKind })
     }
     let noticeTail=Promise.resolve()
-    const presentation=this.channelKind==='qqbot'?installQQPresentation(scoped,agent,this.qqOptions,{
-      current:()=>!!owner(agent),
-      notice:text=>{const owned=owner(agent);if(owned?.input.notice){const send=owned.input.notice;noticeTail=noticeTail.then(()=>send(text)).catch(()=>{})}},
-      deliver:async(path,callId,exec)=>{const result=await sendChannelMedia({path,kind:'file'},{...exec,callId:callId as ToolRunContext['callId']});if(result.delivery!=='sent')throw new Error('Delivery uncertain')},
-    }):()=>{}
     const mediaDisposers=mediaTool?[mediaTool.register(channelMediaTool(sendChannelMedia))]:[]
-    if(mediaTool&&this.channelKind==='qqbot'){
-      mediaDisposers.push(mediaTool.register(qqbotSendFileTool(sendChannelMedia)))
-      mediaDisposers.push(mediaTool.register(qqbotDescribeImageTool(async(image,prompt,exec)=>{
-        const owned=owner(exec.agent)
-        if(!owned)throw new Error('Image analysis requires an active channel turn')
-        const scope=scopeFor(owned,exec.signal),signal=AbortSignal.any([scope.signal,AbortSignal.timeout(120_000)])
-        const selection=this.qqVision??this.preferences.model??this.model??this.ctx.agentDefaultModel.currentSelection()
-        if(!selection)throw new Error('A vision model must be configured')
-        const info=await this.ctx.llm.resolveModelInfo(selection.provider,selection.model)
-        if(info.inputModalities&&!info.inputModalities.includes('image'))throw new Error('Selected model does not accept images; configure QQ visionProvider and visionModel')
-        const reader=this.ctx.agentPresets.serviceFor(agent,'fs')??scoped.get('fs')
-        const attachments=scoped.get('attachments') as Parameters<typeof describeQQImage>[0]['attachments']|undefined
-        if(!reader||!attachments)throw new Error('Agent preset must provide filesystem and image attachment services')
-        return describeQQImage({image,prompt,cwd:this.cwd,reader,signal,attachments,llm:this.ctx.llm,...selection})
-      })))
-    }
-    const unregisterMedia=()=>{for(const dispose of mediaDisposers.splice(0))dispose()}
+    const qqAgent=this.channelKind==='qqbot'?installQQAgent(this.ctx,agent,{
+      cwd:this.cwd,options:this.qqOptions,sendMedia:sendChannelMedia,
+      selection:()=>this.qqVision??this.preferences.model??this.model??this.ctx.agentDefaultModel.currentSelection(),
+      scope:(candidate,signal)=>{const owned=owner(candidate);return owned?scopeFor(owned,signal):undefined},
+      notice:text=>{const owned=owner(agent);if(owned?.input.notice){const send=owned.input.notice;noticeTail=noticeTail.then(()=>send(text)).catch(()=>{})}},
+    }):()=>{}
+    const unregisterMedia=()=>{qqAgent();for(const dispose of mediaDisposers.splice(0))dispose()}
     // Plugin unload and Agent teardown both own this scoped registration.
     const releaseMedia = mediaTool ? this.ctx.effect(() => unregisterMedia) : () => {}
     const questions = scoped.on('user-questions/request',async (request,next) => {
@@ -419,7 +331,7 @@ export class DshNativeHost implements NativeHost {
             try{stored=await this.inspect(agent.id,id)}catch{}
             input.resolve(input.suppressed ? {text:'',reason:'interrupted',suppressed:true} : stored??{text:'DSH 会话已停止；此请求的持久化状态未确认，未自动重跑。',reason:'uncertain'})
           }
-          pending.clear(); claimed(); discarded(); events(); streamed(); disposed();questions();presentation();unregisterMedia();releaseMedia();await noticeTail
+          pending.clear(); claimed(); discarded(); events(); streamed(); disposed();questions();unregisterMedia();releaseMedia();await noticeTail
         }
       },
     }

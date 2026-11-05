@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import type { BindingCommands } from './commands.js'
 import { ChannelInteractions } from './interactions.js'
 import { bounded } from './delivery.js'
 import type { LegacySessionIdentity } from './identity.js'
@@ -18,7 +19,6 @@ export interface NativeSession {
 export interface NativePreferences {model?:{provider:string;model:string}|undefined;preset?:string|undefined}
 export interface NativeHost {
   configure?(preferences:NativePreferences):void
-  command?(text:string,sessionId:string|undefined,preferences:NativePreferences):Promise<{text:string;preferences?:NativePreferences}>
 
   open(id?: string, signal?: AbortSignal): Promise<NativeSession>
   inspect(sessionId: string, inputId: string): Promise<NativeResult | undefined>
@@ -53,25 +53,34 @@ export class ChannelBridge {
   private tail = Promise.resolve()
   private readonly work = new Set<Promise<void>>()
   private readonly receiving = new Set<string>()
+  private readonly delivering = new Set<string>()
   private readonly bindingStop = new AbortController()
   private closed = false
   private generation = 0
   private connected = true
   private readonly interactions = new ChannelInteractions(() => this.connected && !this.closed)
-  constructor(private readonly host: NativeHost, private readonly store: BindingStore) { }
+  constructor(private readonly host: NativeHost, private readonly store: BindingStore, private readonly commands?: BindingCommands) { }
   setConnected(healthy: boolean): void {this.connected=healthy;if(!healthy)this.interactions.cancel()}
   async approveShared(scope: ApprovalInteraction, destination: () => Promise<ChannelMessage>, settled: Promise<ApprovalOutcome>): Promise<ApprovalOutcome> {
     if (!this.connected || this.closed || this.store.read().sessionId !== scope.sessionId) return 'unavailable'
     return this.interactions.approval(scope, await destination(), settled)
   }
-  async deliverExternal(message:ChannelMessage,sessionId:string,result:NativeResult):Promise<void>{
-    let receipt:Receipt|undefined
-    await this.serial(async()=>{
-      if(this.closed||!this.connected||this.store.read().sessionId!==sessionId||this.store.read().receipts.some(r=>r.id===message.id))return
-      receipt={id:message.id,inputId:message.id,sessionId,delivery:'pending',result}
-      await this.replace(receipt)
-    })
-    if(receipt)await this.deliver(receipt,message)
+  deliverExternal(id:string,sessionId:string,result:NativeResult,destination:(id:string)=>Promise<ChannelMessage>):Promise<void>{
+    const work=(async()=>{
+      let receipt:Receipt|undefined
+      await this.serial(async()=>{
+        if(this.closed||this.store.read().sessionId!==sessionId)return
+        const previous=this.store.read().receipts.find(r=>r.id===id)
+        if(previous){if(previous.delivery==='pending')receipt=previous;return}
+        receipt={id,inputId:id,sessionId,delivery:'pending',result}
+        await this.replace(receipt)
+      })
+      // Journal before acquiring an online transport. A pre-send failure stays pending.
+      if(receipt&&this.connected&&!this.closed)await this.deliver(receipt,await destination(id))
+    })()
+    this.work.add(work)
+    void work.finally(()=>this.work.delete(work)).catch(()=>{})
+    return work
   }
   private serial<T>(fn: () => Promise<T>): Promise<T> {
     const next = this.tail.then(fn)
@@ -87,25 +96,29 @@ export class ChannelBridge {
     return work
   }
   private async recoverPending(delivery: (id: string) => Promise<ChannelMessage>): Promise<void> {
-    {
-      for (let receipt of this.store.read().receipts) {
-        if (this.closed) return
-        if (receipt.media?.some(m => m.delivery === 'sending')) {
-          receipt = { ...receipt, media: receipt.media.map(m => m.delivery === 'sending' ? { ...m, delivery: 'uncertain' } : m) }
-          await this.serial(() => this.replace(receipt))
+    for (const {id} of this.store.read().receipts) {
+      if (this.closed || !this.connected) return
+      const pending=await this.serial(async()=>{
+        if(this.closed)return
+        let receipt=this.store.read().receipts.find(r=>r.id===id)
+        if(!receipt||this.delivering.has(id))return
+        if(receipt.media?.some(m=>m.delivery==='sending')){
+          receipt={...receipt,media:receipt.media.map(m=>m.delivery==='sending'?{...m,delivery:'uncertain'}:m)}
+          await this.replace(receipt)
         }
-        if (receipt.delivery === 'sent' || receipt.delivery === 'uncertain') continue
-        if (receipt.delivery === 'sending') {
-          await this.serial(() => this.replace({ ...receipt, delivery: 'uncertain' }))
-          continue
-        }
-        const result = receipt.result ?? await this.host.inspect(receipt.sessionId, receipt.inputId)
-          ?? { text: 'DSH 上次执行未确认结束；请检查会话后重新提交。未自动重跑。', reason: 'interrupted' }
-        if (this.closed) return
-        const ready = { ...receipt, result }
-        await this.serial(() => this.replace(ready))
-        await this.deliver(ready, await delivery(receipt.id))
-      }
+        if(receipt.delivery==='sending'){await this.replace({...receipt,delivery:'uncertain'});return}
+        return receipt.delivery==='pending'?receipt:undefined
+      })
+      if(!pending)continue
+      const result=pending.result??await this.host.inspect(pending.sessionId,pending.inputId)
+        ??{text:'DSH 上次执行未确认结束；请检查会话后重新提交。未自动重跑。',reason:'interrupted'}
+      const ready=await this.serial(async()=>{
+        const receipt=this.store.read().receipts.find(r=>r.id===id)
+        if(this.closed||!receipt||receipt.delivery!=='pending')return
+        if(receipt.result)return receipt
+        const ready={...receipt,result};await this.replace(ready);return ready
+      })
+      if(ready&&this.connected&&!this.closed)await this.deliver(ready,await delivery(id))
     }
   }
   /** Resolve after durable admission, keeping the channel free for /cancel. */
@@ -132,19 +145,22 @@ export class ChannelBridge {
           if(message.acknowledgeDecision)await bounded(message.acknowledgeDecision(accepted),2500,this.bindingStop.signal).catch(()=>{})
           reply=receipt;return
         }
-        if (message.commandChannel === 'qqbot' && /^\/(new|reset|clear|compact|model|preset|bot-status|bot-help|bot-settings)(?:\s|$)/.test(text)) {
-          let result: string
-          if (['/new','/reset','/clear'].includes(text)) {
-            this.generation++;this.interactions.cancel();this.session?.cancel();await this.session?.close();this.session=undefined
-            const {sessionId:_,...state}=this.store.read();await this.store.write(state)
-            result='已开启新会话。历史会话保留。'
-          } else if (text==='/bot-help') result='/new (/reset /clear) 新会话；/compact 压缩；/model 可点击模型列表；/preset [id]（新会话生效）；/stop；/bot-ping；/bot-version；/bot-me；/bot-status；/bot-settings 设置入口。审批与问答沿用 DSH 的单次请求凭据。'
-          else {
-            if(text==='/compact'&&this.store.read().sessionId&&(!this.session||this.session.isLive?.()===false)){this.host.configure?.(this.store.read().preferences??{});this.session=await this.host.open(this.store.read().sessionId,this.bindingStop.signal)}
-            const outcome=await this.host.command?.(text,this.store.read().sessionId,this.store.read().preferences??{})
-            result=outcome?.text??'当前宿主未提供此命令能力。'
-            if(outcome?.preferences){await this.store.write({...this.store.read(),preferences:outcome.preferences});this.host.configure?.(outcome.preferences)}
-          }
+        if (this.commands?.matches(text)) {
+          const outcome = await this.commands.run(text, {
+            sessionId:this.store.read().sessionId, preferences:this.store.read().preferences??{},
+            reset:async()=>{
+              this.generation++;this.interactions.cancel();this.session?.cancel();await this.session?.close();this.session=undefined
+              const {sessionId:_,...state}=this.store.read();await this.store.write(state)
+            },
+            resume:async()=>{
+              if(!this.session||this.session.isLive?.()===false){
+                this.host.configure?.(this.store.read().preferences??{})
+                this.session=await this.host.open(this.store.read().sessionId,this.bindingStop.signal)
+              }
+            },
+          })
+          const result=outcome.text
+          if(outcome.preferences){await this.store.write({...this.store.read(),preferences:outcome.preferences});this.host.configure?.(outcome.preferences)}
           reply={id:message.id,inputId:randomUUID(),sessionId:this.store.read().sessionId??'',delivery:'pending',result:{text:result,reason:'command'}}
           await this.replace(reply);return
         }
@@ -254,22 +270,25 @@ export class ChannelBridge {
     await this.store.write({ ...state, receipts: prune([...state.receipts.filter(r => r.id !== receipt.id), merged]) })
   }
   private async deliver(receipt: Receipt, message: ChannelMessage): Promise<void> {
-    if (!receipt.result || this.closed) return
-    const claimed = await this.serial(async () => {
-      const current = this.store.read().receipts.find(r => r.id === receipt.id)
-      if (current?.delivery !== 'pending') return false
-      if (receipt.result?.suppressed) {
-        await this.replace({ ...receipt, delivery: 'sent' }); return false
-      }
-      await this.replace({ ...receipt, delivery: 'sending' })
-      return true
-    })
-    if (!claimed) return
-    let delivery: Receipt['delivery'] = 'sent'
-    try { await bounded(message.send(receipt.result.text || `DSH 已结束：${receipt.result.reason}`), 30000, this.bindingStop.signal) }
-    catch { delivery = 'uncertain' }
-    // A crash or failed commit here leaves 'sending'; recovery quarantines it.
-    await this.serial(() => this.replace({ ...receipt, delivery }))
+    if (!receipt.result || this.closed || !this.connected || this.delivering.has(receipt.id)) return
+    this.delivering.add(receipt.id)
+    try {
+      const claimed = await this.serial(async () => {
+        const current = this.store.read().receipts.find(r => r.id === receipt.id)
+        if (this.closed || !this.connected || current?.delivery !== 'pending') return false
+        if (receipt.result?.suppressed) {
+          await this.replace({ ...receipt, delivery: 'sent' }); return false
+        }
+        await this.replace({ ...receipt, delivery: 'sending' })
+        return true
+      })
+      if (!claimed) return
+      let delivery: Receipt['delivery'] = 'sent'
+      try { await bounded(message.send(receipt.result.text || `DSH 已结束：${receipt.result.reason}`), 30000, this.bindingStop.signal) }
+      catch { delivery = 'uncertain' }
+      // A crash or failed commit here leaves 'sending'; recovery quarantines it.
+      await this.serial(() => this.replace({ ...receipt, delivery }))
+    } finally { this.delivering.delete(receipt.id) }
   }
   async drain(): Promise<void> { await this.tail; await Promise.all([...this.work]); await this.tail }
   async close(): Promise<void> {

@@ -106,7 +106,7 @@ export class QQBotAdapter implements ChannelAdapter {
   private message(id:string,text:string,target:ReplyTarget,proactive=false):ChannelMessage{
     const bot=this.bot!,signal=this.controller!.signal,c=this.credential
     const resolved=(events=true)=>{signal.throwIfAborted();return resolveReplyTarget({...target,...(proactive?{forceProactive:true}:{})},this.limiter,events)}
-    let stream:StreamSession|undefined,streamTail=Promise.resolve(),streamError:unknown
+    let stream:StreamSession|undefined,streamTail=Promise.resolve(),streamError:unknown,staticOnly=false
     const send=async(value:string,keyboard?:InlineKeyboard)=>{
       const parts=chunkMarkdownText(value,4500)
       for(let i=0;i<parts.length;i++)await sendResolvedMarkdown(bot,resolved(),parts[i]!,i===parts.length-1&&keyboard?{keyboard}:undefined)
@@ -140,14 +140,21 @@ export class QQBotAdapter implements ChannelAdapter {
         streamTail=streamTail.then(async()=>{
           signal.throwIfAborted()
           if(streamError)throw streamError
-          if(!stream){const r=resolved(false);stream=bot.openStream({target:{scope:r.scope,targetId:r.targetId,...(r.msgId?{msgId:r.msgId}:{})}});this.streams.add(stream)}
+          if(staticOnly)return
+          if(!stream){
+            const r=resolved(false)
+            // SDK streams require a passive message ID. No frame has been sent,
+            // so an exhausted/expired reply window can safely use one static send.
+            if(!r.msgId){staticOnly=true;return}
+            stream=bot.openStream({target:{scope:r.scope,targetId:r.targetId,msgId:r.msgId}});this.streams.add(stream)
+          }
           await stream.update(fullText)
         }).catch(error=>{streamError=error})
         return streamTail
       }
       message.completeText=async fullText=>{
         await message.progressText!(fullText);await streamTail
-        try{if(streamError)throw streamError;await stream!.complete()}
+        try{if(streamError)throw streamError;if(staticOnly)await send(fullText);else await stream!.complete()}
         finally{if(stream){stream.cancel();this.streams.delete(stream)}}
       }
     }

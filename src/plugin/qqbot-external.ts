@@ -17,8 +17,7 @@ export function registerQQExternalTurns(ctx:Context,input:{state:()=>BindingStat
     if(!text)return
     void (async()=>{
       if(!await ctx.sessions.flush(session)||input.signal.aborted||session.id!==input.state().sessionId)return
-      const message=await input.adapter.scheduledMessage!(`qq-external:${session.id}:${event.data.turn}`,'')
-      await input.bridge.deliverExternal(message,session.id,{text,reason:'completed'})
+      await input.bridge.deliverExternal(`qq-external:${session.id}:${event.data.turn}`,session.id,{text,reason:'completed'},id=>input.adapter.scheduledMessage!(id,''))
     })().catch(()=>{/* Native transcript and delivery receipts remain authoritative. */})
   },{global:true})
 }

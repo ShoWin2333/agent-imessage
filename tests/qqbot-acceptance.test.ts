@@ -5,14 +5,14 @@ import {QQBotSetup} from '../src/plugin/qqbot-setup.js'
 import type {QrConnectCallbacks} from '@tencent-connect/qqbot-connector'
 import {ChannelBridge,type BindingState,type NativeSession} from '../src/plugin/bridge.js'
 import type {ChannelMessage} from '../src/channels/types.js'
-function harness(){
+function harness(ownerUserId='owner_openid'){
   const events=new Map<string,Function>(),middlewares:Middleware[]=[],receive=vi.fn(async()=>{}),changed=vi.fn()
   let finish!:()=>void
   const stream={update:vi.fn(async()=>{}),complete:vi.fn(async()=>{}),cancel:vi.fn()}
   const bot={appId:'12345678',accountId:'12345678',use:vi.fn((m:Middleware)=>middlewares.push(m)),on:vi.fn((e:string,h:Function)=>events.set(e,h)),start:vi.fn(()=>new Promise<void>(r=>{finish=r})),stop:vi.fn(()=>finish()),sendMarkdown:vi.fn(async()=>({id:'outbound'})),send:vi.fn(async()=>({id:'outbound'})),sendImage:vi.fn(async()=>({})),sendVideo:vi.fn(async()=>({})),sendVoice:vi.fn(async()=>({})),sendFile:vi.fn(async()=>({})),sendTyping:vi.fn(async()=>({})),acknowledgeInteraction:vi.fn(async()=>{}),openStream:vi.fn(()=>stream)}
-  const adapter=new QQBotAdapter({appId:'12345678',appSecret:'synthetic-qq-secret',ownerUserId:'owner_openid',cwd:'/tmp'},receive,changed,()=>bot as unknown as QQBot)
+  const adapter=new QQBotAdapter({appId:'12345678',appSecret:'synthetic-qq-secret',ownerUserId,cwd:'/tmp'},receive,changed,()=>bot as unknown as QQBot)
   const ingest=async(content:string,extra:Record<string,unknown>={})=>{
-    const message={kind:'c2c',rawEventType:'C2C_MESSAGE_CREATE',senderId:'owner_openid',messageId:crypto.randomUUID(),content,timestamp:new Date().toISOString(),replyTarget:{scope:'c2c',targetId:'owner_openid',msgId:crypto.randomUUID()},...extra} as QQBotInboundMessage
+    const message={kind:'c2c',rawEventType:'C2C_MESSAGE_CREATE',senderId:ownerUserId,messageId:crypto.randomUUID(),content,timestamp:new Date().toISOString(),replyTarget:{scope:'c2c',targetId:ownerUserId,msgId:crypto.randomUUID()},...extra} as QQBotInboundMessage
     const controller=new AbortController()
     const ctx:any={bot,message,replyTarget:message.replyTarget,state:{},receivedAt:Date.now(),signal:controller.signal,stopped:false,aborted:false,log:{debug:vi.fn(),info:vi.fn(),warn:vi.fn(),error:vi.fn()},stop(){this.stopped=true},abort(){this.aborted=true;this.stopped=true;controller.abort()}}
     if(await runMiddlewareChain(middlewares,ctx))await events.get('message')!(ctx)
@@ -98,12 +98,12 @@ it('records stream delivery before first external frame and quarantines a broken
   expect(state.receipts[0]?.delivery).toBe('uncertain');expect(message.send).not.toHaveBeenCalled();expect(message.completeText).not.toHaveBeenCalled();await bridge.close()
 })
 it('uses the published DSH 0.2.2 model.select API without changing approval policy',async()=>{
-  const {DshNativeHost}=await import('../src/plugin/native.js')
+  const {QQCommands}=await import('../src/plugin/qqbot-commands.js')
   const {Session,SessionId}=await import('@deepseek-ai/dsh-session')
   const session=Session.create(SessionId('channels-binding-synthetic')),select=vi.fn(),policy=vi.fn()
   const agent={id:session.id,session,model:{current:()=>({provider:'synthetic',model:'first'}),select}}
   const ctx={agents:{get:()=>agent},llm:{listModels:async()=>[{id:'first'},{id:'second'}]},sessions:{flush:async()=>true},permissionPresets:{set:policy}} as any
-  const host=new DshNativeHost(ctx,'/tmp','unchanged-preset','binding')
+  const host=new QQCommands(ctx,{binding:'binding',options:{}})
   expect(await host.command('/model synthetic/second',session.id,{})).toMatchObject({preferences:{model:{provider:'synthetic',model:'second'}}})
   expect(select).toHaveBeenCalledWith({provider:'synthetic',model:'second'});expect(policy).not.toHaveBeenCalled()
   expect(await host.command('/model synthetic/missing',session.id,{})).toMatchObject({text:'模型不在宿主目录中。'})
@@ -180,4 +180,33 @@ it.each([false,true])('acknowledges only a live consumed approval; expired=%s ne
     await f.events.get('interaction')!({},{...event,id:'repeat-click'})
     expect(f.bot.acknowledgeInteraction).toHaveBeenLastCalledWith('repeat-click',3)
   }finally{bridge.setConnected(false);await f.adapter.stop();await bridge.close();vi.useRealTimers()}
+})
+
+it.each(['exhausted','expired'])('delivers the final answer statically before any stream frame when passive IDs are %s',async mode=>{
+  const f=harness(`stream_${mode}_${crypto.randomUUID()}`)
+  let clock:ReturnType<typeof vi.spyOn>|undefined
+  try{
+    await f.adapter.start();f.events.get('ready')!();await f.ingest('task')
+    const message=f.receive.mock.calls[0]![0] as unknown as ChannelMessage
+    if(mode==='exhausted')for(let i=0;i<4;i++)await message.send(`tool notice ${i}`)
+    else {const later=Date.now()+31*60*1000;clock=vi.spyOn(Date,'now').mockReturnValue(later)}
+    const session:NativeSession={id:'channels-stream-fallback',cancel(){},close:async()=>{},submit:(_id,_text,_progress,_interactions,_media,stream)=>{
+      stream!('partial');stream!('final answer')
+      return {admitted:Promise.resolve(),result:Promise.resolve({text:'final answer',reason:'completed'})}
+    }}
+    let state:BindingState={receipts:[]}
+    const bridge=new ChannelBridge({open:async()=>session,inspect:async()=>undefined},{read:()=>state,write:async value=>{state=value}})
+    await bridge.receive(message);await bridge.drain()
+    expect(f.bot.openStream).not.toHaveBeenCalled();expect(f.bot.sendMarkdown).toHaveBeenLastCalledWith({scope:'c2c',targetId:expect.any(String)},'final answer',undefined)
+    expect(f.bot.sendMarkdown.mock.calls.filter(c=>c[1]==='final answer')).toHaveLength(1)
+    expect(state.receipts[0]?.delivery).toBe('sent');await bridge.close()
+  }finally{clock?.mockRestore();await f.adapter.stop()}
+})
+it('never falls back to static delivery after a stream update becomes uncertain',async()=>{
+  const f=harness(`stream_uncertain_${crypto.randomUUID()}`)
+  await f.adapter.start();f.events.get('ready')!();await f.ingest('task')
+  const message=f.receive.mock.calls[0]![0] as unknown as ChannelMessage
+  f.stream.update.mockRejectedValueOnce(new Error('ambiguous send'))
+  await message.progressText!('partial');await expect(message.completeText!('final')).rejects.toThrow('ambiguous send')
+  expect(f.bot.openStream).toHaveBeenCalledOnce();expect(f.bot.sendMarkdown).not.toHaveBeenCalled();await f.adapter.stop()
 })

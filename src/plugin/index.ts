@@ -21,6 +21,7 @@ import { pluginConfigSchema, type Binding } from './config.js'
 import {registerQQExternalTurns} from './qqbot-external.js'
 import {QQBotSetupController} from './qqbot-setup.js'
 import {registerQQPresented} from './qqbot-presented.js'
+import {QQCommands} from './qqbot-commands.js'
 import type {AgentGroup} from '../shared/agents.js'
 
 export const name = 'dsh-channels'
@@ -98,7 +99,7 @@ export async function apply(ctx: Context, config: Config | { bindings: Volatile<
     const lifetime = ctx.root.extend({ [Context.isolate]: ctx[Context.isolate] })
     const bridge = new ChannelBridge(new DshNativeHost(ctx, binding.cwd, binding.permissionPreset, scopeKey, binding.model, table.get(key)?.legacyIdentity, binding.channel.kind, lifetime, binding.channel.kind==='qqbot'&&binding.channel.visionProvider&&binding.channel.visionModel?{provider:binding.channel.visionProvider,model:binding.channel.visionModel}:undefined,binding.channel.kind==='qqbot'?binding.channel:{}), {
       read: () => table.get(key)!, write: value => table.put(key, value),
-    })
+    }, binding.channel.kind==='qqbot'?new QQCommands(ctx,{binding:scopeKey,legacyIdentity:table.get(key)?.legacyIdentity,model:binding.model,options:binding.channel,lifetime}):undefined)
     bridge.setConnected(false)
     let unregisterExternal:(()=>void)|undefined
     let unregisterApprovals: (() => void) | undefined
@@ -137,6 +138,7 @@ export async function apply(ctx: Context, config: Config | { bindings: Volatile<
       const recover = () => recovery ??= bridge.recover(id => adapter!.scheduledMessage!(id, '')).catch(error => { recovery = undefined; throw new BindingActivationError('activation-failed', 'Channel recovery incomplete', { cause: error }) })
       const receive = async (message: Parameters<ChannelBridge['receive']>[0]) => { ensureActive(); if (wasLegacyMessage(legacySeen, message.id)) return; await recover(); ensureActive(); await bridge.receive(message) }
       const onState = (state: RuntimeView) => {
+        if(state.phase!=='listening')recovery=undefined
         bridge.setConnected(!signal.aborted && state.phase === 'listening')
         stateChanged(state.phase, state.phase === 'retrying' ? state.retryReason : undefined)
         if (state.phase === 'listening' && !signal.aborted) void recover().catch(() => {})

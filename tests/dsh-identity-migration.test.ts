@@ -14,7 +14,7 @@ import { ChannelProjectGroups } from '../src/plugin/project-groups.js'
 import type { BindingState } from '../src/plugin/bridge.js'
 import type { ChannelMessage } from '../src/channels/types.js'
 
-const transport = vi.hoisted(() => ({ receive: undefined as undefined | ((message: ChannelMessage) => Promise<void>), delivered: [] as ChannelMessage[] }))
+const transport = vi.hoisted(() => ({ receive: undefined as undefined | ((message: ChannelMessage) => Promise<void>), delivered: [] as ChannelMessage[], change: undefined as undefined|((state:{phase:string})=>void) }))
 const message = (id: string): ChannelMessage => ({ id, text: 'synthetic input', send: vi.fn(async () => {}), responding: fn => fn(), sendFile: vi.fn(), sendVoice: vi.fn() })
 vi.mock('../src/channels/telegram.js', () => ({ TelegramAdapter: class {
   constructor(_config: unknown, _store: unknown, receive: typeof transport.receive, private onState: (state: { phase: string }) => void) { transport.receive = receive }
@@ -23,13 +23,13 @@ vi.mock('../src/channels/telegram.js', () => ({ TelegramAdapter: class {
   async scheduledMessage(id: string) { const result = message(id); transport.delivered.push(result); return result }
 } }))
 vi.mock('../src/channels/qqbot.js',()=>({QQBotAdapter:class{
-  constructor(_config:unknown,receive:typeof transport.receive,private onState:(state:{phase:string})=>void){transport.receive=receive}
+  constructor(_config:unknown,receive:typeof transport.receive,private onState:(state:{phase:string})=>void){transport.receive=receive;transport.change=onState}
   async start(){this.onState({phase:'listening'})}
   async stop(){}
-  async scheduledMessage(id:string){return message(id)}
+  async scheduledMessage(id:string){const result=message(id);transport.delivered.push(result);return result}
 }}))
 const cleanups: Array<() => Promise<void>> = []
-afterEach(async () => { for (const close of cleanups.splice(0)) await close(); transport.receive = undefined; transport.delivered = [] })
+afterEach(async () => { for (const close of cleanups.splice(0)) await close(); transport.receive = undefined; transport.delivered = [];transport.change=undefined })
 
 async function fixture(kind:'telegram'|'qqbot'='telegram') {
   const cwd = await realpath(process.cwd())
@@ -69,7 +69,7 @@ async function fixture(kind:'telegram'|'qqbot'='telegram') {
   adapters.set(oldKey, { seen: ['original-message'], channelCursor: '42' })
   vi.mocked(ctx.agents.create).mockClear()
   const upgrade = async (credential = binding.credentialRef,options={}) => { await apply(ctx, { bindings: [{ ...binding, credentialRef: credential,channel:{...binding.channel,...options} }] }); cleanups.push(stop) }
-  return { ctx, binding, key, oldKey, rows, adapters, sessions, original, follows, upgrade }
+  return { ctx, binding, key, oldKey, rows, adapters, sessions, original, follows, upgrade, emit }
 }
 
 it('continues a pre-upgrade session after migration and another credential rotation without changing its ID', async () => {
@@ -188,4 +188,22 @@ it('continues the current QQ account across new defaults and UI changes without 
   expect(f.rows.get(f.oldKey)).toEqual(older);expect(f.rows.get(currentKey)).toEqual(recent)
   expect(bindingKey({...f.binding,permissionPreset:'other'})).not.toBe(f.key)
   expect(bindingKey({...f.binding,channel:{...f.binding.channel,ownerUserId:'other_owner'}} as any)).not.toBe(f.key)
+})
+
+it('re-runs binding recovery after QQ reconnect instead of retaining the completed startup recovery',async()=>{
+  const f=await fixture('qqbot');f.rows.set(f.key,{sessionId:f.original,scopeKey:f.oldKey,receipts:[]});await f.upgrade()
+  const state=f.rows.get(f.key)!,session=f.sessions.get(state.sessionId!)!
+  // Startup recovery has already completed; a later offline completion must still be picked up.
+  await Promise.resolve();transport.change!({phase:'retrying'})
+  session.append('turn/start',{turn:7})
+  session.append('user/message',{id:'desktop-input',role:'user',content:[{type:'text',text:'desktop task'}],source:{kind:'user'}} as never,{surfaceOp:'append'})
+  session.append('assistant/message',{turn:7,message:{content:[{type:'text',text:'offline completion'}]}} as never,{surfaceOp:'append'})
+  session.append('turn/end',{turn:7,reason:{kind:'completed'}})
+  f.emit('session/event',session,{type:'turn/end',data:{turn:7,reason:{kind:'completed'}}})
+  await vi.waitFor(()=>expect(f.rows.get(f.key)?.receipts.at(-1)).toMatchObject({delivery:'pending',result:{text:'offline completion'}}))
+  expect(transport.delivered).toHaveLength(0)
+  transport.change!({phase:'listening'})
+  await vi.waitFor(()=>expect(transport.delivered[0]?.send).toHaveBeenCalledWith('offline completion'))
+  expect(f.rows.get(f.key)?.receipts.at(-1)?.delivery).toBe('sent')
+  expect(f.follows).not.toHaveBeenCalled();expect(f.ctx.agents.create).not.toHaveBeenCalled()
 })
