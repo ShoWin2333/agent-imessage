@@ -84,7 +84,7 @@ it('requires an explicit bot mention, exact server and exact channel in server m
   await expect.poll(() => onMessage.mock.calls.length).toBe(1)
   expect(onMessage.mock.calls[0]![0].text).toBe('/status')
 })
-it('exposes the owner DM for shared approvals without forwarding them to a server', async () => {
+it('uses the verified binding destination for shared DM and server approvals', async () => {
   const dm = await adapter()
   const prompt = await dm.value.approvalMessage!()
   await prompt.send('Private approval')
@@ -92,29 +92,29 @@ it('exposes the owner DM for shared approvals without forwarding them to a serve
     body: expect.objectContaining({ content: 'Private approval' }),
   }))
   const server = await adapter(guildScope)
-  expect(server.value.approvalMessage).toBeUndefined()
-  expect(server.client.rest.post).not.toHaveBeenCalled()
+  await (await server.value.approvalMessage!()).send('Bound server approval')
+  expect(server.client.rest.post).toHaveBeenCalledWith(Routes.channelMessages(guildScope.channelId!),expect.objectContaining({body:expect.objectContaining({content:'Bound server approval'})}))
 })
 
-it('renders Discord approval buttons, admits only the bound owner click, and clears the card', async () => {
-  const {value,client,onMessage} = await adapter()
+it.each([scope,guildScope])('renders Discord approval buttons only for the bound owner and destination %#', async binding => {
+  const {value,client,onMessage} = await adapter(binding)
   const prompt = await value.approvalMessage!()
   const token = 'a-12345678-abcd-4123-9123-123456789abc'
   const cardId = '678901234567890123'
   client.rest.post.mockResolvedValueOnce({id:cardId})
   const settle = await prompt.sendApproval!('Approve this one action',token,new AbortController().signal)
-  expect(client.rest.post).toHaveBeenCalledWith(Routes.channelMessages('567890123456789012'),expect.objectContaining({
+  expect(client.rest.post).toHaveBeenCalledWith(Routes.channelMessages(binding.channelId ?? '567890123456789012'),expect.objectContaining({
     body:expect.objectContaining({content:'Approve this one action',components:[{type:1,components:[
       {type:2,style:3,label:'批准一次',custom_id:`dsh:approve:${token}`},
       {type:2,style:4,label:'拒绝',custom_id:`dsh:deny:${token}`},
     ]}]}),
   }))
   const deferUpdate = vi.fn(async()=>{})
-  const click = {id:'789012345678901234',guildId:null,channelId:'567890123456789012',
+  const click = {id:'789012345678901234',guildId:binding.guildId ?? null,channelId:binding.channelId ?? '567890123456789012',
     user:{id:scope.ownerUserId,bot:false},message:{author:{id:scope.botId,bot:true}},
     customId:`dsh:deny:${token}`,isButton:()=>true,deferUpdate}
   for (const invalid of [
-    {user:{id:'other',bot:false}}, {channelId:'other'}, {guildId:guildScope.guildId},
+    {user:{id:'other',bot:false}}, {channelId:'other'}, {guildId:'other'},
     {message:{author:{id:'other',bot:true}}}, {customId:'unrelated'}, {isButton:()=>false},
   ]) client.emit(Events.InteractionCreate,{...click,...invalid})
   await Promise.resolve()
@@ -129,6 +129,19 @@ it('renders Discord approval buttons, admits only the bound owner click, and cle
   expect(client.rest.patch).toHaveBeenCalledWith(Routes.channelMessage(click.channelId,cardId),expect.objectContaining({
     body:expect.objectContaining({content:'Approve this one action\n\n已批准一次',components:[]}),
   }))
+})
+
+it('preserves all long approval context and always displays the terminal status', async () => {
+  const {value,client}=await adapter(guildScope)
+  client.rest.post.mockResolvedValue({id:'678901234567890123'})
+  const message=await value.approvalMessage(),text='x'.repeat(2000)
+  const close=await message.sendApproval!(text,'a-12345678-abcd-4123-9123-123456789abc',new AbortController().signal)
+  expect(client.rest.post.mock.calls.map(([,data])=>(data.body as any).content).join('')).toBe(text)
+  await close?.('expired')
+  const body=client.rest.patch.mock.calls[0]![1].body as any
+  expect(body.content).toContain('渠道审批已过期')
+  expect(body.content.length).toBeLessThanOrEqual(2000)
+  expect(body.components).toEqual([])
 })
 
 it('chunks output, disables all mentions, sends files, and fences stale delivery after stop', async () => {

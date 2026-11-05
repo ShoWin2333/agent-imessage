@@ -78,8 +78,7 @@ export async function apply(ctx: Context, config: Config | { bindings: Volatile<
     if (!table.get(key)) await wait(table.put(key, { receipts: [] }))
     ensureActive()
     let adapter: ChannelAdapter | undefined
-    let approvalDestination: ChannelAdapter['approvalMessage']
-    const bridge = new ChannelBridge(new DshNativeHost(ctx, binding.cwd, binding.permissionPreset, key, binding.model, table.get(key)?.legacyIdentity, binding.channel.kind, () => approvalDestination !== undefined), {
+    const bridge = new ChannelBridge(new DshNativeHost(ctx, binding.cwd, binding.permissionPreset, key, binding.model, table.get(key)?.legacyIdentity, binding.channel.kind), {
       read: () => table.get(key)!, write: value => table.put(key, value),
     })
     bridge.setConnected(false)
@@ -142,7 +141,7 @@ export async function apply(ctx: Context, config: Config | { bindings: Volatile<
         ensureActive()
         adapter = new WeixinAdapter({ accountId: c.accountId, token: secret.value, ...binding.weixin! }, store, receive, onState)
       }
-      const destination = approvalDestination = adapter.approvalMessage?.bind(adapter)
+      const destination = adapter.approvalMessage?.bind(adapter)
       if (destination) {
         unregisterApprovals = registerSharedApprovals(ctx, ({ agent }) => {
           const state = table.get(key)

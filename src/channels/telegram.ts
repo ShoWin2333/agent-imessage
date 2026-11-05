@@ -3,12 +3,13 @@ import type { RuntimeView, TelegramRetryReason } from '../types.js'
 import type { ChannelAdapter, ChannelMessage } from './types.js'
 import { TelegramApi, TelegramError, supportsTelegramVoice } from './telegram-api.js'
 import { pause, record } from './weixin-api.js'
+import { approvalStatus, APPROVAL_STATUS_RESERVE } from './approval.js'
 
-export function splitTelegramText(text: string): string[] {
+export function splitTelegramText(text: string, limit = 4096): string[] {
   const result: string[] = []; let part = ''
   for (const {segment} of new Intl.Segmenter(undefined,{granularity:'grapheme'}).segment(text)) {
-    if (segment.length > 4096) throw new Error('Oversized text segment')
-    if (part.length + segment.length > 4096) { result.push(part); part = '' }
+    if (segment.length > limit) throw new Error('Oversized text segment')
+    if (part.length + segment.length > limit) { result.push(part); part = '' }
     part += segment
   }
   if (part) result.push(part)
@@ -60,7 +61,7 @@ export class TelegramAdapter implements ChannelAdapter {
       },
       sendApproval: async (value, approvalToken, cancellation) => {
         const combined = AbortSignal.any([signal, cancellation])
-        const parts = splitTelegramText(value)
+        const parts = splitTelegramText(value, 4096 - APPROVAL_STATUS_RESERVE)
         const last = parts.pop()
         if (!last) throw new Error('Telegram approval prompt is empty')
         for (const part of parts) {
@@ -77,9 +78,9 @@ export class TelegramAdapter implements ChannelAdapter {
         const messageId = sent.message_id
         if (!Number.isSafeInteger(messageId)) return
         return async outcome => {
-          const status = outcome === 'allowed-once' ? '已批准一次' : outcome === 'rejected' ? '已拒绝' : '审批已结束'
+          const status = approvalStatus(outcome)
           await this.api.request(token, 'editMessageText', {
-            chat_id: ownerUserId, message_id: messageId, text: last.length + status.length + 2 <= 4096 ? last + '\n\n' + status : last,
+            chat_id: ownerUserId, message_id: messageId, text: `${last}\n\n${status}`,
             reply_markup: { inline_keyboard: [] },
           }, AbortSignal.any([signal, AbortSignal.timeout(3000)]))
         }
@@ -119,17 +120,15 @@ export class TelegramAdapter implements ChannelAdapter {
       || typeof query.id !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(query.id)) return
 
     const match = typeof query.data === 'string' ? approvalCallback.exec(query.data) : null
-    try {
-      if (match) {
-        const message = this.message(`telegram-callback:${query.id}`, `/${match[1]} ${match[2]}`, signal)
-        await this.admit(message, signal)
-      }
-    } finally {
-      // Acknowledgement only stops the Telegram spinner. The durable command
-      // path confirms the decision separately, and callback replay can't grant twice.
-      await this.api.request(token, 'answerCallbackQuery', { callback_query_id: query.id },
-        AbortSignal.any([signal, AbortSignal.timeout(3000)])).catch(() => {})
+    // Acknowledge transport receipt immediately. This grants nothing: the bridge
+    // still persists admission before recording the actual approval decision.
+    const acknowledgement = this.api.request(token, 'answerCallbackQuery', { callback_query_id: query.id },
+      AbortSignal.any([signal, AbortSignal.timeout(3000)])).catch(() => {})
+    if (match) {
+      const message = this.message(`telegram-callback:${query.id}`, `/${match[1]} ${match[2]}`, signal)
+      await this.admit(message, signal)
     }
+    await acknowledgement
   }
   private async run(signal: AbortSignal) {
     let verified = false, failures = 0

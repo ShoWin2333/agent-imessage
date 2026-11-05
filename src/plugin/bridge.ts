@@ -138,7 +138,6 @@ export class ChannelBridge {
         const operation = generation !== this.generation || this.closed
           ? { admitted: Promise.resolve(), result: Promise.resolve({ text: '已取消。', reason: 'interrupted' }) }
           : session.submit(receipt.inputId, message.text, () => {}, {
-            approval:request => this.interactions.approval({...request,current:()=>request.current() && generation===this.generation && this.session===session && !this.closed},message),
             question:request => this.interactions.question({...request,current:()=>request.current() && generation===this.generation && this.session===session && !this.closed},message),
           }, request => this.sendMedia(receipt.id, session, generation, message, request))
         const job = this.execute(operation.result, receipt, message)

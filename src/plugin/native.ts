@@ -67,7 +67,7 @@ function reasonText(reason: unknown): string {
 }
 
 export class DshNativeHost implements NativeHost {
-  constructor(private readonly ctx: Context, private readonly cwd: string, private readonly permissionPreset: string, private readonly binding: string, private readonly model?: {provider:string;model:string;reasoningEffort?:string | undefined}, private readonly legacyIdentity?: LegacySessionIdentity, private readonly channelKind?: string, private readonly sharedApprovals: () => boolean = () => false) { }
+  constructor(private readonly ctx: Context, private readonly cwd: string, private readonly permissionPreset: string, private readonly binding: string, private readonly model?: {provider:string;model:string;reasoningEffort?:string | undefined}, private readonly legacyIdentity?: LegacySessionIdentity, private readonly channelKind?: string) { }
   async inspect(sessionId: string, inputId: string): Promise<NativeResult | undefined> {
     if (!sessionId) return undefined
     const snapshot = await this.ctx.sessionPersistence.stat(SessionId(sessionId))
@@ -180,7 +180,7 @@ export class DshNativeHost implements NativeHost {
       live = false
       for (const id of pending.keys()) finish(id, { text: 'DSH 会话已停止。', reason: 'interrupted' })
     })
-    const owner = (requestAgent: unknown) => {
+    const owner = (requestAgent: unknown, includeCancelled = false) => {
       if (requestAgent !== agent || this.ctx.agents.get(agent.id) !== agent) return undefined
       let turn: number | undefined
       for (const event of agent.session.snapshotEvents()) {
@@ -188,7 +188,7 @@ export class DshNativeHost implements NativeHost {
         if (event.type === 'turn/end') turn = undefined
       }
       if (turn === undefined) return undefined
-      for (const [id,input] of pending) if (input.turn === turn && !input.suppressed && leaders.get(turn) === id && !input.controller.signal.aborted) return {id,input,turn}
+      for (const [id,input] of pending) if (input.turn === turn && !input.suppressed && leaders.get(turn) === id && (includeCancelled || !input.controller.signal.aborted)) return {id,input,turn}
       return undefined
     }
     const scopeFor = (owned: NonNullable<ReturnType<typeof owner>>, signal?: AbortSignal): InteractionScope => ({
@@ -241,25 +241,6 @@ export class DshNativeHost implements NativeHost {
     })) : () => {}
     // Plugin unload and Agent teardown both own this scoped registration.
     const releaseMedia = mediaTool ? this.ctx.effect(() => unregisterMedia) : () => {}
-    // Shared approval channels use the binding-wide answerer, including desktop turns.
-    const approval = scoped.on('approval/request', async (request, next) => {
-      if (this.sharedApprovals()) return next()
-      const owned = owner(request.agent)
-      if (!owned?.input.interactions) return next()
-      // Approval is an optional host service in this plugin's context.
-      const service = this.ctx.get('approval')
-      if (!service) return 'unavailable'
-      const base = scopeFor(owned, request.signal)
-      const scope = {
-        ...base,
-        current: () => base.current() && (service.overrideOf(agent.session) ?? service.config.policy ?? 'ask') === 'ask',
-      }
-      if (!scope.current() || scope.signal.aborted) return 'cancelled'
-      return owned.input.interactions.approval({
-        ...scope, toolName: request.toolName, reason: request.reason,
-        displayReason: request.displayReason, callId: request.callId,
-      })
-    }, { prepend: true })
     const questions = scoped.on('user-questions/request',async (request,next) => {
       const owned=owner(request.agent)
       if (!owned?.input.interactions) return next()
@@ -275,11 +256,8 @@ export class DshNativeHost implements NativeHost {
       if (!isLive()) return
       const cancelTurn = !!owner(agent)
       for (const input of pending.values()) input.controller.abort()
-      if (handle) {
-        agent.cancel({ kind: 'user' })
-        return
-      }
-      // Remove only channel inputs and leave the desktop's queue intact.
+      // Input ownership is independent of who created the Agent handle. Desktop
+      // work can share either a channel-created or a desktop-created session.
       for (const id of pending.keys()) {
         if (agent.inbox.remove(MessageId(id)) && id !== failedId) finish(id, { text: '已取消。', reason: 'interrupted' })
       }
@@ -316,13 +294,18 @@ export class DshNativeHost implements NativeHost {
       },
       cancel: () => cancel(),
       close: async () => {
-        if (!handle) cancel()
+        // A lifecycle handle is not exclusive input ownership. If desktop work
+        // still uses this Agent, leave the handle with its native host context.
+        const foreignQueued = [...(agent.inbox.nextTurn ?? []), ...(agent.inbox.nextStep ?? [])]
+          .some(message => !pending.has(message.id))
+        const retainForDesktop = foreignQueued || agent.status === 'running' && !owner(agent, true)
+        cancel()
         live = false
         for(const input of pending.values())input.controller.abort()
-        try { await handle?.dispose() }
+        try { if (!retainForDesktop) await handle?.dispose() }
         finally {
           for (const input of pending.values()) {input.controller.abort();input.resolve(input.suppressed ? {text:'',reason:'interrupted',suppressed:true} : { text: 'DSH 会话已停止。', reason: 'interrupted' })}
-          pending.clear(); claimed(); discarded(); events(); disposed();approval();questions();unregisterMedia();releaseMedia()
+          pending.clear(); claimed(); discarded(); events(); disposed();questions();unregisterMedia();releaseMedia()
         }
       },
     }

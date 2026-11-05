@@ -1,4 +1,3 @@
-import type { ApprovalOutcome } from '@deepseek-ai/dsh-user-approval'
 import type { AskUserQuestionAnswer, AskUserQuestionItem } from '@deepseek-ai/dsh-user-questions'
 
 /** Same-process capability, minted only for an exact live claimed input/turn. */
@@ -18,6 +17,5 @@ export interface ApprovalInteraction extends Omit<InteractionScope, 'inputId'> {
 }
 export interface QuestionInteraction extends InteractionScope { questions: AskUserQuestionItem[] }
 export interface InteractionHandlers {
-  approval(request: ApprovalInteraction): Promise<ApprovalOutcome>
   question(request: QuestionInteraction): Promise<AskUserQuestionAnswer>
 }

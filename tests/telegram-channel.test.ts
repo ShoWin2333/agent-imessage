@@ -80,6 +80,35 @@ it('renders approval buttons and accepts callbacks only from the owner on the bo
   }, expect.any(AbortSignal))
 })
 
+it('acknowledges a verified button before slow durable admission or confirmation', async () => {
+  const admission=Promise.withResolvers<void>()
+  const receive=vi.fn(()=>admission.promise)
+  const {adapter,request,store}=setup([{update_id:1,callback_query:{id:'review',
+    from:{id:456,is_bot:false},message:{chat:{id:456,type:'private'},from:{id:123,is_bot:true}},
+    data:'dsh:approve:a-12345678-abcd-4123-9123-123456789abc',
+  }}],receive)
+  await adapter.start()
+  await vi.waitFor(()=>expect(receive).toHaveBeenCalledOnce())
+  expect(request.mock.calls.some(call=>call[1]==='answerCallbackQuery')).toBe(true)
+  expect(store.state.channelCursor).toBeUndefined()
+  admission.resolve()
+  await expect.poll(()=>store.state.channelCursor).toBe('2')
+})
+
+it('keeps all approval context and reserves space for the expiry status', async () => {
+  const {adapter,request}=setup([])
+  await adapter.start();await expect.poll(()=>adapter.state.phase).toBe('listening')
+  request.mockImplementation(async()=>({message_id:42}))
+  const prompt=await adapter.approvalMessage(),context='x'.repeat(4096)
+  const close=await prompt.sendApproval!(context,'a-12345678-abcd-4123-9123-123456789abc',new AbortController().signal)
+  expect(request.mock.calls.filter(c=>c[1]==='sendMessage').map(c=>(c[2] as any).text).join('')).toBe(context)
+  await close?.('expired')
+  const update=request.mock.calls.at(-1)![2] as any
+  expect(update.text).toContain('渠道审批已过期')
+  expect(update.text.length).toBeLessThanOrEqual(4096)
+  expect(update.reply_markup.inline_keyboard).toEqual([])
+})
+
 it('routes image, file and native voice sends for inbound and proactive owner messages',async()=>{
   const {api,adapter,messages}=setup([inbound(1)])
   const photo=vi.spyOn(api,'photo').mockResolvedValue(undefined),file=vi.spyOn(api,'file').mockResolvedValue(undefined),voice=vi.spyOn(api,'voice').mockResolvedValue(undefined)

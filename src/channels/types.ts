@@ -1,4 +1,4 @@
-import type { ApprovalOutcome } from '@deepseek-ai/dsh-user-approval/types'
+import type { ApprovalPromptOutcome } from './approval.js'
 import type { OutboundMediaPayload } from '../media.js'
 import type { RuntimeView } from '../types.js'
 
@@ -17,8 +17,8 @@ export interface ChannelMessage {
   responding<T>(callback: () => Promise<T>): Promise<T>
   /** Send one plain-text message to the same DM. */
   send(text: string): Promise<void>
-  /** Show approve/deny controls for a single pending request in the same DM. */
-  sendApproval?(text: string, token: string, signal: AbortSignal): Promise<void | ((outcome: ApprovalOutcome) => Promise<void>)>
+  /** Show approve/deny controls for one request at the fixed binding destination. */
+  sendApproval?(text: string, token: string, signal: AbortSignal): Promise<void | ((outcome: ApprovalPromptOutcome) => Promise<void>)>
   /** Send one image to the same DM, using provider photo delivery when available.
    * Cancellation is best effort once the provider has accepted an upload; never retry ambiguous delivery.
    */
@@ -36,7 +36,7 @@ export interface ChannelConnection {
 }
 export type ChannelFactory<Config> = (config: Config) => Promise<ChannelConnection>
 export interface ChannelAdapter {
-  /** Deliver shared desktop approvals only to the verified owner's private chat. */
+  /** Deliver shared approvals to the verified binding destination. */
   readonly approvalMessage?: (() => Promise<ChannelMessage>) | undefined
   scheduledMessage?(id: string, text: string): Promise<ChannelMessage>
   readonly state: RuntimeView

@@ -9,7 +9,7 @@ afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await c
 async function fixture({ presetFs = true, agentFs = false, channelKind = 'imessage' } = {}) {
   const ctx = new Context(), agentCtx = new Context(), session = Session.create(SessionId('channels-binding-test'))
   let live: any, decision = 'allowed-once'
-  const agent = { id: session.id, session, ctx: agentCtx, inbox: { clear: vi.fn() }, cancel: vi.fn(), followup: vi.fn((input: any) => {
+  const agent = { id: session.id, session, ctx: agentCtx, inbox: { clear: vi.fn(), remove: vi.fn(() => false) }, cancel: vi.fn(), followup: vi.fn((input: any) => {
     session.append('turn/start', { turn: 1 }); agentCtx.emit('agent/inbox/claimed', { agent, message: input, turn: 1 } as never)
   }) }
   live = agent

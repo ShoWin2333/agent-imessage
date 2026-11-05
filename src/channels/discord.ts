@@ -6,6 +6,7 @@ import type { OutboundMediaPayload } from '../media.js'
 import { pause } from './weixin-api.js'
 import { oggOpusDuration } from './ogg-opus.js'
 import { SNOWFLAKE_RE } from '../shared/rules.js'
+import { approvalStatus, APPROVAL_STATUS_RESERVE } from './approval.js'
 
 /** Discord voice needs Opus in Ogg plus real duration and a sampled waveform. */
 export function supportsDiscordVoice(media: OutboundMediaPayload): boolean {
@@ -24,12 +25,12 @@ const approvalButton = /^dsh:(approve|deny):(a-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0
 class DiscordBindingError extends Error {}
 
 /** Discord counts UTF-16 code units. Never split a surrogate pair or grapheme. */
-export function splitDiscordText(text: string): string[] {
+export function splitDiscordText(text: string, limit = 2000): string[] {
   const parts: string[] = []
   let part = ''
   for (const {segment} of new Intl.Segmenter(undefined, {granularity:'grapheme'}).segment(text)) {
-    if (segment.length > 2000) throw new Error('Discord text contains an oversized segment')
-    if (part.length + segment.length > 2000) { parts.push(part); part = '' }
+    if (segment.length > limit) throw new Error('Discord text contains an oversized segment')
+    if (part.length + segment.length > limit) { parts.push(part); part = '' }
     part += segment
   }
   if (part) parts.push(part)
@@ -72,10 +73,7 @@ export class DiscordAdapter implements ChannelAdapter {
     this.destination = undefined
     this.publish({phase:'failed',error:{code:'runtime-failed',message}})
   }
-  get approvalMessage(): (() => Promise<ChannelMessage>) | undefined {
-    // Desktop approval details may only be sent to the verified private route.
-    return this.scope.guildId ? undefined : () => this.scheduledMessage('approval', '')
-  }
+  approvalMessage() { return this.scheduledMessage('approval', '') }
   async scheduledMessage(id: string, text: string): Promise<ChannelMessage> {
     const signal = this.controller?.signal, client = this.client, destination = this.destination
     if (!signal || signal.aborted || !client?.isReady() || !destination || this.state.phase !== 'listening') throw new Error('Discord is not connected')
@@ -111,32 +109,30 @@ export class DiscordAdapter implements ChannelAdapter {
     }
     return {id,text,nativeVoice:true,supportsNativeVoice:supportsDiscordVoice,
       send: async value => {for (const part of splitDiscordText(value)) await post({content:part,allowed_mentions:noMentions})},
-      ...(!this.scope.guildId && {
-        sendApproval: async (value, token, cancellation) => {
-          const parts = splitDiscordText(value)
-          const last = parts.pop()
-          if (!last) throw new Error('Discord approval prompt is empty')
-          for (const part of parts) await post({content:part,allowed_mentions:noMentions}, cancellation)
-          const sent = await post({
-            content:last, allowed_mentions:noMentions,
-            components:[{type:ComponentType.ActionRow,components:[
-              {type:ComponentType.Button,style:ButtonStyle.Success,label:'批准一次',custom_id:`dsh:approve:${token}`},
-              {type:ComponentType.Button,style:ButtonStyle.Danger,label:'拒绝',custom_id:`dsh:deny:${token}`},
-            ]}],
-          }, cancellation)
-          const messageId = sent && typeof sent === 'object' && 'id' in sent ? sent.id : undefined
-          if (typeof messageId !== 'string' || !SNOWFLAKE_RE.test(messageId)) return
-          return async outcome => {
-            ready()
-            const status = outcome === 'allowed-once' ? '已批准一次' : outcome === 'rejected' ? '已拒绝' : '审批已结束'
-            const content = last.length + status.length + 2 <= 2000 ? `${last}\n\n${status}` : last
-            await client.rest.patch(Routes.channelMessage(destination,messageId), {
-              body:{content,allowed_mentions:noMentions,components:[]},
-              signal:AbortSignal.any([signal,AbortSignal.timeout(3000)]),
-            })
-          }
-        },
-      }),
+      sendApproval: async (value, token, cancellation) => {
+        const parts = splitDiscordText(value, 2000 - APPROVAL_STATUS_RESERVE)
+        const last = parts.pop()
+        if (!last) throw new Error('Discord approval prompt is empty')
+        for (const part of parts) await post({content:part,allowed_mentions:noMentions}, cancellation)
+        const sent = await post({
+          content:last, allowed_mentions:noMentions,
+          components:[{type:ComponentType.ActionRow,components:[
+            {type:ComponentType.Button,style:ButtonStyle.Success,label:'批准一次',custom_id:`dsh:approve:${token}`},
+            {type:ComponentType.Button,style:ButtonStyle.Danger,label:'拒绝',custom_id:`dsh:deny:${token}`},
+          ]}],
+        }, cancellation)
+        const messageId = sent && typeof sent === 'object' && 'id' in sent ? sent.id : undefined
+        if (typeof messageId !== 'string' || !SNOWFLAKE_RE.test(messageId)) return
+        return async outcome => {
+          ready()
+          const status = approvalStatus(outcome)
+          const content = `${last}\n\n${status}`
+          await client.rest.patch(Routes.channelMessage(destination,messageId), {
+            body:{content,allowed_mentions:noMentions,components:[]},
+            signal:AbortSignal.any([signal,AbortSignal.timeout(3000)]),
+          })
+        }
+      },
       sendImage: upload,
       sendFile: upload,
       sendVoice: (media, cancellation) => upload(media,cancellation,true),
@@ -217,8 +213,8 @@ export class DiscordAdapter implements ChannelAdapter {
         if (text) enqueue(this.message(`discord:${raw.channelId}:${raw.id}`,text,client,this.destination!,signal))
       })
       client.on(Events.InteractionCreate, interaction => {
-        if (!canReceive() || this.scope.guildId || !interaction.isButton()
-          || interaction.guildId !== null || interaction.channelId !== this.destination
+        if (!canReceive() || !interaction.isButton()
+          || interaction.guildId !== (this.scope.guildId ?? null) || interaction.channelId !== this.destination
           || interaction.user.bot || interaction.user.id !== this.scope.ownerUserId
           || !interaction.message.author.bot || interaction.message.author.id !== this.scope.botId) return
         const match = approvalButton.exec(interaction.customId)

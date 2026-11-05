@@ -184,17 +184,14 @@ permissionPresets: { resolve: () => { } }, storageDomain: { open: async () => ({
 })
 it('interaction commands use durable admission, never become model prompts and cannot replay a grant',async()=>{
   const f=fixture(),task=message('task')
-  let handlers:import('../src/plugin/interaction-types.js').InteractionHandlers|undefined
-  const original=vi.mocked(f.session.submit).getMockImplementation()!
-  vi.mocked(f.session.submit).mockImplementation((id,text,progress,interactions)=>{handlers=interactions;return original(id,text,progress,interactions)})
   await f.bridge.receive(task)
-  const signal=new AbortController().signal
-  const outcome=handlers!.approval({sessionId:f.session.id,inputId:f.runs[0]!.id,turn:1,signal,current:()=>true,toolName:'write_file',reason:'Write synthetic file'})
+  const settlement=deferred<import('@deepseek-ai/dsh-user-approval').ApprovalOutcome>()
+  const outcome=f.bridge.approveShared({sessionId:f.session.id,turn:1,signal:new AbortController().signal,current:()=>true,toolName:'write_file',reason:'Write synthetic file'},async()=>task,settlement.promise)
   await vi.waitFor(()=>expect(task.send).toHaveBeenCalled());await Promise.resolve();await Promise.resolve()
-  const prompt=vi.mocked(task.send).mock.calls[0]![0],token=prompt.match(/\/approve (a-[a-f0-9-]+)/)![1]!
+  const prompt=vi.mocked(task.send).mock.calls[0]![0],token=prompt.match(/\/approve ([A-Za-z0-9_-]+)/)![1]!
   const approve=message('approval',`/approve ${token}`)
   await Promise.all([f.bridge.receive(approve),f.bridge.receive(approve)])
-  expect(await outcome).toBe('allowed-once');expect(f.session.submit).toHaveBeenCalledTimes(1)
+  expect(await outcome).toBe('allowed-once');settlement.resolve('allowed-once');expect(f.session.submit).toHaveBeenCalledTimes(1)
   expect(f.store.read().receipts.find(r=>r.id==='approval')?.delivery).toBe('sent')
   const invalid=message('late',`/approve ${token}`);await f.bridge.receive(invalid)
   expect(invalid.send).toHaveBeenCalledWith(expect.stringContaining('失效'))
@@ -204,16 +201,15 @@ it('interaction commands use durable admission, never become model prompts and c
   await restarted.bridge.close()
 })
 it('failed interaction command persistence cannot resolve the native approval',async()=>{
-  const f=fixture(),task=message('task');let handlers:import('../src/plugin/interaction-types.js').InteractionHandlers|undefined
-  const original=vi.mocked(f.session.submit).getMockImplementation()!
-  vi.mocked(f.session.submit).mockImplementation((id,text,progress,interactions)=>{handlers=interactions;return original(id,text,progress,interactions)})
+  const f=fixture(),task=message('task')
   await f.bridge.receive(task)
-  const outcome=handlers!.approval({sessionId:f.session.id,inputId:f.runs[0]!.id,turn:1,signal:new AbortController().signal,current:()=>true,toolName:'write_file',reason:'Write synthetic file'})
+  const settlement=deferred<import('@deepseek-ai/dsh-user-approval').ApprovalOutcome>()
+  const outcome=f.bridge.approveShared({sessionId:f.session.id,turn:1,signal:new AbortController().signal,current:()=>true,toolName:'write_file',reason:'Write synthetic file'},async()=>task,settlement.promise)
   await vi.waitFor(()=>expect(task.send).toHaveBeenCalled());await Promise.resolve();await Promise.resolve()
-  const token=vi.mocked(task.send).mock.calls[0]![0].match(/\/approve (a-[a-f0-9-]+)/)![1]!
+  const token=vi.mocked(task.send).mock.calls[0]![0].match(/\/approve ([A-Za-z0-9_-]+)/)![1]!
   f.store.write.mockRejectedValueOnce(new Error('synthetic persistence failure'))
   await expect(f.bridge.receive(message('approval',`/approve ${token}`))).rejects.toThrow('persistence')
-  f.bridge.setConnected(false);expect(await outcome).toBe('cancelled')
+  f.bridge.setConnected(false);expect(await outcome).toBe('cancelled');settlement.resolve('cancelled')
   f.runs[0]!.result.resolve({text:'cancelled',reason:'interrupted'});await f.bridge.drain();await f.bridge.close()
 })
 it('does not send fixed progress or a second reply for an admitted same-turn steering input',async()=>{
