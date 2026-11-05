@@ -95,7 +95,7 @@
     "@spectrum-ts/core": "12.7.0",
     "@spectrum-ts/imessage": "12.7.0",
     "discord.js": "14.27.0",
-    "zod": "4.6.1"
+    "zod": "4.6.6"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.0.5",
