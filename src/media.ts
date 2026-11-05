@@ -10,8 +10,6 @@ export interface OutboundMediaPayload {
   name: string
   /** MIME type derived from the allowed extension set. */
   mimeType: string
-  /** Real audio metadata computed from decoded samples for native voice messages. */
-  voice?: { durationSeconds: number; waveform: string }
 }
 
 /** Structural subset of the agent-composed fs service; opaque keys stay opaque. */
@@ -28,12 +26,12 @@ export interface OutboundMediaReader<T extends OutboundMediaTarget = OutboundMed
 
 const IMAGE_MIME_BY_EXT = new Map<string, string>([
   ['.png', 'image/png'], ['.jpg', 'image/jpeg'], ['.jpeg', 'image/jpeg'],
-  ['.gif', 'image/gif'], ['.webp', 'image/webp'], ['.heic', 'image/heic'], ['.heif', 'image/heif'],
+  ['.bmp','image/bmp'], ['.gif', 'image/gif'], ['.webp', 'image/webp'], ['.heic', 'image/heic'], ['.heif', 'image/heif'],
 ])
 const AUDIO_MIME_BY_EXT = new Map<string, string>([
   ['.m4a', 'audio/mp4'], ['.mp3', 'audio/mpeg'], ['.wav', 'audio/wav'],
   ['.aif', 'audio/aiff'], ['.aiff', 'audio/aiff'], ['.aac', 'audio/aac'],
-  ['.caf', 'audio/x-caf'], ['.ogg', 'audio/ogg'],
+  ['.caf', 'audio/x-caf'], ['.ogg', 'audio/ogg'], ['.silk','audio/silk'], ['.amr','audio/amr'],
 ])
 const FILE_MIME_BY_EXT = new Map<string, string>([
   ...IMAGE_MIME_BY_EXT, ...AUDIO_MIME_BY_EXT,

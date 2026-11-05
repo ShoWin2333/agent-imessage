@@ -60,3 +60,6 @@ export type { Binding } from './plugin/config.js'
 
 /** Plugin configuration groups, independent of native DSH Agent/session identities. */
 export type {AgentGroup} from './shared/agents.js'
+
+/** Public QR setup wire state; secrets never cross the remote boundary. */
+export type {QQSetupState} from './plugin/qqbot-setup.js'

@@ -1,21 +1,22 @@
 import {useEffect,useRef,useState,useSyncExternalStore} from 'react'
 import type {AgentGroup,Binding,Catalog,ClientContext,ConfigForm,FormSnapshot,RuntimeStatus,StatusFrame} from './contracts.js'
-import {bindingIssues,type BindingIssue,type RuleBinding} from '../shared/rules.js'
+import {bindingIssues,isChannelKind,type BindingIssue,type RuleBinding} from '../shared/rules.js'
 import {agentGroupIssue,MAX_AGENTS,resolveAgentGroups} from '../shared/agents.js'
 import {isPhase} from '../shared/phases.js'
+import {QQBotSetup} from './QQBotSetup.js'
+import {QQBotCredentials} from './QQBotCredentials.js'
 import {styles} from './styles.js'
 import {NS,fallbackTranslate} from './locale.js'
 
 export type Translate=(key:string)=>string
 const labels:Record<Binding['channel']['kind'],string>={
-  imessage:'kind.imessage',telegram:'kind.telegram',weixin:'kind.weixin',discord:'kind.discord',feishu:'kind.feishu',
+  imessage:'kind.imessage',telegram:'kind.telegram',weixin:'kind.weixin',qqbot:'kind.qqbot',
 }
 const channelFields:Record<Binding['channel']['kind'],Array<[string,string]>>={
   imessage:[['projectId','field.projectId'],['senderPhoneNumber','field.senderPhoneNumber'],['assignedPhoneNumber','field.assignedPhoneNumber']],
   telegram:[['botId','field.botId'],['ownerUserId','field.ownerUserId']],
-  feishu:[['appId','field.appId'],['tenantKey','field.tenantKey'],['ownerUserId','field.feishuOwner'],['chatId','field.chatId']],
   weixin:[['accountId','field.accountId']],
-  discord:[['botId','field.botId'],['ownerUserId','field.ownerUserId'],['guildId','field.guildId'],['channelId','field.channelId']],
+  qqbot:[['appId','field.qqAppId'],['ownerUserId','field.qqOwner'],['visionProvider','field.qqVisionProvider'],['visionModel','field.qqVisionModel']],
 }
 export function translate(ctx:ClientContext):Translate {
   const bound=ctx.locale?.bind(NS)
@@ -46,11 +47,19 @@ export function ChannelPanel({ctx,channelForm,view}:{ctx:ClientContext;channelFo
 }
 type Edit={value:Binding;base?:Binding;agentId?:string}
 type Removal={kind:'agent'|'channel';agent:AgentGroup;rows:Binding[];draftIds:string[];label:string}
-const canonical=(value:unknown):unknown=>Array.isArray(value)?value.map(canonical):value&&typeof value==='object'?Object.fromEntries(Object.entries(value).filter(([,v])=>v!==undefined).sort(([a],[b])=>a.localeCompare(b)).map(([k,v])=>[k,canonical(v)])):value
+const canonical=(value:unknown):unknown=>{
+ if(Array.isArray(value))return value.map(canonical)
+ if(!value||typeof value!=='object')return value
+ // Native Settings materializes declarative defaults when it accepts a QQ row.
+ // They do not represent a conflicting edit or a failed save.
+ const object='kind' in value&&value.kind==='qqbot'?{streaming:true,showToolResults:false,sendPresentedFiles:true,maxFiles:4,externalTurns:'c2c',...value}:value
+ return Object.fromEntries(Object.entries(object).filter(([,v])=>v!==undefined).sort(([a],[b])=>a.localeCompare(b)).map(([k,v])=>[k,canonical(v)]))
+}
 const same=(a:unknown,b:unknown)=>JSON.stringify(canonical(a))===JSON.stringify(canonical(b))
 function ChannelEditor({ctx,form,t}:{ctx:ClientContext;form:ConfigForm;t:Translate}){
  const snapshot=useSyncExternalStore(listener=>form.subscribe(listener),()=>form.getSnapshot(),()=>form.getSnapshot())
  const persisted=snapshot.value?.bindings??[]
+ const unsupported=persisted.some(b=>!isChannelKind(b.channel.kind))
  const [edits,setEdits]=useState<Record<string,Edit>>({}),[selectedId,setSelectedId]=useState(persisted[0]?.id??'')
  const [selectedAgentId,setSelectedAgentId]=useState(''),[newAgent,setNewAgent]=useState<{name:string;cwd:string}|null>(null)
  const [removal,setRemoval]=useState<Removal|null>(null)
@@ -76,7 +85,7 @@ function ChannelEditor({ctx,form,t}:{ctx:ClientContext;form:ConfigForm;t:Transla
  const project=current?projects.find(p=>p.bindingIds.includes(id)):undefined
  const statusMessage=(code:string)=>{const text=t(`status.${code}`);return text===`status.${code}`?code:text}
  useEffect(()=>{let live=true;void ctx.remote.session.modelCatalog().then(result=>{if(!live)return;if(result.ok)setCatalog(result.value);else setModelsError(t('error.models'))},()=>{if(live)setModelsError(t('error.modelsUnavailable'))});return()=>{live=false}},[ctx,t])
- // Push Host lifecycle transitions; only fall back to one read when an older Host has no stream.
+ // The current Host publishes lifecycle transitions through the native stream.
  useEffect(()=>{
   let live=true;const controller=new AbortController()
   const loadProjects=async()=>{const api=ctx.remote.channelProjects;if(!api)return;try{const result=await api.status();if(live&&result.ok)setProjects(result.value.projects)}catch{/* keep the previous grouping */}}
@@ -84,12 +93,8 @@ function ChannelEditor({ctx,form,t}:{ctx:ClientContext;form:ConfigForm;t:Transla
   void (async()=>{
     const api=ctx.remote.channels
     if(!api){if(live)setStatusError(t('error.statusUnavailable'));return}
-    if(api.statusStream){
-      try{for await(const frame of api.statusStream(controller.signal)){if(!live)break;apply(frame);void loadProjects()}}
-      catch{if(live)setStatusError(t('error.statusFailed'))}
-      return
-    }
-    try{const result=await api.status();if(!live)return;if(result.ok){apply(result.value);void loadProjects()}else setStatusError(t('error.statusFailed'))}catch{if(live)setStatusError(t('error.statusFailed'))}
+    try{for await(const frame of api.statusStream(controller.signal)){if(!live)break;apply(frame);void loadProjects()}}
+    catch{if(live)setStatusError(t('error.statusFailed'))}
   })()
   return()=>{live=false;controller.abort()}
  },[ctx,t])
@@ -181,13 +186,14 @@ function ChannelEditor({ctx,form,t}:{ctx:ClientContext;form:ConfigForm;t:Transla
   setEdits(previous=>({...previous,[key]:{value,agentId:group.id}}));setSelectedAgentId(group.id);setSelectedId(key);setNotice(t('notice.newDraft'))
  }
  const chooseAgentDirectory=async()=>{try{const path=await ctx.uiWorkspace.pickDirectory();if(path!==null)setNewAgent(previous=>previous?{...previous,cwd:path}:previous)}catch{fail(t('error.pickFailed'))}}
+ if(unsupported)return <section className="dsh-channel-panel"><style>{styles}</style><h2>{t('heading')}</h2><p role="alert" className="dsh-channel-notice dsh-channel-error">{t('issue.channel-kind')}</p><p className="dsh-channel-muted">{t('config.unsupported')}</p></section>
  return <section className="dsh-channel-panel"><style>{styles}</style>
   <h2>{t('heading')}</h2><p className="dsh-channel-muted">{t('intro')}</p>
   <div className="dsh-channel-toolbar"><button disabled={busy||!writable||groups.length>=MAX_AGENTS} onClick={()=>setNewAgent({name:'',cwd:''})}>{t('action.addAgent')}</button></div>
   {newAgent&&<form className="dsh-channel-card" aria-label={t('agent.create')} onSubmit={event=>{event.preventDefault();void createAgent()}}><fieldset disabled={busy} style={{border:0,padding:0,margin:0}}><div className="dsh-channel-grid"><Field label={t('agent.name')} value={newAgent.name} set={name=>setNewAgent(previous=>previous?{...previous,name}:previous)}/><label className="dsh-channel-field">{t('agent.cwd')}<div className="dsh-channel-path"><input aria-label={t('agent.cwd')} value={newAgent.cwd} onChange={event=>{const cwd=event.target.value;setNewAgent(previous=>previous?{...previous,cwd}:previous)}}/><button type="button" onClick={()=>void chooseAgentDirectory()}>{t('action.choose')}</button></div></label></div><p className="dsh-channel-muted">{t('agent.hint')}</p><div className="dsh-channel-actions"><button type="button" onClick={()=>setNewAgent(null)}>{t('action.cancel')}</button><button className="dsh-channel-primary" disabled={!writable}>{t('action.createAgent')}</button></div></fieldset></form>}
   <div className="dsh-agent-layout"><nav className="dsh-agent-tabs" aria-label={t('agentGroups')}>{groups.map(g=><button key={g.id} aria-pressed={g.id===group?.id} onClick={()=>{setSelectedAgentId(g.id);setSelectedId(g.bindingIds[0]??'');setConfirmation(null);setRemoval(null);setNotice('')}}><strong>{g.name}</strong><span>{g.bindingIds.length} {t('channelsUnit')}</span></button>)}</nav><div className="dsh-agent-detail">
   {group&&<header className="dsh-agent-header"><div className="dsh-channel-heading"><h3>{group.name}</h3><button disabled={busy||!writable} onClick={()=>requestRemoval('agent')}>{t('action.removeAgent')}</button></div><p className="dsh-channel-path-text">{t('agent.cwd')}：{group.cwd||t('project.none')}</p><p className="dsh-channel-muted">{t('agent.cwdHint')}</p><p className="dsh-channel-muted">{t('model.inheritHint')}</p></header>}
-  <div className="dsh-channel-toolbar"><div className="dsh-channel-actions">{Object.entries(labels).map(([kind,key])=><button key={kind} disabled={busy||baseRows.length>=32||!writable||!group} onClick={()=>add(kind as Binding['channel']['kind'])}>＋ {t(key)}</button>)}</div><span className="dsh-channel-muted">{baseRows.length} / 32 {t('channelsUnit')}</span></div>
+  <div className="dsh-channel-toolbar"><div className="dsh-channel-actions">{Object.entries(labels).map(([kind,key])=><button key={kind} disabled={busy||baseRows.length>=32||!writable||!group} onClick={()=>add(kind as Binding['channel']['kind'])}>＋ {t(key)}</button>)}</div><span className="dsh-channel-muted">{t('channels.saved')} {persisted.length} {t('channelsUnit')}{baseRows.length>persisted.length?` · ${baseRows.length-persisted.length} ${t('channels.drafts')}`:''}</span></div>
   {snapshot.status!=='ready'&&<p className="dsh-channel-notice">{snapshot.value?t('syncing'):t('reading')}</p>}
   {notice&&<p role={failure?'alert':'status'} className={`dsh-channel-notice ${failure?'dsh-channel-error':''}`}>{notice}</p>}
   {metadataIssue&&<p role="alert" className="dsh-channel-notice dsh-channel-error">{t(`issue.${metadataIssue}`)}</p>}
@@ -201,17 +207,20 @@ function ChannelEditor({ctx,form,t}:{ctx:ClientContext;form:ConfigForm;t:Transla
    <p className="dsh-channel-muted">{project?`${t('project.owned')}${project.title} · ${project.id} · ${project.cwd}`:t('project.pending')}</p>
    {conflict&&<p role="alert" className="dsh-channel-notice dsh-channel-error">{t('notice.conflict')}</p>}
    {status?.error&&<p role="alert" className="dsh-channel-notice dsh-channel-error">{statusMessage(status.error)}</p>}
+   {binding.channel.kind==='qqbot'?<QQBotSetup ctx={ctx} t={t} disabled={busy||!writable||!!current?.enabled} onBound={value=>update(b=>({...b,credentialRef:value.credentialRef,channel:{...b.channel,appId:value.appId,ownerUserId:value.ownerUserId}}))}/>:null}
+   {binding.channel.kind==='qqbot'?<QQBotCredentials ctx={ctx} t={t} reference={binding.credentialRef} disabled={busy||!writable||!!current?.enabled} onSaved={credentialRef=>update(b=>({...b,credentialRef}))}/>:null}
    <fieldset disabled={busy||!writable} style={{border:0,padding:0,margin:0}}><div className="dsh-channel-grid">
     <label className="dsh-channel-field">{t('model.label')}<select value={selected} onChange={e=>{const value=e.target.value;update(b=>{const {model:_,...rest}=b;return value?{...rest,model:{provider:JSON.parse(value)[0],model:JSON.parse(value)[1]}}:rest})}}><option value="">{t('model.inherit')}{catalog?` · ${catalog.default.model}`:''}</option>{binding.model&&!catalog?.groups.some(g=>g.id===binding.model?.provider&&g.models.some(m=>m.id===binding.model?.model))&&<option value={selected}>{t('model.current')} · {binding.model.provider}/{binding.model.model}{t('model.unknown')}</option>}{catalog?.groups.map(g=><optgroup key={g.id} label={g.name}>{g.models.map(m=><option key={m.id} value={JSON.stringify([g.id,m.id])}>{m.name}</option>)}</optgroup>)}</select></label>
     {model?.reasoning&&<label className="dsh-channel-field">{t('model.reasoning')}<select value={binding.model?.reasoningEffort??''} onChange={e=>{const value=e.target.value;update(b=>{if(!b.model)return b;const {reasoningEffort:_,...selection}=b.model;return {...b,model:{...selection,...(value?{reasoningEffort:value}:{})}}})}}><option value="">{t('model.default')}</option>{model.reasoning.efforts.map(e=><option key={e.id} value={e.id}>{e.name}</option>)}</select></label>}
    </div><p className="dsh-channel-muted">{t('model.note')}</p>
+   {binding.channel.kind==='qqbot'?<details><summary>{t('qq.options')}</summary><div className="dsh-channel-grid">{(['streaming','showToolResults','sendPresentedFiles'] as const).map(key=><label key={key}><input type="checkbox" checked={binding.channel[key]===undefined?key!=='showToolResults':!!binding.channel[key]} onChange={e=>{const checked=e.target.checked;update(b=>({...b,channel:{...b.channel,[key]:checked}}))}}/>{t(`qq.option.${key}`)}</label>)}<label><input type="checkbox" checked={binding.channel.externalTurns!=='off'} onChange={e=>{const value=e.target.checked?'c2c':'off';update(b=>({...b,channel:{...b.channel,externalTurns:value}}))}}/>{t('qq.option.externalTurns')}</label><label>{t('qq.maxFiles')}<input type="number" min={1} max={32} value={Number(binding.channel.maxFiles??4)} onChange={e=>{const value=e.target.valueAsNumber;if(Number.isInteger(value))update(b=>({...b,channel:{...b.channel,maxFiles:value}}))}}/></label></div><p>{t('qq.deliveryHint')}</p></details>:null}
    <details><summary>{t('details.label')}</summary><div className="dsh-channel-grid">
     <label className="dsh-channel-field">{t('field.bindingId')}<input value={binding.id} readOnly/></label>
     <Field label={t('field.credential')} value={binding.credentialRef} set={value=>update(b=>({...b,credentialRef:value}))}/>
     <label className="dsh-channel-field dsh-channel-wide">{t('field.cwd')}<div className="dsh-channel-path"><input aria-label={t('field.cwd')} value={binding.cwd} placeholder="/Users/…/project" onChange={e=>{const value=e.target.value;update(b=>({...b,cwd:value}))}}/><button onClick={()=>void choose()}>{t('action.choose')}</button></div></label>
     <p className="dsh-channel-muted dsh-channel-wide">{t('field.cwdHint')}</p>
     <Field label={t('field.permission')} value={binding.permissionPreset} set={value=>update(b=>({...b,permissionPreset:value}))}/>
-    {channelFields[binding.channel.kind].map(([field,key])=><Field key={field} label={t(key)} value={(binding.channel as unknown as Record<string,string|undefined>)[field]??''} set={value=>update(b=>{const channel={...b.channel} as unknown as Record<string,string>;if(value||!['guildId','channelId'].includes(field))channel[field]=value;else delete channel[field];return {...b,channel:channel as Binding['channel']}})}/>)}
+    {channelFields[binding.channel.kind].map(([field,key])=><Field key={field} label={t(key)} value={String(binding.channel[field]??'')} set={value=>update(b=>{const channel={...b.channel};if(b.channel.kind==='qqbot'&&['visionProvider','visionModel'].includes(field)&&!value.trim())delete channel[field];else channel[field]=value;return {...b,channel}})}/>)}
     {binding.channel.kind==='weixin'&&<><Field label={t('field.weixinOwner')} value={binding.weixin?.ownerUserId??''} set={value=>update(b=>({...b,weixin:{ownerUserId:value,baseUrl:b.weixin?.baseUrl??''}}))}/><Field label={t('field.weixinBase')} value={binding.weixin?.baseUrl??''} set={value=>update(b=>({...b,weixin:{ownerUserId:b.weixin?.ownerUserId??'',baseUrl:value}}))}/></>}
    </div></details></fieldset>
    {confirmation?.id===id&&<div ref={confirmRef} role="dialog" aria-modal="true" aria-label={t('dialog.apply')} className="dsh-channel-notice" onKeyDown={event=>{if(event.key==='Escape')setConfirmation(null)}}><strong>{t('confirm.title')} {group?.name} / {t(labels[binding.channel.kind])}？</strong><p>{t('confirm.body')}</p><div className="dsh-channel-actions"><button onClick={()=>setConfirmation(null)}>{t('action.continue')}</button><button ref={confirmButton} className="dsh-channel-primary" disabled={busy} onClick={()=>void commit(confirmation.id,confirmation.value,confirmation.expected,true)}>{t('action.apply')}</button></div></div>}

@@ -5,7 +5,7 @@ export interface Binding {
   cwd: string
   credentialRef: string
   permissionPreset: string
-  channel: {id:string;kind:'imessage'|'telegram'|'weixin'|'discord'|'feishu';[key:string]:string}
+  channel: {id:string;kind:'imessage'|'telegram'|'weixin'|'qqbot';[key:string]:string|boolean|number|undefined}
   weixin?: {ownerUserId:string;baseUrl:string}
   model?: {provider:string;model:string;reasoningEffort?:string}
 }
@@ -27,12 +27,13 @@ export interface RuntimeStatus {id:string;phase:string;error?:string;sessionId?:
 export interface StatusFrame {bindings:RuntimeStatus[];configError?:string}
 export interface ProjectStatus {projects:Array<{id:string;title:string;cwd:string;bindingIds:string[]}>;pending:string[];errors:Array<{bindingId:string;code:string}>}
 export type Result<T>={ok:true;value:T}|{ok:false;error?:{message?:string}}
-export interface ChannelsApi {status():Promise<Result<StatusFrame>>;statusStream?(signal?:AbortSignal):AsyncIterable<StatusFrame>}
+export interface ChannelsApi {status():Promise<Result<StatusFrame>>;statusStream(signal?:AbortSignal):AsyncIterable<StatusFrame>}
 export interface ClientLocale {
   bind(ns:string):(key:string)=>string
   register(ns:string,locale:'en'|'zh',dict:Record<string,string>):()=>void
   subscribe(listener:()=>void):()=>void
 }
+export interface QQSetupState {id:string;phase:'waiting'|'saving'|'complete'|'failed'|'cancelled';url?:string;qrSvg?:string;appId?:string;ownerUserId?:string;credentialRef?:string}
 export interface ClientContext {
   inject(dependencies:string[],mount:(ctx:ClientContext)=>()=>void):PromiseLike<unknown>&{dispose():Promise<void>}
   configForms:{get(id:string):ConfigForm;whileServed(ids:string[],register:()=>()=>void):()=>void}
@@ -43,6 +44,7 @@ export interface ClientContext {
     $mount(contribution:unknown):Promise<()=>Promise<void>|void>
     session:{modelCatalog():Promise<Result<Catalog>>}
     channelProjects?:{status():Promise<Result<ProjectStatus>>}
+    qqBotSetup?:{start(reference:string):Promise<Result<QQSetupState>>;status(id:string):Promise<Result<QQSetupState>>;cancel(id:string):Promise<Result<void>>;runtime?():Promise<Result<{version:string;startedAt:string}>>;credentialStatus?(reference:string):Promise<Result<{configured:boolean;writable:boolean;source?:string}>>;saveCredential?(reference:string,value:string):Promise<Result<void>>}
     channels?:ChannelsApi
   }
   effect(effect:()=>()=>void,label?:string):unknown

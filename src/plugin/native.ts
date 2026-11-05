@@ -15,9 +15,13 @@ import type {} from '@deepseek-ai/dsh-sandbox'
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import { prepareVoiceMedia } from './audio-preparation.js'
 import type { InteractionHandlers, InteractionScope } from './interaction-types.js'
-import type { NativeHost, NativeSession, NativeResult } from './bridge.js'
+import type { NativeHost, NativeSession, NativeResult, NativePreferences } from './bridge.js'
 import { ownsSession, type LegacySessionIdentity } from './identity.js'
-import { channelMediaTool } from './media-tool.js'
+import {qqbotSendFileTool,qqbotDescribeImageTool,describeQQImage} from './qqbot-tools.js'
+import type {ToolRunContext,ToolDispatchExecution} from '@deepseek-ai/dsh-tools'
+import {installQQPresentation,commandLink,type QQPresentationOptions} from './qqbot-presentation.js'
+import {QQBOT_VERSION} from '../shared/qqbot-version.js'
+import { channelMediaTool, type ChannelMediaArgs } from './media-tool.js'
 import { loadOutboundMedia, DEFAULT_MAX_OUTBOUND_MEDIA_BYTES } from '../media.js'
 import type { MediaHandler } from './media-delivery.js'
 
@@ -67,13 +71,52 @@ function reasonText(reason: unknown): string {
 }
 
 export class DshNativeHost implements NativeHost {
-  constructor(private readonly ctx: Context, private readonly cwd: string, private readonly permissionPreset: string, private readonly binding: string, private readonly model?: {provider:string;model:string;reasoningEffort?:string | undefined}, private readonly legacyIdentity?: LegacySessionIdentity, private readonly channelKind?: string, private readonly lifetime: Context = ctx) { }
+  private preferences:NativePreferences={}
+  configure(preferences:NativePreferences){this.preferences=preferences}
+  async command(text:string,sessionId:string|undefined,preferences:NativePreferences){
+    const [verb,...args]=text.trim().split(/\s+/),value=args.join(' ')
+    const agent=sessionId&&ownsSession(sessionId,this.binding,this.legacyIdentity)?this.ctx.agents.get(SessionId(sessionId)):undefined
+    if(verb==='/bot-settings')return {text:`Messaging Channels ${QQBOT_VERSION}\nDSH → 账号菜单 → 设置 → Messaging Channels → 当前 Agent → QQ Bot 设置。\n流式输出：${this.qqOptions.streaming!==false?'开':'关'}；工具成功结果：${this.qqOptions.showToolResults?'显示':'隐藏'}；声明文件自动交付：${this.qqOptions.sendPresentedFiles!==false?'开（每份仍需审批）':'关'}。\n凭据状态和手动配置也在该设置页；聊天不接收密钥。`}
+    if(verb==='/bot-status'){
+      const events=agent?.session.snapshotEvents()??[],selection=agent?.model.current()??preferences.model??this.model??this.ctx.agentDefaultModel.currentSelection()
+      const last=events.at(-1)
+      return {text:`📊 会话状态 · ${QQBOT_VERSION}\n会话：${sessionId??'尚未创建'}\n运行：${agent?.status??'未加载'}\n模型：${selection?`${selection.provider}/${selection.model}`:'宿主默认'}\nPreset：${preferences.preset??this.ctx.agentPresets.defaultId}\n用户消息：${events.filter(e=>e.type==='user/message').length}\n最后活动：${last?new Date(last.time).toISOString():'—'}`}
+    }
+    if(verb==='/compact'){
+      if(!agent)return {text:'当前无活跃会话。'}
+      if(agent.status!=='idle')return {text:'正在生成中，无法压缩。'}
+      const compaction=((this.ctx.agentPresets as unknown as {serviceFor(agent:Agent,name:string):unknown}).serviceFor(agent,'compaction')??agent.ctx.get('compaction')) as {compactNow(context:unknown,signal:AbortSignal):Promise<{shadowedSeqs:unknown[]}|null>}|undefined
+      if(!compaction)return {text:'当前 Agent preset 未提供 compaction 服务。'}
+      const result=await compaction.compactNow({session:agent.session,options:agent.options,runMaintenance:agent.runMaintenance.bind(agent)},new AbortController().signal)
+      await this.flush(agent);return {text:`已压缩 ${result?.shadowedSeqs.length??0} 条历史记录。`}
+    }
+    if(verb==='/preset'){
+      const presets=await this.ctx.agentPresets.list()
+      if(!value)return {text:`当前：${preferences.preset??this.ctx.agentPresets.defaultId}\n${presets.map(p=>commandLink(`/preset ${p.id}`,p.id)).join('\n')}`}
+      const preset=['reset','default'].includes(value)?this.ctx.agentPresets.defaultId:value
+      const resolved=await this.ctx.agentPresets.resolve(preset)
+      if(resolved.broken)return {text:'所选 Agent preset 不可用。'}
+      return {text:`Agent preset 已选择：${preset}；新会话生效。权限审批仍使用原有配置。`,preferences:{...preferences,preset}}
+    }
+    const nativeModel=agent?.model
+    const selection=nativeModel?.current()??preferences.model??this.model??this.ctx.agentDefaultModel.currentSelection()
+    if(!value){
+      const providers=await this.ctx.llm.listProviders(),models=await Promise.all(providers.map(async p=>(await this.ctx.llm.listModels(p.id)).map(m=>commandLink(`/model ${p.id}/${m.id}`,m.name??`${p.id}/${m.id}`))))
+      return {text:`### 模型配置\n当前：${selection?`${selection.provider}/${selection.model}`:'宿主默认'}\n可用模型（点击切换）：\n${models.flat().join('\n')}\n手动指定：/model provider/model`}
+    }
+    const split=value.indexOf('/'),provider=split<0?selection!.provider:value.slice(0,split),model=split<0?value:value.slice(split+1)
+    if(!(await this.ctx.llm.listModels(provider)).some(m=>m.id===model))return {text:'模型不在宿主目录中。'}
+    const next={provider,model}
+    if(agent){agent.model.select(next);await this.flush(agent)}
+    return {text:`模型已选择：${provider}/${model}；保留会话上下文。`,preferences:{...preferences,model:next}}
+  }
+  constructor(private readonly ctx: Context, private readonly cwd: string, private readonly permissionPreset: string, private readonly binding: string, private readonly model?: {provider:string;model:string;reasoningEffort?:string | undefined}, private readonly legacyIdentity?: LegacySessionIdentity, private readonly channelKind?: string, private readonly lifetime: Context = ctx, private readonly qqVision?:{provider:string;model:string}|undefined,private readonly qqOptions:QQPresentationOptions&{streaming?:boolean}={}) { }
   async inspect(sessionId: string, inputId: string): Promise<NativeResult | undefined> {
     if (!sessionId) return undefined
-    const snapshot = await this.ctx.sessionPersistence.stat(SessionId(sessionId))
+    const snapshot = await this.lifetime.sessionPersistence.stat(SessionId(sessionId))
     if (!snapshot) return undefined
     if (snapshot.header.cwd !== this.cwd || !ownsSession(sessionId, this.binding, this.legacyIdentity)) throw new Error('Session binding mismatch')
-    const handle = await this.ctx.sessionPersistence.open(SessionId(sessionId), 'read')
+    const handle = await this.lifetime.sessionPersistence.open(SessionId(sessionId), 'read')
     try {
       const events = (await handle.read()).events
       return resultFromEvents([...events, ...interruptedTurnClosers(events)], inputId)
@@ -99,7 +142,7 @@ export class DshNativeHost implements NativeHost {
       if (live) return this.attach(live)
     }
     let selection = this.model ? {provider:this.model.provider,model:this.model.model,...(this.model.reasoningEffort === undefined ? {} : {reasoningEffort:ReasoningEffortId(this.model.reasoningEffort)})} : this.ctx.agentDefaultModel.currentSelection()
-    let preset = this.ctx.agentPresets.defaultId
+    let preset = this.preferences.preset??this.ctx.agentPresets.defaultId
     if (id) {
       const snapshot = await this.ctx.sessionPersistence.stat(SessionId(id), { signal })
       signal.throwIfAborted()
@@ -114,17 +157,13 @@ export class DshNativeHost implements NativeHost {
         for (const event of events) if (event.type === 'agent-preset/selected') preset = event.data.agentPreset ?? this.ctx.agentPresets.defaultId
       } finally { await stored.close() }
     }
+    if(this.preferences.model)selection=this.preferences.model
     this.ctx.permissionPresets.resolve(this.permissionPreset)
     const setup = async (agentCtx: Context) => {
       signal.throwIfAborted()
       await this.ctx.agentPresets.mount(agentCtx, preset)
       signal.throwIfAborted()
-      // 0.2.1 consumes this entry-point-owned state. 0.2.2 owns model
-      // selection on the Agent and ignores the extra argument. A shared
-      // call signature keeps both public installers type-safe.
-      const state = { current: selection, assembled: undefined }
-      const install: (ctx: Context, selectionState: typeof state) => () => void = installModelSelection
-      install(agentCtx, state)
+      installModelSelection(agentCtx)
     }
     const options = { ...selection }
     let handle: AgentHandle
@@ -150,7 +189,7 @@ export class DshNativeHost implements NativeHost {
     } catch (error) { await handle.dispose(); throw error }
   }
   private async flush(agent: Agent): Promise<void> {
-    if (!await this.ctx.sessions.flush(agent.session)) throw new Error('DSH session durability unavailable')
+    if (!await this.lifetime.sessions.flush(agent.session)) throw new Error('DSH session durability unavailable')
   }
   private attach(agent: Agent): NativeSession {
     if (agent.session.id !== agent.id || agent.session.header.cwd !== this.cwd || !this.ctx.agents.roots().includes(agent)) {
@@ -164,7 +203,9 @@ export class DshNativeHost implements NativeHost {
     // These feeds are scope-filtered: registering on the Agent's own context keeps every
     // other session's traffic out of this binding and unwinds automatically on disposal.
     const scoped = agent.ctx
-    const pending = new Map<string, { turn?: number; suppressed?: boolean; text: string; resolve: (value: NativeResult) => void; progress: () => void; controller:AbortController; interactions?:InteractionHandlers | undefined; media?:MediaHandler | undefined }>()
+    let closing=false
+    const finishing=new Set<Promise<void>>()
+    const pending = new Map<string, { turn?: number; suppressed?: boolean; text: string; resolve: (value: NativeResult) => void; progress: () => void; controller:AbortController; interactions?:InteractionHandlers | undefined; media?:MediaHandler | undefined; stream?:((text:string)=>void)|undefined; notice?:((text:string)=>Promise<void>)|undefined; streamedText?:string }>()
     const leaders = new Map<number, string>()
     const claimed = scoped.on('agent/inbox/claimed', payload => {
       if (payload.agent !== agent) return
@@ -183,11 +224,16 @@ export class DshNativeHost implements NativeHost {
     const finish = (id: string, result: NativeResult) => {
       const input = pending.get(id)
       if (!input) return
+      // During teardown the SDK owns the final drain. Calling live-session
+      // flush concurrently with handle disposal races its writer removal.
+      if(closing){input.controller.abort();return}
       input.controller.abort()
       pending.delete(id)
       const normalize = (value: NativeResult): NativeResult => input.suppressed ? {text:'',reason:value.reason,suppressed:true} : value
       // Turn completion is not a durability barrier. No reply before flush.
-      void this.flush(agent).then(() => input.resolve(normalize(result)), () => input.resolve(normalize({ text: 'DSH 日志落盘未确认；请检查本机会话。', reason: 'uncertain' })))
+      const completion=this.flush(agent).then(() => input.resolve(normalize(result)), () => input.resolve(normalize({ text: 'DSH 日志落盘未确认；请检查本机会话。', reason: 'uncertain' })))
+      finishing.add(completion)
+      void completion.finally(()=>finishing.delete(completion))
     }
     const events = scoped.on('session/event', (session, event) => {
       if (session !== agent.session) return
@@ -198,6 +244,16 @@ export class DshNativeHost implements NativeHost {
         if (event.type === 'turn/end' && event.data.turn === input.turn) finish(id, input.suppressed ? { text: '', reason: reasonText(event.data.reason), suppressed: true } : { text: input.text, reason: reasonText(event.data.reason) })
       }
       if (event.type === 'turn/end') leaders.delete(event.data.turn)
+    })
+    let streamingInput:string|undefined,streamAttempt:string|undefined
+    const streamed = scoped.on('agent/assistant-stream', payload => {
+      if(payload.agent!==agent)return
+      const frame=payload.frame
+      if(frame.type==='start'){streamAttempt=frame.attemptId;streamingInput=[...pending].find(([,input])=>input.turn===frame.turn&&!input.suppressed&&!input.controller.signal.aborted)?.[0]}
+      const owned=streamAttempt===frame.attemptId&&streamingInput?pending.get(streamingInput):undefined
+      if(!owned?.stream)return
+      if(frame.type==='start')owned.streamedText=owned.text
+      if(frame.type==='chunk'&&frame.chunk.type==='text-delta'){owned.streamedText=(owned.streamedText??owned.text)+frame.chunk.text;owned.stream(owned.streamedText)}
     })
     const disposed = scoped.on('agent/disposed', payload => {
       if (payload.agent !== agent) return
@@ -223,7 +279,7 @@ export class DshNativeHost implements NativeHost {
     // Only the exact channel-owned Agent can invoke this scoped outbound capability.
     // The recipient is fixed, and all file access goes through the channel Agent’s DSH filesystem.
     const mediaTool = scoped.get?.('tools')
-    const unregisterMedia = mediaTool ? mediaTool.register(channelMediaTool(async (args, exec) => {
+    const sendChannelMedia = async (args:ChannelMediaArgs, exec:Pick<ToolDispatchExecution,'agent'|'callId'|'signal'>) => {
       const owned = owner(exec.agent)
       if (!owned?.input.media) throw new Error('Media sending requires an active channel-owned turn.')
       const scope = scopeFor(owned, exec.signal)
@@ -245,7 +301,7 @@ export class DshNativeHost implements NativeHost {
         workspaceCwd: this.cwd, maxBytes: DEFAULT_MAX_OUTBOUND_MEDIA_BYTES, signal: scope.signal, reader })
       ensureCurrent()
       let preparationNote: string | undefined
-      if (args.kind === 'voice' && (this.channelKind === 'telegram' || this.channelKind === 'discord')) {
+      if (args.kind === 'voice' && this.channelKind === 'telegram') {
         const presets = this.ctx.agentPresets
         const policy = presets.serviceFor(agent, 'sandboxPolicy')?.resolve({ session: agent.session })
         const subprocess = presets.serviceFor(agent, 'subprocess'), sandbox = presets.serviceFor(agent, 'sandbox')
@@ -262,7 +318,31 @@ export class DshNativeHost implements NativeHost {
       ensureCurrent()
       const result = await owned.input.media({ ...scope, callId: exec.callId, kind: args.kind, media })
       return preparationNote && result.mode === 'file' ? { ...result, reason: preparationNote } : result
-    })) : () => {}
+    }
+    let noticeTail=Promise.resolve()
+    const presentation=this.channelKind==='qqbot'?installQQPresentation(scoped,agent,this.qqOptions,{
+      current:()=>!!owner(agent),
+      notice:text=>{const owned=owner(agent);if(owned?.input.notice){const send=owned.input.notice;noticeTail=noticeTail.then(()=>send(text)).catch(()=>{})}},
+      deliver:async(path,callId,exec)=>{const result=await sendChannelMedia({path,kind:'file'},{...exec,callId:callId as ToolRunContext['callId']});if(result.delivery!=='sent')throw new Error('Delivery uncertain')},
+    }):()=>{}
+    const mediaDisposers=mediaTool?[mediaTool.register(channelMediaTool(sendChannelMedia))]:[]
+    if(mediaTool&&this.channelKind==='qqbot'){
+      mediaDisposers.push(mediaTool.register(qqbotSendFileTool(sendChannelMedia)))
+      mediaDisposers.push(mediaTool.register(qqbotDescribeImageTool(async(image,prompt,exec)=>{
+        const owned=owner(exec.agent)
+        if(!owned)throw new Error('Image analysis requires an active channel turn')
+        const scope=scopeFor(owned,exec.signal),signal=AbortSignal.any([scope.signal,AbortSignal.timeout(120_000)])
+        const selection=this.qqVision??this.preferences.model??this.model??this.ctx.agentDefaultModel.currentSelection()
+        if(!selection)throw new Error('A vision model must be configured')
+        const info=await this.ctx.llm.resolveModelInfo(selection.provider,selection.model)
+        if(info.inputModalities&&!info.inputModalities.includes('image'))throw new Error('Selected model does not accept images; configure QQ visionProvider and visionModel')
+        const reader=this.ctx.agentPresets.serviceFor(agent,'fs')??scoped.get('fs')
+        const attachments=scoped.get('attachments') as Parameters<typeof describeQQImage>[0]['attachments']|undefined
+        if(!reader||!attachments)throw new Error('Agent preset must provide filesystem and image attachment services')
+        return describeQQImage({image,prompt,cwd:this.cwd,reader,signal,attachments,llm:this.ctx.llm,...selection})
+      })))
+    }
+    const unregisterMedia=()=>{for(const dispose of mediaDisposers.splice(0))dispose()}
     // Plugin unload and Agent teardown both own this scoped registration.
     const releaseMedia = mediaTool ? this.ctx.effect(() => unregisterMedia) : () => {}
     const questions = scoped.on('user-questions/request',async (request,next) => {
@@ -290,12 +370,12 @@ export class DshNativeHost implements NativeHost {
     return {
       id: agent.id,
       isLive,
-      submit: (id, text, progress, interactions, media) => {
+      submit: (id, text, progress, interactions, media, stream, notice) => {
         let rejectResult!: (reason: unknown) => void
         const result = new Promise<NativeResult>((resolve, reject) => {
           rejectResult = reject
           pending.set(id, {
-            text: '', resolve, progress, interactions, media, controller: new AbortController(),
+            text: '', resolve, progress, interactions, media, stream, notice, controller: new AbortController(),
           })
         })
         try {
@@ -323,13 +403,23 @@ export class DshNativeHost implements NativeHost {
         const foreignQueued = [...(agent.inbox.nextTurn ?? []), ...(agent.inbox.nextStep ?? [])]
           .some(message => !pending.has(message.id))
         const retainForDesktop = foreignQueued || agent.status === 'running' && !owner(agent, true)
+        closing=true
         cancel()
         live = false
         for(const input of pending.values())input.controller.abort()
-        try { if (!retainForDesktop) await handle?.dispose() }
+        try {
+          await Promise.all([...finishing])
+          if (!retainForDesktop) await handle?.dispose()
+          else if(pending.size)await this.flush(agent)
+        }
         finally {
-          for (const input of pending.values()) {input.controller.abort();input.resolve(input.suppressed ? {text:'',reason:'interrupted',suppressed:true} : { text: 'DSH 会话已停止。', reason: 'interrupted' })}
-          pending.clear(); claimed(); discarded(); events(); disposed();questions();unregisterMedia();releaseMedia()
+          for (const [id,input] of pending) {
+            input.controller.abort()
+            let stored:NativeResult|undefined
+            try{stored=await this.inspect(agent.id,id)}catch{}
+            input.resolve(input.suppressed ? {text:'',reason:'interrupted',suppressed:true} : stored??{text:'DSH 会话已停止；此请求的持久化状态未确认，未自动重跑。',reason:'uncertain'})
+          }
+          pending.clear(); claimed(); discarded(); events(); streamed(); disposed();questions();presentation();unregisterMedia();releaseMedia();await noticeTail
         }
       },
     }

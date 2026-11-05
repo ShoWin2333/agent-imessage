@@ -15,7 +15,7 @@ import type { ChannelMessage } from '../src/channels/types.js'
 const cleanup:Array<()=>Promise<void>>=[]
 afterEach(async()=>{for(const close of cleanup.splice(0).reverse())await close()})
 const qs=[{id:'pick',question:'Synthetic question',options:[{label:'One'},{label:'Two'}]}]
-async function fixture(before?:(ctx:Context)=>void, { input = 'synthetic', channel = 'discord', submit = true, shared = true } = {}) {
+async function fixture(before?:(ctx:Context)=>void, { input = 'synthetic', channel = 'telegram', submit = true, shared = true } = {}) {
   const ctx=new Context(),session=Session.create(SessionId('channels-binding-synthetic'))
   let live:any
   const agent={id:session.id,session,ctx,inbox:{clear:vi.fn(),remove:vi.fn(()=>false)},cancel:vi.fn(),followup:vi.fn((message:any)=>{
@@ -160,7 +160,7 @@ it.each(['turn-end','unload','abort'] as const)('withdraws desktop approval on %
   expect(controller.signal.aborted).toBe(action==='abort')
 })
 it.each([
-  ['telegram', 'mobile'], ['telegram', 'desktop'], ['discord', 'mobile'], ['discord', 'desktop'],
+  ['telegram', 'mobile'], ['telegram', 'desktop'], ['imessage', 'mobile'], ['imessage', 'desktop'], ['weixin', 'mobile'], ['weixin', 'desktop'],
 ] as const)('shares one %s upload approval, answered on %s', async (channel, winner) => {
   const desktop = Promise.withResolvers<ApprovalOutcome>()
   const showDesktop = vi.fn((_request: { signal?: AbortSignal }) => desktop.promise)
@@ -333,10 +333,10 @@ it('uses real native approval policy/audit; never bypasses never, then allows ex
   expect(events.filter(e=>e.type==='approval/decided').map(e=>e.data.outcome)).toEqual(['rejected','allowed-once'])
   expect(events.filter(e=>e.type==='approval/policy')).toHaveLength(2)
 })
-it.each(['before', 'after'] as const)('shares Discord approvals with desktop registered %s the coordinator', async order => {
+it.each(['before', 'after'] as const)('shares Telegram approvals with desktop registered %s the coordinator', async order => {
   const desktop = vi.fn(async (): Promise<ApprovalOutcome> => 'allowed-once')
   const register = (ctx: Context) => { ctx.on('approval/request', desktop) }
-  const f = await fixture(order === 'before' ? register : undefined, { channel: 'discord' })
+  const f = await fixture(order === 'before' ? register : undefined, { channel: 'telegram' })
   if (order === 'after') register(f.ctx)
   expect(await f.ctx.approval.request({ agent: f.agent as never, toolName: 'write', reason: 'Synthetic action' })).toBe('allowed-once')
   expect(desktop).toHaveBeenCalledOnce()

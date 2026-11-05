@@ -15,7 +15,21 @@ const digest = (value: unknown): string =>
  */
 export function bindingKey(binding: Binding): string {
   const { enabled: _enabled, credentialRef: _credentialRef, ...identity } = binding
+  if(binding.channel.kind==='qqbot'){
+    const {id,kind,appId,ownerUserId}=binding.channel
+    // Keep the existing private-chat identity while removing the scope option.
+    return digest({...identity,channel:{id,kind,appId,ownerUserId,scope:'c2c'},identityVersion:2})
+  }
   return digest(identity)
+}
+
+/** Exact historical hashes for the same binding; never search arbitrary sessions. */
+export function priorQQBindingKeys(binding:Binding):string[]{
+  if(binding.channel.kind!=='qqbot')return []
+  const {enabled:_,credentialRef,...identity}=binding
+  const {showToolResults:_tools,sendPresentedFiles:_files,maxFiles:_max,...channel}=binding.channel
+  const beforeFeatures={...identity,channel}
+  return [digest(identity),digest(beforeFeatures),digest({...identity,credentialRef}),digest({...beforeFeatures,credentialRef})]
 }
 
 /**
@@ -40,14 +54,15 @@ export function ownsSession(id: string, key: string, legacy?: LegacySessionIdent
 /** Shared ownership check for native resume, receipt recovery and project metadata. */
 export function ownedSessionIds(value: unknown, key: string): string[] {
   if (!value || typeof value !== 'object') return []
-  const row = value as { sessionId?: unknown; receipts?: unknown; legacyIdentity?: LegacySessionIdentity }
+  const row = value as { scopeKey?:unknown; sessionId?: unknown; receipts?: unknown; legacyIdentity?: LegacySessionIdentity }
+  const scopeKey=typeof row.scopeKey==='string'&&/^[a-f0-9]{64}$/.test(row.scopeKey)?row.scopeKey:key
   const ids: unknown[] = [row.sessionId]
   if (Array.isArray(row.receipts)) for (const receipt of row.receipts) {
     if (receipt && typeof receipt === 'object') ids.push((receipt as { sessionId?: unknown }).sessionId)
   }
   const legacy = row.legacyIdentity
   const validLegacy = legacy && typeof legacy.key === 'string' && Array.isArray(legacy.sessionIds) ? legacy : undefined
-  return [...new Set(ids.filter((id): id is string => typeof id === 'string' && ownsSession(id, key, validLegacy)))]
+  return [...new Set(ids.filter((id): id is string => typeof id === 'string' && ownsSession(id, scopeKey, validLegacy)))]
 }
 
 /**

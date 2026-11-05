@@ -7,7 +7,7 @@ import { fallbackTranslate } from '../src/client/locale.js'
 import type { ClientContext } from '../src/client/contracts.js'
 import type { ComponentType } from 'react'
 
-it.each(['unary','stream'] as const)('mounts the %s settings view with both generated remote namespaces in a real Cordis scope', async mode => {
+it.each(['stream'] as const)('mounts the %s settings view with both generated remote namespaces in a real Cordis scope', async mode => {
   const root = new Context()
   const status = vi.fn(async () => ({ ok: true, value: { bindings: [{ id: 'jane-weixin', phase: 'listening' }] } }))
   const projectStatus = vi.fn(async () => ({ ok: true, value: { projects: [{ id: 'project', title: 'Jane', cwd: '/synthetic/jane', bindingIds: ['jane-weixin'] }], pending: [], errors: [] } }))
@@ -35,6 +35,7 @@ it.each(['unary','stream'] as const)('mounts the %s settings view with both gene
   let registration: { options: { inject(): any }; component: ComponentType<any> } | undefined
   let remoteUnmounted = 0
   const services = await root.plugin((ctx: Context) => {
+    ctx.provide('remote.qqBotSetup' as any, {})
     ctx.provide('remote.channels' as any, namespaces.channels)
     ctx.provide('remote.channelProjects' as any, namespaces.projects)
     ctx.provide('remote.session' as any, { modelCatalog: async () => ({ ok: true, value: { default: { provider: 'synthetic', model: 'no-call' }, groups: [], failures: [] } }) })

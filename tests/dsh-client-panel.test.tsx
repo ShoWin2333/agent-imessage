@@ -17,7 +17,7 @@ function fixture(initial:Binding[]=[binding()],agents?:AgentGroup[]){
   const picker=vi.fn(async():Promise<string|null>=>null)
   const models=vi.fn(async()=>({ok:true as const,value:{default:{provider:'host',model:'default'},groups:[{id:'host',name:'宿主',models:[{id:'default',name:'默认模型'},{id:'configured',name:'已配置模型',reasoning:{efforts:[{id:'high',name:'高'}]}}]}],failures:[]}}))
   const status=vi.fn(async()=>({ok:true as const,value:{bindings:initial.map(b=>({id:b.id,phase:'stopped'}))}}))
-  const ctx={remote:{session:{modelCatalog:models},channels:{status}},uiWorkspace:{pickDirectory:picker},inject(this:ClientContext,_dependencies:string[],mount:(ctx:ClientContext)=>()=>void){const release=mount(this);return Object.assign(Promise.resolve(),{dispose:async()=>{release()}})}} as unknown as ClientContext
+  const ctx={remote:{session:{modelCatalog:models},channels:{status,async *statusStream(signal:AbortSignal){yield (await status()).value;if(!signal.aborted)await new Promise<void>(resolve=>signal.addEventListener('abort',()=>resolve(),{once:true}))}}},uiWorkspace:{pickDirectory:picker},inject(this:ClientContext,_dependencies:string[],mount:(ctx:ClientContext)=>()=>void){const release=mount(this);return Object.assign(Promise.resolve(),{dispose:async()=>{release()}})}} as unknown as ClientContext
   const show=()=>render(<ChannelPanel ctx={ctx} channelForm={form}/>)
   return {form,ctx,mutate,picker,models,status,replace,show,snapshot:()=>snapshot}
 }
@@ -31,14 +31,14 @@ describe('native channel settings panel',()=>{
     expect(screen.queryByRole('textbox',{name:/密钥/})).toBeNull()
     await waitFor(()=>expect(f.models).toHaveBeenCalledTimes(1))
   })
-  it('edits and saves an inert Feishu binding with identity fields and a credential reference',async()=>{
-    const f=fixture([],[emptyAgent]);f.show();fireEvent.click(screen.getByRole('button',{name:'＋ 飞书'}))
-    const fields=[['项目目录','/tmp/project'],['宿主权限预设','workspace-write'],['凭据引用（宿主已配置）','FEISHU_SECRET'],
-      ['飞书 App ID','cli_1234567890abcdef'],['飞书租户 Key','tenant'],['允许的飞书用户 Open ID','ou_owner'],['飞书单聊 Chat ID','oc_private']]
-    for(const [name,value] of fields) fireEvent.change(screen.getByLabelText(name!),{target:{value}})
-    expect(f.mutate).not.toHaveBeenCalled();expect(screen.queryByLabelText('App Secret')).toBeNull()
+  it('edits and saves an inert Weixin binding with identity fields and a credential reference',async()=>{
+    const f=fixture([],[emptyAgent]);f.show();fireEvent.click(screen.getByRole('button',{name:'＋ 微信'}))
+    const fields=[['项目目录','/tmp/project'],['宿主权限预设','workspace-write'],['凭据引用（宿主已配置）','WEIXIN_TOKEN'],
+      ['账号 ID','bot@synthetic'],['微信允许的用户 ID','owner'],['微信 API 地址','https://ilinkai.weixin.qq.com']]
+    for(const [name,value] of fields)fireEvent.change(screen.getByLabelText(name!),{target:{value}})
+    expect(f.mutate).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button',{name:'保存配置'}));await waitFor(()=>expect(f.mutate).toHaveBeenCalledOnce())
-    expect(f.snapshot().value?.bindings[0]).toMatchObject({enabled:false,credentialRef:'FEISHU_SECRET',channel:{kind:'feishu',appId:'cli_1234567890abcdef',tenantKey:'tenant',ownerUserId:'ou_owner',chatId:'oc_private'}})
+    expect(f.snapshot().value?.bindings[0]).toMatchObject({enabled:false,credentialRef:'WEIXIN_TOKEN',channel:{kind:'weixin',accountId:'bot@synthetic'},weixin:{ownerUserId:'owner',baseUrl:'https://ilinkai.weixin.qq.com'}})
   })
   it('saves the complete binding array with its read revision, then enables only explicitly',async()=>{
     const f=fixture();f.show();fireEvent.change(screen.getByLabelText('项目目录'),{target:{value:'/tmp/changed'}})
@@ -110,23 +110,23 @@ describe('native channel settings panel',()=>{
   })
   it('keeps Agent/channel drafts separate and preserves only the saved channel across reopen',async()=>{
     const a={...binding(),id:'alice-telegram',cwd:'/tmp/alice',channel:{...binding().channel,id:'alice-telegram'}}
-    const d={...binding(),id:'alice-discord',cwd:'/tmp/alice',channel:{id:'alice-discord',kind:'discord' as const,botId:'1234',ownerUserId:'5678'}}
+    const d={...binding(),id:'alice-imessage',cwd:'/tmp/alice',channel:{id:'alice-imessage',kind:'imessage' as const,projectId:'synthetic',senderPhoneNumber:'+15551234567',assignedPhoneNumber:'+15557654321'}}
     const j={...binding(),id:'jane-telegram',cwd:'/tmp/jane',channel:{...binding().channel,id:'jane-telegram',botId:'999'}}
     const f=fixture([a,d,j]);f.show();await screen.findByRole('option',{name:'已配置模型'})
     fireEvent.change(screen.getByLabelText('凭据引用（宿主已配置）'),{target:{value:'ALICE_UNSAVED'}})
-    fireEvent.click(within(screen.getByRole('navigation',{name:'Agent 所属渠道'})).getByRole('button',{name:'Discord'}))
-    fireEvent.change(screen.getByLabelText('凭据引用（宿主已配置）'),{target:{value:'DISCORD_SAVED'}})
+    fireEvent.click(within(screen.getByRole('navigation',{name:'Agent 所属渠道'})).getByRole('button',{name:'iMessage'}))
+    fireEvent.change(screen.getByLabelText('凭据引用（宿主已配置）'),{target:{value:'IMESSAGE_SAVED'}})
     fireEvent.click(screen.getByRole('button',{name:'保存配置'}));await waitFor(()=>expect(f.mutate).toHaveBeenCalledTimes(1))
     const payload=f.mutate.mock.calls[0]![0][0]!.value
     expect(payload.find(b=>b.id===a.id)).toEqual(a);expect(payload.find(b=>b.id===j.id)).toEqual(j)
-    expect(payload.find(b=>b.id===d.id)!.credentialRef).toBe('DISCORD_SAVED')
+    expect(payload.find(b=>b.id===d.id)!.credentialRef).toBe('IMESSAGE_SAVED')
     fireEvent.click(within(screen.getByRole('navigation',{name:'Agent 分组'})).getByRole('button',{name:/Jane/}))
     expect((screen.getByLabelText('凭据引用（宿主已配置）') as HTMLInputElement).value).toBe(j.credentialRef)
     fireEvent.click(within(screen.getByRole('navigation',{name:'Agent 分组'})).getByRole('button',{name:/Alice/}))
     expect((screen.getByLabelText('凭据引用（宿主已配置）') as HTMLInputElement).value).toBe('ALICE_UNSAVED')
     fireEvent.click(screen.getByRole('button',{name:'取消编辑'}));expect((screen.getByLabelText('凭据引用（宿主已配置）') as HTMLInputElement).value).toBe(a.credentialRef)
-    cleanup();f.show();fireEvent.click(within(screen.getByRole('navigation',{name:'Agent 所属渠道'})).getByRole('button',{name:'Discord'}))
-    expect((screen.getByLabelText('凭据引用（宿主已配置）') as HTMLInputElement).value).toBe('DISCORD_SAVED')
+    cleanup();f.show();fireEvent.click(within(screen.getByRole('navigation',{name:'Agent 所属渠道'})).getByRole('button',{name:'iMessage'}))
+    expect((screen.getByLabelText('凭据引用（宿主已配置）') as HTMLInputElement).value).toBe('IMESSAGE_SAVED')
   })
   it('checks the selected binding again after confirmation and never overwrites concurrent changes',async()=>{
     const original={...binding(),id:'alice-telegram',enabled:true,channel:{...binding().channel,id:'alice-telegram'}},f=fixture([original]);f.show()
@@ -211,16 +211,16 @@ describe('native channel settings panel',()=>{
   })
   it('lists and removes exactly one Agent’s saved channels, retaining other configuration and drafts',async()=>{
     const a={...binding(),id:'alice-telegram',enabled:true,channel:{...binding().channel,id:'alice-telegram'}}
-    const d={...binding(),id:'alice-discord',channel:{id:'alice-discord',kind:'discord' as const,botId:'1234',ownerUserId:'5678'}}
+    const d={...binding(),id:'alice-imessage',channel:{id:'alice-imessage',kind:'imessage' as const,projectId:'synthetic',senderPhoneNumber:'+15551234567',assignedPhoneNumber:'+15557654321'}}
     const j={...binding(),id:'jane-telegram',cwd:'/tmp/jane',channel:{...binding().channel,id:'jane-telegram',botId:'999'}}
     const f=fixture([a,d,j]);f.show()
     fireEvent.click(screen.getByRole('button',{name:/Jane 1/}))
     fireEvent.change(screen.getByLabelText('凭据引用（宿主已配置）'),{target:{value:'JANE_DRAFT'}})
     fireEvent.click(screen.getByRole('button',{name:/Alice 2/}))
-    fireEvent.click(screen.getByRole('button',{name:'＋ 飞书'}))
+    fireEvent.click(screen.getByRole('button',{name:'＋ 微信'}))
     fireEvent.click(screen.getByRole('button',{name:'移除 Agent'}))
     const dialog=screen.getByRole('dialog');expect(dialog.textContent).toContain('alice-telegram · Telegram · 将停止并移除配置')
-    expect(dialog.textContent).toContain('alice-discord · Discord · 已停用，将移除配置')
+    expect(dialog.textContent).toContain('alice-imessage · iMessage · 已停用，将移除配置')
     expect(dialog.textContent).not.toContain(j.id);expect(dialog.textContent).toContain('未保存渠道草稿')
     fireEvent.click(within(dialog).getByRole('button',{name:'取消'}));expect(f.mutate).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button',{name:'移除 Agent'}));fireEvent.click(screen.getByRole('button',{name:'确认移除配置'}))
@@ -245,7 +245,7 @@ describe('native channel settings panel',()=>{
   it.each(['移除渠道','移除 Agent'])('rejects %s when another Agent saved a formerly local draft id after confirmation',async action=>{
     const other={...emptyAgent,id:'agent-other',name:'Other',cwd:'/tmp/other'}
     const f=fixture([],[emptyAgent,other]);f.show()
-    fireEvent.click(screen.getByRole('button',{name:'＋ 飞书'}))
+    fireEvent.click(screen.getByRole('button',{name:'＋ 微信'}))
     const draftId=(screen.getByLabelText('渠道标识') as HTMLInputElement).value
     fireEvent.click(screen.getByRole('button',{name:action}))
     expect(screen.getByRole('dialog').textContent).toContain('没有连接需要停止')
@@ -259,7 +259,7 @@ describe('native channel settings panel',()=>{
   })
   it('shows the selected channel’s Host project independently of the Agent default or an unsaved directory draft',async()=>{
     const a={...binding(),id:'channel-a',enabled:true,cwd:'/tmp/channel-a',channel:{...binding().channel,id:'channel-a'}}
-    const b={...binding(),id:'channel-b',enabled:true,cwd:'/tmp/channel-b',channel:{id:'channel-b',kind:'discord' as const,botId:'1234',ownerUserId:'5678'}}
+    const b={...binding(),id:'channel-b',enabled:true,cwd:'/tmp/channel-b',channel:{id:'channel-b',kind:'imessage' as const,projectId:'synthetic',senderPhoneNumber:'+15551234567',assignedPhoneNumber:'+15557654321'}}
     const f=fixture([a,b],[{...emptyAgent,cwd:'/tmp/default',bindingIds:[a.id,b.id]}])
     f.ctx.remote.channelProjects={status:async()=>({ok:true,value:{projects:[
       {id:'project-a',title:'Channel A',cwd:'/canonical/channel-a',bindingIds:[a.id]},
@@ -271,7 +271,7 @@ describe('native channel settings panel',()=>{
     expect(screen.getByText('仅供新增渠道预填；已有渠道保留各自目录。')).toBeTruthy()
     fireEvent.change(screen.getByLabelText('项目目录'),{target:{value:'/tmp/unsaved'}})
     expect(screen.getByText('DSH 项目：Channel A · project-a · /canonical/channel-a')).toBeTruthy()
-    fireEvent.click(within(screen.getByRole('navigation',{name:'Agent 所属渠道'})).getByRole('button',{name:'Discord'}))
+    fireEvent.click(within(screen.getByRole('navigation',{name:'Agent 所属渠道'})).getByRole('button',{name:'iMessage'}))
     expect(screen.getByText('DSH 项目：Channel B · project-b · /canonical/channel-b')).toBeTruthy()
     expect(screen.queryByText('DSH 项目：Channel A · project-a · /canonical/channel-a')).toBeNull()
     expect(f.mutate).not.toHaveBeenCalled()
@@ -292,11 +292,19 @@ describe('native channel settings panel',()=>{
     expect((screen.getByLabelText('凭据引用（宿主已配置）') as HTMLInputElement).value).toBe('DRAFT_REF')
   })
   it('removes an empty Agent and a draft-only channel without inventing a running connection',async()=>{
-    const f=fixture([],[emptyAgent]);f.show();fireEvent.click(screen.getByRole('button',{name:'＋ 飞书'}))
+    const f=fixture([],[emptyAgent]);f.show();fireEvent.click(screen.getByRole('button',{name:'＋ 微信'}))
     fireEvent.click(screen.getByRole('button',{name:'移除渠道'}));expect(screen.getByRole('dialog').textContent).toContain('没有连接需要停止')
     fireEvent.click(screen.getByRole('button',{name:'确认移除配置'}));await screen.findByText('尚未配置渠道')
     fireEvent.click(screen.getByRole('button',{name:'移除 Agent'}));fireEvent.click(screen.getByRole('button',{name:'确认移除配置'}))
     await screen.findByText('先新增 Agent，再为它添加渠道。');expect(f.snapshot().value).toEqual({bindings:[],agents:[]})
+  })
+  it.each(['discord','feishu'])('shows a read-only error for retired %s configuration without deleting or rewriting it',kind=>{
+    const retired={...binding(),id:'retired',channel:{id:'retired',kind}} as Binding
+    const f=fixture([binding(),retired]);f.show()
+    expect(screen.getByRole('alert').textContent).toContain('仅支持 iMessage、Telegram 和微信')
+    expect(screen.getByText('请先核对宿主配置。此页面不会自动删除绑定、Agent 分组、凭据或会话。')).toBeTruthy()
+    expect(screen.queryByRole('button')).toBeNull();expect(f.mutate).not.toHaveBeenCalled()
+    expect(f.snapshot().value?.bindings).toEqual([binding(),retired])
   })
   it('renders malformed external membership safely and blocks writes until repaired',()=>{
     const f=fixture([binding()],[{...emptyAgent,bindingIds:['missing']}]);f.show()
@@ -344,4 +352,18 @@ it.each(['C:\\workspace\\project','\\\\server\\share\\project'])('saves a Window
 })
 it.each(['C:relative','\\relative','\\\\server'])('rejects incomplete or relative Windows path %s in the panel',cwd=>{
  expect(validateBindings([{...binding(),cwd}])).toContain('绝对项目路径')
+})
+
+
+it('accepts QQ schema defaults from the real Host contract and preserves every existing binding',async()=>{
+ const original=binding(),qq:Binding={id:'alice-qqbot',enabled:false,cwd:'/tmp/project',credentialRef:'QQ_SECRET',permissionPreset:'existing',channel:{id:'alice-qqbot',kind:'qqbot',appId:'12345678',ownerUserId:'owner_openid'}}
+ const group={...emptyAgent,bindingIds:[original.id,qq.id]},f=fixture([original,qq],[group])
+ f.mutate.mockImplementation(async(ops,revision)=>{
+  const values=(ops.find(op=>op.path[0]==='bindings')!.value as Binding[]).map(b=>b.channel.kind==='qqbot'?{...b,channel:{streaming:true,showToolResults:false,sendPresentedFiles:true,maxFiles:4,externalTurns:'c2c',...b.channel}}:b)
+  f.replace(values,revision!+1,ops.find(op=>op.path[0]==='agents')!.value as AgentGroup[]);return true
+ })
+ f.show();fireEvent.click(screen.getByRole('button',{name:'QQ Bot'}));fireEvent.change(screen.getByLabelText('项目目录'),{target:{value:'/tmp/qq-updated'}});fireEvent.click(screen.getByRole('button',{name:'保存配置'}))
+ await screen.findByText('配置已保存；实际连接状态以下方宿主状态为准。')
+ expect(screen.queryByRole('alert')).toBeNull();expect(f.snapshot().value!.bindings![0]).toEqual(original)
+ expect(f.snapshot().value!.bindings).toHaveLength(2);expect((screen.getByRole('button',{name:'保存配置'}) as HTMLButtonElement).disabled).toBe(true)
 })

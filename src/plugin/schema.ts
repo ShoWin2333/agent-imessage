@@ -1,19 +1,18 @@
 import Schema from '@deepseek-ai/schemastery'
 import { absoluteWorkspacePattern } from './workspace-path.js'
-import { FEISHU_APP_RE, FEISHU_USER_RE, FEISHU_CHAT_RE, FEISHU_TENANT_RE, CREDENTIAL_RE, IDENTIFIER_RE, ORIGIN_RE, PHONE_RE, SNOWFLAKE_RE, TELEGRAM_ID_RE } from '../shared/rules.js'
+import { CREDENTIAL_RE, IDENTIFIER_RE, ORIGIN_RE, PHONE_RE, TELEGRAM_ID_RE } from '../shared/rules.js'
 import {MAX_AGENTS} from '../shared/agents.js'
 
 const id = () => Schema.string().pattern(IDENTIFIER_RE).required()
 const text = () => Schema.string().min(1).required()
 const numeric = () => Schema.string().pattern(TELEGRAM_ID_RE).required()
-const snowflake = () => Schema.string().pattern(SNOWFLAKE_RE).required()
 const phone = () => Schema.string().pattern(PHONE_RE).required()
+const qqid=()=>Schema.string().pattern(/^[A-Za-z0-9_-]{8,128}$/).required()
 const channels = Schema.union([
   Schema.object({ id:id(), kind:Schema.const('imessage').required(), projectId:text(), senderPhoneNumber:phone(), assignedPhoneNumber:phone() }),
   Schema.object({ id:id(), kind:Schema.const('telegram').required(), botId:numeric(), ownerUserId:numeric() }),
   Schema.object({ id:id(), kind:Schema.const('weixin').required(), accountId:Schema.string().min(1).max(256).required() }),
-  Schema.object({id:id(), kind:Schema.const('feishu').required(), appId:Schema.string().pattern(FEISHU_APP_RE).required(), tenantKey:Schema.string().pattern(FEISHU_TENANT_RE).required(), ownerUserId:Schema.string().pattern(FEISHU_USER_RE).required(), chatId:Schema.string().pattern(FEISHU_CHAT_RE).required()}),
-  Schema.object({ id:id(), kind:Schema.const('discord').required(), botId:snowflake(), ownerUserId:snowflake(), guildId:snowflake().required(false), channelId:snowflake().required(false) }),
+  Schema.object({id:id(),kind:Schema.const('qqbot').required(),appId:Schema.string().pattern(/^[1-9]\d{3,31}$/).required(),ownerUserId:qqid(),streaming:Schema.boolean().default(true),showToolResults:Schema.boolean().default(false),sendPresentedFiles:Schema.boolean().default(true),maxFiles:Schema.number().min(1).max(32).step(1).default(4),externalTurns:Schema.union(['off','c2c']).default('c2c'),visionProvider:Schema.string().min(1),visionModel:Schema.string().min(1)}),
 ]).required()
 const binding = Schema.object({
   id:id(), enabled:Schema.boolean().default(false), cwd:Schema.string().pattern(absoluteWorkspacePattern).required(),

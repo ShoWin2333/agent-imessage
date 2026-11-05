@@ -13,29 +13,21 @@ export const IDENTIFIER_RE = /^[A-Za-z0-9_-]{1,64}$/
 export const CREDENTIAL_RE = /^[A-Za-z_][A-Za-z0-9_]*$/
 export const PHONE_RE = /^\+[1-9]\d{6,14}$/
 export const TELEGRAM_ID_RE = /^[1-9]\d{0,15}$/
-export const SNOWFLAKE_RE = /^[1-9]\d{0,19}$/
-export const FEISHU_APP_RE = /^cli_[0-9a-fA-F]{16}$/
-export const FEISHU_USER_RE = /^ou_[A-Za-z0-9_-]{1,128}$/
-export const FEISHU_CHAT_RE = /^oc_[A-Za-z0-9_-]{1,128}$/
-export const FEISHU_TENANT_RE = /^[A-Za-z0-9_-]{1,128}$/
 export const ORIGIN_RE = /^https?:\/\/[^\s]+$/
 
-export type ChannelKind = 'imessage' | 'telegram' | 'weixin' | 'discord' | 'feishu'
+export type ChannelKind = 'imessage' | 'telegram' | 'weixin' | 'qqbot'
+export const isChannelKind=(kind:unknown):kind is ChannelKind=>kind==='imessage'||kind==='telegram'||kind==='weixin'||kind==='qqbot'
 
 export interface RuleChannel {
   readonly id: string
   readonly kind: ChannelKind
-  readonly appId?: string | undefined
-  readonly tenantKey?: string | undefined
-  readonly chatId?: string | undefined
   readonly projectId?: string | undefined
   readonly senderPhoneNumber?: string | undefined
   readonly assignedPhoneNumber?: string | undefined
+  readonly appId?: string | undefined
   readonly botId?: string | undefined
   readonly ownerUserId?: string | undefined
   readonly accountId?: string | undefined
-  readonly guildId?: string | undefined
-  readonly channelId?: string | undefined
 }
 
 export interface RuleBinding {
@@ -52,13 +44,12 @@ export type BindingIssueCode =
   | 'id-format'
   | 'id-duplicate'
   | 'channel-id'
+  | 'channel-kind'
   | 'cwd-absolute'
   | 'credential-ref'
   | 'permission-preset'
   | 'channel-field'
   | 'channel-format'
-  | 'discord-pair'
-  | 'discord-owner'
   | 'weixin-owner'
   | 'weixin-origin'
   | 'account-duplicate'
@@ -73,16 +64,14 @@ const requiredFields: Record<ChannelKind, readonly string[]> = {
   imessage: ['projectId', 'senderPhoneNumber', 'assignedPhoneNumber'],
   telegram: ['botId', 'ownerUserId'],
   weixin: ['accountId'],
-  discord: ['botId', 'ownerUserId'],
-  feishu: ['appId', 'tenantKey', 'ownerUserId', 'chatId'],
+  qqbot: ['appId', 'ownerUserId'],
 }
 
 const text = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0
 
 const consumerOf = (channel: RuleChannel): string => {
   const identity = channel.kind === 'imessage' ? channel.projectId
-    : channel.kind === 'weixin' ? channel.accountId
-      : channel.kind === 'feishu' ? channel.appId : channel.botId
+    : channel.kind === 'weixin' ? channel.accountId : channel.kind === 'qqbot' ? channel.appId : channel.botId
   return JSON.stringify([channel.kind, identity])
 }
 
@@ -104,6 +93,7 @@ export function bindingIssues(bindings: readonly RuleBinding[]): BindingIssue[] 
     if (!text(binding.permissionPreset)) issues.push({ code: 'permission-preset', bindingId: id })
 
     const channel = binding.channel
+    if(!isChannelKind(channel.kind)){issues.push({code:'channel-kind',bindingId:id});continue}
     if (!text(channel.id) || !IDENTIFIER_RE.test(channel.id)) issues.push({ code: 'channel-id', bindingId: id })
 
     for (const field of requiredFields[channel.kind] ?? []) {
@@ -122,19 +112,8 @@ export function bindingIssues(bindings: readonly RuleBinding[]): BindingIssue[] 
         if (text(value) && !TELEGRAM_ID_RE.test(value)) issues.push({ code: 'channel-format', bindingId: id, field })
       }
     }
-    if (channel.kind === 'feishu') {
-      for (const [field, pattern] of [['appId',FEISHU_APP_RE],['ownerUserId',FEISHU_USER_RE],['chatId',FEISHU_CHAT_RE],['tenantKey',FEISHU_TENANT_RE]] as const) {
-        const value = channel[field]
-        if (text(value) && !pattern.test(value)) issues.push({code:'channel-format',bindingId:id,field})
-      }
-    }
-    if (channel.kind === 'discord') {
-      for (const field of ['botId', 'ownerUserId'] as const) {
-        const value = channel[field]
-        if (text(value) && !SNOWFLAKE_RE.test(value)) issues.push({ code: 'channel-format', bindingId: id, field })
-      }
-      if (Boolean(channel.guildId) !== Boolean(channel.channelId)) issues.push({ code: 'discord-pair', bindingId: id })
-      if (text(channel.botId) && channel.botId === channel.ownerUserId) issues.push({ code: 'discord-owner', bindingId: id })
+    if (channel.kind === 'qqbot') {
+      if (!/^[1-9]\d{3,31}$/.test(channel.appId ?? '') || !/^[A-Za-z0-9_-]{8,128}$/.test(channel.ownerUserId ?? '')) issues.push({code:'channel-format',bindingId:id})
     }
     if (channel.kind === 'weixin') {
       if (text(channel.accountId) && channel.accountId.length > 256) issues.push({ code: 'channel-format', bindingId: id, field: 'accountId' })

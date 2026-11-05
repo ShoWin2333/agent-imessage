@@ -13,7 +13,7 @@ export async function installPanel(ctx:ClientContext,contribution:unknown):Promi
   try {
     // $mount publishes these namespaces. A child scope must explicitly claim
     // them before the rendered view can access them through Cordis's guard.
-    pageScope=ctx.inject(['remote.channels','remote.channelProjects'],scoped=>{
+    pageScope=ctx.inject(['remote.channels','remote.channelProjects','remote.qqBotSetup'],scoped=>{
       const form=scoped.configForms.get('dsh-channels')
       return scoped.configForms.whileServed(['dsh-channels'],()=>scoped.slots.inject('settings.section',()=>scoped.slots.register({
         name:'settings.section',id:'dsh-channels',order:55,

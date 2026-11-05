@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Messaging Channels",
-    "description": "Connect iMessage, Telegram, Weixin, Discord and Feishu conversations to Harness sessions, reusing the Host's models, tools and permission presets."
+    "description": "Connect iMessage, Telegram and Weixin conversations to Harness sessions, reusing the Host's models, tools and permission presets."
   }
 }
