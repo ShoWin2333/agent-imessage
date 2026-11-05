@@ -8,6 +8,7 @@ import {Config} from '../src/plugin/schema.js'
 import {bindingIssues} from '../src/shared/rules.js'
 import {bindingKey} from '../src/plugin/identity.js'
 import {ChannelInteractions} from '../src/plugin/interactions.js'
+import {ChannelBridge,type BindingState,type NativeSession} from '../src/plugin/bridge.js'
 
 const scope:FeishuScope={id:'owner-feishu',kind:'feishu',appId:'cli_1234567890abcdef',tenantKey:'tenant_synthetic',ownerUserId:'ou_owner',chatId:'oc_private'}
 const cleanup:Array<()=>Promise<void>>=[]
@@ -75,13 +76,16 @@ it('rejects failed admission and checkpoint writes so provider replay can retry'
   await f.client.callbacks.message(event());expect(f.onMessage).toHaveBeenCalledTimes(3)
   await f.client.callbacks.message(event());expect(f.onMessage).toHaveBeenCalledTimes(3)
 })
-it('serializes bounded admission and rejects overflow without acknowledging dropped work',async()=>{
+it('bounds concurrent admission and reserves capacity for control messages',async()=>{
   const gate=deferred(),f=await fixture({handler:()=>gate.promise}),work:Promise<void>[]=[]
   for(let i=0;i<32;i++)work.push(f.client.callbacks.message(event({message:{...event().message,message_id:`om_${i}`}})))
   await expect(f.client.callbacks.message(event({message:{...event().message,message_id:'om_overflow'}}))).rejects.toThrow('temporarily unavailable')
-  await vi.waitFor(()=>expect(f.onMessage).toHaveBeenCalledTimes(1));gate.resolve();await Promise.all(work)
-  expect(f.onMessage).toHaveBeenCalledTimes(32)
-  await f.client.callbacks.message(event({message:{...event().message,message_id:'om_overflow'}}));expect(f.onMessage).toHaveBeenCalledTimes(33)
+  await vi.waitFor(()=>expect(f.onMessage).toHaveBeenCalledTimes(32))
+  const control=f.client.callbacks.message(event({message:{...event().message,message_id:'om_cancel',content:JSON.stringify({text:'/cancel'})}}))
+  await vi.waitFor(()=>expect(f.onMessage).toHaveBeenCalledTimes(33))
+  gate.resolve();await Promise.all([...work,control])
+  expect(f.onMessage).toHaveBeenCalledTimes(33)
+  await f.client.callbacks.message(event({message:{...event().message,message_id:'om_overflow'}}));expect(f.onMessage).toHaveBeenCalledTimes(34)
 })
 it('bounds durable dedupe history and handles malformed sender/message payloads',async()=>{
   const store={state:{seen:Array.from({length:1024},(_,i)=>`old-${i}`)},save:vi.fn(async()=>{})},f=await fixture({store})
@@ -109,12 +113,12 @@ it('does not mistake the SDK start return for a handshake; times out and closes 
   expect(f.value.state.phase).toBe('failed');expect(f.client.close).toHaveBeenCalledOnce()
   f.client.callbacks.ready();expect(f.value.state.phase).toBe('failed')
 })
-it('stopping fences queued admission and delivery without waiting on a blocked host',async()=>{
+it('stopping fences pending checkpoints and delivery without waiting on a blocked host',async()=>{
   const gate=deferred(),f=await fixture({handler:()=>gate.promise}),message=await f.value.approvalMessage()
   const first=f.client.callbacks.message(event()),second=f.client.callbacks.message(event({message:{...event().message,message_id:'om_two'}}))
-  const settled=Promise.allSettled([first,second]);await vi.waitFor(()=>expect(f.onMessage).toHaveBeenCalledOnce())
+  const settled=Promise.allSettled([first,second]);await vi.waitFor(()=>expect(f.onMessage).toHaveBeenCalledTimes(2))
   await f.value.stop();await expect(message.send('stale')).rejects.toThrow();gate.resolve()
-  expect((await settled).every(r=>r.status==='rejected')).toBe(true);expect(f.onMessage).toHaveBeenCalledOnce();expect(f.store.save).not.toHaveBeenCalled()
+  expect((await settled).every(r=>r.status==='rejected')).toBe(true);expect(f.onMessage).toHaveBeenCalledTimes(2);expect(f.store.save).not.toHaveBeenCalled()
 })
 it('sends lossless UTF-8 chunks, bounded media and text approval with terminal status',async()=>{
   const f=await fixture(),message=await f.value.approvalMessage(),text='中'.repeat(5000)+'👨‍👩‍👧‍👦'
@@ -151,4 +155,87 @@ it('approval grants only a matching, delivered owner reply and expires on discon
 it('splits graphemes by UTF-8 size and rejects oversized combining sequences',()=>{
   const text='😀'.repeat(3001)+'a';expect(splitFeishuText(text).join('')).toBe(text)
   expect(splitFeishuText('')).toEqual([]);expect(()=>splitFeishuText('a'+'\u0301'.repeat(7000))).toThrow('oversized')
+})
+
+const input=(id:string,text:string)=>event({message:{...event().message,message_id:`om_${id}`,content:JSON.stringify({text})}})
+async function composed(options:{opening?:Promise<void>;admitted?:Promise<void>}={}){
+  let state:BindingState={receipts:[]}
+  const submit=vi.fn<NativeSession['submit']>(()=>({admitted:options.admitted??Promise.resolve(),result:Promise.resolve({text:'done',reason:'completed'})}))
+  const session:NativeSession={id:'feishu-synthetic-session',submit,cancel:vi.fn(),close:vi.fn(async()=>{})}
+  const host={open:vi.fn(async()=>{await options.opening;return session}),inspect:vi.fn(async()=>undefined)}
+  const bridge=new ChannelBridge(host,{read:()=>structuredClone(state),write:async next=>{state=structuredClone(next)}})
+  const f=await fixture({handler:message=>bridge.receive(message)})
+  cleanup.push(()=>bridge.close())
+  return {...f,bridge,host,session,submit,read:()=>state}
+}
+it.each(['/cancel','/stop'])('%s reaches Bridge during slow initialization and prevents task submission',async command=>{
+  const gate=deferred(),f=await composed({opening:gate.promise})
+  const task=f.client.callbacks.message(input('slow','task'))
+  await vi.waitFor(()=>expect(f.host.open).toHaveBeenCalledOnce())
+  const control=f.client.callbacks.message(input('cancel',command))
+  await vi.waitFor(()=>expect(f.onMessage).toHaveBeenCalledTimes(2))
+  // Both calls reached the real Bridge before host.open can resolve.
+  gate.resolve();await Promise.all([task,control]);await f.bridge.drain()
+  expect(f.submit).not.toHaveBeenCalled()
+  expect(f.read().receipts.find(r=>r.id.endsWith(':om_slow'))?.result).toEqual({text:'已取消。',reason:'interrupted'})
+  expect(f.store.state.seen).toHaveLength(2)
+})
+it('full ordinary capacity still admits a deduplicated cancel and cancels every queued Bridge input',async()=>{
+  const gate=deferred(),f=await composed({opening:gate.promise}),tasks:Promise<void>[]=[]
+  for(let i=0;i<32;i++) tasks.push(f.client.callbacks.message(input(`queued_${i}`,`task ${i}`)))
+  await vi.waitFor(()=>expect(f.onMessage).toHaveBeenCalledTimes(32))
+  await expect(f.client.callbacks.message(input('overflow','too many'))).rejects.toThrow('temporarily unavailable')
+  const control=f.client.callbacks.message(input('cancel','/cancel'))
+  expect(f.client.callbacks.message(input('cancel','/cancel'))).toBe(control)
+  await vi.waitFor(()=>expect(f.onMessage).toHaveBeenCalledTimes(33))
+  gate.resolve();await Promise.all([...tasks,control]);await f.bridge.drain()
+  expect(f.submit).not.toHaveBeenCalled()
+  expect(f.read().receipts).toHaveLength(33)
+  expect(f.store.state.seen).toHaveLength(33)
+  expect(new Set(f.store.state.seen).size).toBe(33)
+  // A fresh task after cancellation remains usable; replay cannot cancel it.
+  f.submit.mockReturnValueOnce({admitted:Promise.resolve(),result:Promise.resolve({text:'fresh',reason:'completed'})})
+  await f.client.callbacks.message(input('fresh','new task'));await f.bridge.drain()
+  const cancellations=vi.mocked(f.session.cancel).mock.calls.length
+  await f.client.callbacks.message(input('cancel','/cancel'))
+  expect(f.submit).toHaveBeenCalledOnce();expect(f.submit.mock.calls[0]?.[1]).toBe('new task')
+  expect(f.session.cancel).toHaveBeenCalledTimes(cancellations)
+})
+it('cancels an existing session before its slow admission promise settles',async()=>{
+  const gate=deferred(),f=await composed({admitted:gate.promise})
+  const task=f.client.callbacks.message(input('task','task'))
+  await vi.waitFor(()=>expect(f.submit).toHaveBeenCalledOnce())
+  const control=f.client.callbacks.message(input('cancel','/cancel'))
+  await vi.waitFor(()=>expect(f.session.cancel).toHaveBeenCalled())
+  gate.resolve();await Promise.all([task,control]);await f.bridge.drain()
+})
+it('keeps concurrent transport checkpoints serialized and duplicate acknowledgements durable',async()=>{
+  const gate=deferred(),saved:string[][]=[]
+  const store={state:{seen:[] as string[]},save:vi.fn(async()=>{
+    if(store.save.mock.calls.length===1){await gate.promise;throw new Error('disk failure')}
+    saved.push([...store.state.seen])
+  })}
+  const f=await fixture({store})
+  const first=f.client.callbacks.message(input('first','task'))
+  const failed=expect(first).rejects.toThrow('could not be confirmed')
+  await vi.waitFor(()=>expect(store.save).toHaveBeenCalledOnce())
+  expect(f.client.callbacks.message(input('first','task'))).toBe(first)
+  const control=f.client.callbacks.message(input('control','/status'))
+  await vi.waitFor(()=>expect(f.onMessage).toHaveBeenCalledTimes(2))
+  expect(store.save).toHaveBeenCalledOnce()
+  gate.resolve();await failed;await control
+  expect(saved).toEqual([[`feishu:${scope.appId}:${scope.chatId}:om_control`]])
+  await f.client.callbacks.message(input('first','task'))
+  expect(store.state.seen).toEqual([`feishu:${scope.appId}:${scope.chatId}:om_control`,`feishu:${scope.appId}:${scope.chatId}:om_first`])
+})
+it('does not replay a persisted Bridge cancellation after a transport checkpoint failure',async()=>{
+  const f=await composed()
+  await f.client.callbacks.message(input('first','task'));await f.bridge.drain()
+  f.store.save.mockRejectedValueOnce(new Error('disk failure'))
+  await expect(f.client.callbacks.message(input('cancel','/cancel'))).rejects.toThrow('could not be confirmed')
+  const cancellations=vi.mocked(f.session.cancel).mock.calls.length
+  await f.client.callbacks.message(input('fresh','fresh task'));await f.bridge.drain()
+  await f.client.callbacks.message(input('cancel','/cancel'))
+  expect(f.session.cancel).toHaveBeenCalledTimes(cancellations)
+  expect(f.submit).toHaveBeenCalledTimes(2)
 })

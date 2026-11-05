@@ -27,8 +27,8 @@ export class FeishuAdapter implements ChannelAdapter {
   private client: FeishuConnection | undefined
   private watchdog: ReturnType<typeof setTimeout> | undefined
   private stopping: Promise<void> | undefined
-  private queue = Promise.resolve()
-  private readonly pending = new Map<string, Promise<void>>()
+  private checkpoint = Promise.resolve()
+  private readonly pending = new Map<string, {work:Promise<void>; control:boolean}>()
   constructor(private readonly scope: FeishuScope, private readonly secret: string,
     private readonly store: {state:RouteState; save():Promise<void>},
     private readonly onMessage: (message:ChannelMessage) => Promise<void>,
@@ -45,7 +45,7 @@ export class FeishuAdapter implements ChannelAdapter {
     await this.stopping
     if (this.controller) return
     const signal = (this.controller = new AbortController()).signal
-    this.queue = Promise.resolve(); this.pending.clear()
+    this.pending.clear()
     this.publish({phase:'starting'})
     // ws.start resolves before the handshake. Publish listening only from onReady.
     const current = () => signal === this.controller?.signal && !signal.aborted
@@ -111,25 +111,32 @@ export class FeishuAdapter implements ChannelAdapter {
     try {text = (JSON.parse(message.content) as {text?:unknown} | null)?.text} catch {return Promise.resolve()}
     if (typeof text !== 'string' || !text.trim()) return Promise.resolve()
     const id = `feishu:${this.scope.appId}:${message.chat_id}:${message.message_id}`
-    if (this.store.state.seen.includes(id)) return Promise.resolve()
     const existing = this.pending.get(id)
-    if (existing) return existing
-    // Reject, rather than acknowledge and drop, overload or unhealthy deliveries.
-    if (this.state.phase !== 'listening' || this.pending.size >= 32) return Promise.reject(new Error('Feishu admission is temporarily unavailable'))
+    if (existing) return existing.work
+    if (this.store.state.seen.includes(id)) return Promise.resolve()
     const acceptedText = text.trim()
-    const work = this.queue.then(async () => {
+    const control = /^\/(cancel|stop|status|help)$/.test(acceptedText) || /^\/(approve|deny|answer)(?:\s|$)/.test(acceptedText)
+    // Reserve a separate bounded budget for controls. Bridge owns admission
+    // ordering; entering it concurrently lets /cancel fence slow/queued turns.
+    const count = [...this.pending.values()].filter(item => item.control === control).length
+    if (this.state.phase !== 'listening' || count >= 32) return Promise.reject(new Error('Feishu admission is temporarily unavailable'))
+    const work = Promise.resolve().then(async () => {
       if (signal.aborted || signal !== this.controller?.signal || this.state.phase !== 'listening') throw new Error('Feishu connection changed')
       if (this.store.state.seen.includes(id)) return
       await this.onMessage(await this.scheduledMessage(id,acceptedText))
-      // Admission owns durability; checkpoint failure is retried by provider replay.
-      signal.throwIfAborted()
-      const previous = this.store.state.seen
-      this.store.state.seen = [...previous,id].slice(-1024)
-      try {await this.store.save()} catch {this.store.state.seen = previous; throw new Error('Feishu checkpoint could not be saved')}
+      // Admission owns durability. Serialize only transport checkpoints so
+      // concurrent controls cannot lose IDs or roll back another saved update.
+      const saved = this.checkpoint.then(async () => {
+        if (signal.aborted || signal !== this.controller?.signal) throw new Error('Feishu connection changed')
+        const previous = this.store.state.seen
+        this.store.state.seen = [...previous,id].slice(-1024)
+        try {await this.store.save()} catch {this.store.state.seen = previous; throw new Error('Feishu checkpoint could not be saved')}
+      })
+      this.checkpoint = saved.catch(() => {})
+      await saved
     }).catch(() => {throw new Error('Feishu message admission could not be confirmed')})
-    this.pending.set(id,work)
-    this.queue = work.catch(() => {})
-    void work.finally(() => {if (this.pending.get(id) === work) this.pending.delete(id)}).catch(() => {})
+    this.pending.set(id,{work,control})
+    void work.finally(() => {if (this.pending.get(id)?.work === work) this.pending.delete(id)}).catch(() => {})
     return work
   }
 }
