@@ -2,16 +2,17 @@
 import {afterEach,describe,expect,it,vi} from 'vitest'
 import {cleanup,fireEvent,render,screen,waitFor,within,act} from '@testing-library/react'
 import {ChannelPanel,phaseLabel,validateBindings} from '../src/client/Panel.js'
-import type {Binding,ClientContext,ConfigForm,FormSnapshot} from '../src/client/contracts.js'
+import type {AgentGroup,Binding,ClientContext,ConfigForm,FormSnapshot} from '../src/client/contracts.js'
 import {installPanel} from '../src/client/bootstrap.js'
 
 afterEach(cleanup)
 const binding=():Binding=>({id:'telegram-one',enabled:false,cwd:'/tmp/project',credentialRef:'TELEGRAM_TOKEN',permissionPreset:'existing',channel:{id:'telegram-one',kind:'telegram',botId:'123',ownerUserId:'456'}})
-function fixture(initial:Binding[]=[binding()]){
-  let snapshot:FormSnapshot={status:'ready',revision:7,writable:true,value:{bindings:structuredClone(initial)}}
+const emptyAgent:AgentGroup={id:'agent-empty',name:'Empty',cwd:'/tmp/project',bindingIds:[]}
+function fixture(initial:Binding[]=[binding()],agents?:AgentGroup[]){
+  let snapshot:FormSnapshot={status:'ready',revision:7,writable:true,value:{bindings:structuredClone(initial),...(agents?{agents:structuredClone(agents)}:{})}}
   const listeners=new Set<()=>void>()
-  const replace=(bindings:Binding[],revision:number)=>{snapshot={...snapshot,revision,value:{bindings:structuredClone(bindings)}};for(const fn of listeners)fn()}
-  const mutate=vi.fn<ConfigForm['mutate']>(async(ops,revision)=>{if(revision!==snapshot.revision)return false;replace(ops[0]!.value,snapshot.revision!+1);return true})
+  const replace=(bindings:Binding[],revision:number,agents=snapshot.value?.agents)=>{snapshot={...snapshot,revision,value:{bindings:structuredClone(bindings),...(agents?{agents:structuredClone(agents)}:{})}};for(const fn of listeners)fn()}
+  const mutate=vi.fn<ConfigForm['mutate']>(async(ops,revision)=>{if(revision!==snapshot.revision)return false;const next={...snapshot.value};for(const op of ops)Object.assign(next,{[op.path[0]]:structuredClone(op.value)});replace(next.bindings??[],snapshot.revision!+1,next.agents);return true})
   const form:ConfigForm={getSnapshot:()=>snapshot,subscribe:fn=>{listeners.add(fn);return()=>{listeners.delete(fn)}},mutate}
   const picker=vi.fn(async():Promise<string|null>=>null)
   const models=vi.fn(async()=>({ok:true as const,value:{default:{provider:'host',model:'default'},groups:[{id:'host',name:'宿主',models:[{id:'default',name:'默认模型'},{id:'configured',name:'已配置模型',reasoning:{efforts:[{id:'high',name:'高'}]}}]}],failures:[]}}))
@@ -22,7 +23,7 @@ function fixture(initial:Binding[]=[binding()]){
 }
 describe('native channel settings panel',()=>{
   it('creates a disabled binding; never starts on mount or editing',async()=>{
-    const f=fixture([]);f.show();fireEvent.click(screen.getByRole('button',{name:'＋ Telegram'}))
+    const f=fixture([],[emptyAgent]);f.show();fireEvent.click(screen.getByRole('button',{name:'＋ Telegram'}))
     expect(screen.getByText('已停用 · 未连接')).toBeTruthy()
     expect((screen.getByRole('button',{name:'启动'}) as HTMLButtonElement).disabled).toBe(true)
     expect(f.mutate).not.toHaveBeenCalled()
@@ -31,7 +32,7 @@ describe('native channel settings panel',()=>{
     await waitFor(()=>expect(f.models).toHaveBeenCalledTimes(1))
   })
   it('edits and saves an inert Feishu binding with identity fields and a credential reference',async()=>{
-    const f=fixture([]);f.show();fireEvent.click(screen.getByRole('button',{name:'＋ 飞书'}))
+    const f=fixture([],[emptyAgent]);f.show();fireEvent.click(screen.getByRole('button',{name:'＋ 飞书'}))
     const fields=[['项目目录','/tmp/project'],['宿主权限预设','workspace-write'],['凭据引用（宿主已配置）','FEISHU_SECRET'],
       ['飞书 App ID','cli_1234567890abcdef'],['飞书租户 Key','tenant'],['允许的飞书用户 Open ID','ou_owner'],['飞书单聊 Chat ID','oc_private']]
     for(const [name,value] of fields) fireEvent.change(screen.getByLabelText(name!),{target:{value}})
@@ -149,7 +150,7 @@ describe('native channel settings panel',()=>{
   it('accepts semantically identical host normalization without retaining a false dirty draft',async()=>{
     const f=fixture();f.mutate.mockImplementation(async(ops,revision)=>{
       const normalized=ops[0]!.value.map(b=>Object.fromEntries(Object.entries(b).reverse()) as unknown as Binding)
-      f.replace(normalized,revision!+1);return true
+      f.replace(normalized,revision!+1,ops.find(op=>op.path[0]==='agents')?.value as AgentGroup[]);return true
     });f.show();fireEvent.change(screen.getByLabelText('凭据引用（宿主已配置）'),{target:{value:'SAVED_REF'}})
     fireEvent.click(screen.getByRole('button',{name:'保存配置'}));await screen.findByText('配置已保存；实际连接状态以下方宿主状态为准。')
     expect((screen.getByRole('button',{name:'保存配置'}) as HTMLButtonElement).disabled).toBe(true)
@@ -167,13 +168,121 @@ describe('native channel settings panel',()=>{
     fireEvent.click(screen.getByRole('button',{name:'保存配置'}));await waitFor(()=>expect(f.mutate).toHaveBeenCalledTimes(1))
     expect(f.mutate.mock.calls[0]![1]).toBe(8);expect(f.snapshot().value!.bindings![1]!.credentialRef).toBe('UNRELATED_NEW_REF')
   })
+  it('creates and reopens an empty Agent without creating a session or a connection',async()=>{
+    const f=fixture([]);f.show()
+    expect((screen.getByRole('button',{name:'＋ Telegram'}) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(screen.getByRole('button',{name:'＋ 新增 Agent'}))
+    fireEvent.change(screen.getByLabelText('Agent 名称'),{target:{value:'Research'}})
+    fireEvent.change(screen.getByLabelText('默认项目目录'),{target:{value:'/tmp/research'}})
+    fireEvent.click(screen.getByRole('button',{name:'创建 Agent'}))
+    await screen.findByText('Agent 已保存，可以添加渠道。')
+    expect(f.snapshot().value).toEqual({bindings:[],agents:[{id:expect.stringMatching(/^agent-/),name:'Research',cwd:'/tmp/research',bindingIds:[]}]})
+    expect(f.mutate.mock.calls[0]![1]).toBe(7)
+    cleanup();f.show();expect(screen.getByRole('button',{name:'Research 0 个渠道'})).toBeTruthy()
+    fireEvent.click(screen.getByRole('button',{name:'＋ Telegram'}))
+    expect((screen.getByLabelText('项目目录') as HTMLInputElement).value).toBe('/tmp/research')
+    expect((screen.getByRole('button',{name:'启动'}) as HTMLButtonElement).disabled).toBe(true)
+  })
+  it('validates new Agent name and path and keeps the form on rejection',async()=>{
+    const f=fixture([]);f.show();fireEvent.click(screen.getByRole('button',{name:'＋ 新增 Agent'}))
+    fireEvent.click(screen.getByRole('button',{name:'创建 Agent'}));await screen.findByText('请填写 1–80 个字符的 Agent 名称。')
+    expect(f.mutate).not.toHaveBeenCalled()
+    fireEvent.change(screen.getByLabelText('Agent 名称'),{target:{value:'Research'}})
+    fireEvent.change(screen.getByLabelText('默认项目目录'),{target:{value:'relative'}})
+    fireEvent.click(screen.getByRole('button',{name:'创建 Agent'}));await screen.findByText('请选择 Agent 的绝对默认项目路径。')
+    f.mutate.mockResolvedValue(false)
+    fireEvent.change(screen.getByLabelText('默认项目目录'),{target:{value:'/tmp/research'}})
+    fireEvent.click(screen.getByRole('button',{name:'创建 Agent'}));await screen.findByRole('alert')
+    expect((screen.getByLabelText('Agent 名称') as HTMLInputElement).value).toBe('Research')
+    expect(f.snapshot().value?.agents).toBeUndefined()
+  })
+  it('removes the last channel while retaining its empty Agent across reopen',async()=>{
+    const original=binding(),f=fixture([original]);f.show()
+    fireEvent.click(screen.getByRole('button',{name:'移除渠道'}))
+    const dialog=screen.getByRole('dialog',{name:'移除配置'})
+    expect(dialog.textContent).toContain(original.id);expect(dialog.textContent).toContain('会话历史、宿主凭据和项目文件保留')
+    expect(f.mutate).not.toHaveBeenCalled()
+    fireEvent.click(within(dialog).getByRole('button',{name:'确认移除配置'}))
+    await screen.findByText('尚未配置渠道')
+    expect(f.snapshot().value?.bindings).toEqual([]);expect(f.snapshot().value?.agents).toHaveLength(1)
+    expect(f.snapshot().value?.agents?.[0]?.bindingIds).toEqual([])
+    cleanup();f.show();expect(screen.getByRole('button',{name:'project 0 个渠道'})).toBeTruthy()
+  })
+  it('lists and removes exactly one Agent’s saved channels, retaining other configuration and drafts',async()=>{
+    const a={...binding(),id:'alice-telegram',enabled:true,channel:{...binding().channel,id:'alice-telegram'}}
+    const d={...binding(),id:'alice-discord',channel:{id:'alice-discord',kind:'discord' as const,botId:'1234',ownerUserId:'5678'}}
+    const j={...binding(),id:'jane-telegram',cwd:'/tmp/jane',channel:{...binding().channel,id:'jane-telegram',botId:'999'}}
+    const f=fixture([a,d,j]);f.show()
+    fireEvent.click(screen.getByRole('button',{name:/Jane 1/}))
+    fireEvent.change(screen.getByLabelText('凭据引用（宿主已配置）'),{target:{value:'JANE_DRAFT'}})
+    fireEvent.click(screen.getByRole('button',{name:/Alice 2/}))
+    fireEvent.click(screen.getByRole('button',{name:'＋ 飞书'}))
+    fireEvent.click(screen.getByRole('button',{name:'移除 Agent'}))
+    const dialog=screen.getByRole('dialog');expect(dialog.textContent).toContain('alice-telegram · Telegram · 将停止并移除配置')
+    expect(dialog.textContent).toContain('alice-discord · Discord · 已停用，将移除配置')
+    expect(dialog.textContent).not.toContain(j.id);expect(dialog.textContent).toContain('未保存渠道草稿')
+    fireEvent.click(within(dialog).getByRole('button',{name:'取消'}));expect(f.mutate).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button',{name:'移除 Agent'}));fireEvent.click(screen.getByRole('button',{name:'确认移除配置'}))
+    await screen.findByText('配置已移除；宿主将停止相应渠道。会话历史、凭据与项目文件保留。')
+    expect(f.snapshot().value?.bindings).toEqual([j]);expect(f.snapshot().value?.agents).toHaveLength(1)
+    expect(screen.queryByRole('button',{name:/Alice 2/})).toBeNull()
+    expect((screen.getByLabelText('凭据引用（宿主已配置）') as HTMLInputElement).value).toBe('JANE_DRAFT')
+  })
+  it('revalidates confirmed removal after a concurrent member change, without writing',async()=>{
+    const f=fixture([{...binding(),enabled:true}]);f.show();fireEvent.click(screen.getByRole('button',{name:'移除 Agent'}))
+    act(()=>f.replace([{...binding(),enabled:true,credentialRef:'CHANGED'}],8))
+    fireEvent.click(screen.getByRole('button',{name:'确认移除配置'}));await screen.findByText('Agent 或渠道配置已变化。请核对当前配置后重新操作。')
+    expect(f.mutate).not.toHaveBeenCalled();expect(f.snapshot().value?.bindings?.[0]?.credentialRef).toBe('CHANGED')
+  })
+  it('rejects removal if a new member was added since confirmation',async()=>{
+    const f=fixture();f.show();fireEvent.click(screen.getByRole('button',{name:'移除 Agent'}))
+    const existing={id:'explicit',name:'Agent',cwd:'/tmp/project',bindingIds:[binding().id]}
+    act(()=>f.replace([binding(),{...binding(),id:'new-channel',channel:{...binding().channel,id:'new-channel',botId:'999'}}],8,[{...existing,bindingIds:[binding().id,'new-channel']}]))
+    fireEvent.click(screen.getByRole('button',{name:'确认移除配置'}));await screen.findByRole('alert')
+    expect(f.mutate).not.toHaveBeenCalled()
+  })
+  it('merges unrelated updates during removal and preserves unrelated draft values',async()=>{
+    const first={...binding(),id:'alice-telegram',channel:{...binding().channel,id:'alice-telegram'}},other={...binding(),id:'jane-telegram',cwd:'/tmp/jane',channel:{...binding().channel,id:'jane-telegram',botId:'999'}}
+    const f=fixture([first,other]);f.show();fireEvent.click(screen.getByRole('button',{name:'移除 Agent'}))
+    act(()=>f.replace([first,{...other,credentialRef:'NEW_REF'}],8))
+    fireEvent.click(screen.getByRole('button',{name:'确认移除配置'}));await waitFor(()=>expect(f.mutate).toHaveBeenCalledOnce())
+    expect(f.mutate.mock.calls[0]![1]).toBe(8);expect(f.snapshot().value?.bindings).toEqual([{...other,credentialRef:'NEW_REF'}])
+  })
+  it('retains configuration and draft on a rejected or uncertain removal, and does not retry',async()=>{
+    const f=fixture();f.mutate.mockRejectedValue(new Error('unknown'));f.show()
+    fireEvent.change(screen.getByLabelText('凭据引用（宿主已配置）'),{target:{value:'DRAFT_REF'}})
+    fireEvent.click(screen.getByRole('button',{name:'移除渠道'}));fireEvent.click(screen.getByRole('button',{name:'确认移除配置'}))
+    await screen.findByRole('alert');expect(f.mutate).toHaveBeenCalledOnce();expect(f.snapshot().value?.bindings).toEqual([binding()])
+    fireEvent.click(screen.getByRole('button',{name:'取消'}))
+    expect((screen.getByLabelText('凭据引用（宿主已配置）') as HTMLInputElement).value).toBe('DRAFT_REF')
+  })
+  it('removes an empty Agent and a draft-only channel without inventing a running connection',async()=>{
+    const f=fixture([],[emptyAgent]);f.show();fireEvent.click(screen.getByRole('button',{name:'＋ 飞书'}))
+    fireEvent.click(screen.getByRole('button',{name:'移除渠道'}));expect(screen.getByRole('dialog').textContent).toContain('没有连接需要停止')
+    fireEvent.click(screen.getByRole('button',{name:'确认移除配置'}));await screen.findByText('尚未配置渠道')
+    fireEvent.click(screen.getByRole('button',{name:'移除 Agent'}));fireEvent.click(screen.getByRole('button',{name:'确认移除配置'}))
+    await screen.findByText('先新增 Agent，再为它添加渠道。');expect(f.snapshot().value).toEqual({bindings:[],agents:[]})
+  })
+  it('renders malformed external membership safely and blocks writes until repaired',()=>{
+    const f=fixture([binding()],[{...emptyAgent,bindingIds:['missing']}]);f.show()
+    expect(screen.getByRole('alert').textContent).toContain('每个渠道只能属于一个 Agent')
+    expect((screen.getByRole('button',{name:'移除 Agent'}) as HTMLButtonElement).disabled).toBe(true)
+    expect(f.mutate).not.toHaveBeenCalled()
+  })
+  it('focuses the safe action, traps Tab and permits Escape to cancel removal',()=>{
+    const f=fixture();f.show();fireEvent.click(screen.getByRole('button',{name:'移除 Agent'}))
+    expect(document.activeElement).toBe(screen.getByRole('button',{name:'取消'}))
+    fireEvent.keyDown(window,{key:'Tab',shiftKey:true});expect(document.activeElement).toBe(screen.getByRole('button',{name:'确认移除配置'}))
+    fireEvent.keyDown(window,{key:'Tab'});expect(document.activeElement).toBe(screen.getByRole('button',{name:'取消'}))
+    fireEvent.keyDown(window,{key:'Escape'});expect(screen.queryByRole('dialog')).toBeNull();expect(f.mutate).not.toHaveBeenCalled()
+  })
   it('registers one independent Settings sidebar section, with no built-in plugin entry',async()=>{
     const f=fixture(),registrations:Array<Record<string,unknown>>=[],slots:string[]=[]
     const ctx={...f.ctx,remote:{...f.ctx.remote,$mount:async()=>async()=>{}},configForms:{get:()=>f.form,whileServed:(_ids:string[],register:()=>()=>void)=>register()},slots:{inject:(name:string,register:()=>()=>void)=>{slots.push(name);return register()},register:(options:Record<string,unknown>)=>{registrations.push(options);return()=>{}}}} as unknown as ClientContext
     const dispose=await installPanel(ctx,{})
     expect(slots).toEqual(['settings.section']);expect(registrations).toHaveLength(1)
     expect(registrations[0]).toMatchObject({name:'settings.section',id:'dsh-channels'})
-    expect((registrations[0]!.label as ()=>string)()).toBe('消息渠道')
+    expect((registrations[0]!.label as ()=>string)()).toBe('Messaging Channels')
     await dispose()
   })
   it('awaits generated remote mount before registering the page and releases in order once',async()=>{

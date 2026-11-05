@@ -18,6 +18,7 @@ import { DshNativeHost } from './native.js'
 import { registerSharedApprovals } from './shared-approvals.js'
 import { channelStatusTool } from './tool.js'
 import { pluginConfigSchema, type Binding } from './config.js'
+import type {AgentGroup} from '../shared/agents.js'
 
 export const name = 'dsh-channels'
 export const inject = ['agents', 'llm', 'sessions', 'sessionPersistence', 'agentPresets', 'agentDefaultModel', 'permissionPresets', 'credentials', 'storageDomain', 'tools']
@@ -37,10 +38,10 @@ export const channelDomain = defineDomain({
 })
 
 /** Loading or saving disabled bindings never resolves credentials or starts consumers. */
-export async function apply(ctx: Context, config: Config | { bindings: Volatile<Binding[]> } = {}): Promise<void> {
+export async function apply(ctx: Context, config: Config | { bindings: Volatile<Binding[]>; agents?:Volatile<AgentGroup[]> } = {}): Promise<void> {
   const log = ctx.logger('dsh-channels')
   const report = (message: string, details?: unknown) => { log.warn(message); if (details !== undefined) log.warn(details) }
-  const read = () => pluginConfigSchema.parse({ bindings: config.bindings && 'get' in config.bindings ? config.bindings.get() : config.bindings ?? [] }).bindings
+  const read = () => pluginConfigSchema.parse({ bindings: config.bindings && 'get' in config.bindings ? config.bindings.get() : config.bindings ?? [], agents:config.agents && 'get' in config.agents ? config.agents.get() : config.agents ?? [] }).bindings
   const initial = read()
   const domain = await ctx.storageDomain.open(channelDomain)
   let stopped = false

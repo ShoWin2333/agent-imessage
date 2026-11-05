@@ -1,6 +1,7 @@
 import Schema from '@deepseek-ai/schemastery'
 import { absoluteWorkspacePattern } from './workspace-path.js'
 import { FEISHU_APP_RE, FEISHU_USER_RE, FEISHU_CHAT_RE, FEISHU_TENANT_RE, CREDENTIAL_RE, IDENTIFIER_RE, ORIGIN_RE, PHONE_RE, SNOWFLAKE_RE, TELEGRAM_ID_RE } from '../shared/rules.js'
+import {MAX_AGENTS} from '../shared/agents.js'
 
 const id = () => Schema.string().pattern(IDENTIFIER_RE).required()
 const text = () => Schema.string().min(1).required()
@@ -25,4 +26,5 @@ const binding = Schema.object({
 // Native Settings reserializes this schema before sending it to the browser.
 // Keep it declarative: executable transform callbacks do not survive that round trip.
 const bindings = Schema.array(binding).max(32).default([]).volatile()
-export const Config: Schema = Schema.object({ bindings })
+const agents=Schema.array(Schema.object({id:id(),name:Schema.string().min(1).max(80).required(),cwd:Schema.string().pattern(absoluteWorkspacePattern).required(),bindingIds:Schema.array(id()).max(32).default([])})).max(MAX_AGENTS).default([]).volatile()
+export const Config: Schema = Schema.object({ bindings, agents })

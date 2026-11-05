@@ -1,3 +1,4 @@
+import type {AgentGroup} from '../shared/agents.js'
 export interface Binding {
   id: string
   enabled: boolean
@@ -8,11 +9,14 @@ export interface Binding {
   weixin?: {ownerUserId:string;baseUrl:string}
   model?: {provider:string;model:string;reasoningEffort?:string}
 }
-export interface FormSnapshot {status:string;value?:{bindings?:Binding[]};revision?:number;writable:boolean}
+export type {AgentGroup} from '../shared/agents.js'
+export interface ChannelConfig {bindings?:Binding[];agents?:AgentGroup[]}
+export interface FormSnapshot {status:string;value?:ChannelConfig;revision?:number;writable:boolean}
+export type ConfigMutation={op:'set';path:['bindings'];value:Binding[]}|{op:'set';path:['agents'];value:AgentGroup[]}
 export interface ConfigForm {
   getSnapshot():FormSnapshot
   subscribe(listener:()=>void):()=>void
-  mutate(ops:Array<{op:'set';path:string[];value:Binding[]}>,revision?:number):Promise<boolean>
+  mutate(ops:ConfigMutation[],revision?:number):Promise<boolean>
 }
 export interface Catalog {
   default:{provider:string;model:string;reasoningEffort?:string}

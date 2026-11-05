@@ -22,8 +22,8 @@
     {
       "name": "@showin2333/dsh-plugin-channels",
       "title": {
-        "en": "Message Channels",
-        "zh": "消息渠道"
+        "en": "Messaging Channels",
+        "zh": "Messaging Channels"
       },
       "description": {
         "en": "Connect iMessage, Telegram, Weixin and Discord conversations to Harness sessions, reusing the Host's models, tools and permission presets.",
