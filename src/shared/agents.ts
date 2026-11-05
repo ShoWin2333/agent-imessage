@@ -13,7 +13,7 @@ export function resolveAgentGroups(bindings:readonly GroupBinding[],agents:reado
   const inferred=new Map<string,AgentGroup>()
   for(const binding of bindings){
     if(assigned.has(binding.id))continue
-    const prefix=/^(.+)-(?:imessage|telegram|weixin|discord|feishu)(?:-|$)/.exec(binding.id)?.[1]??''
+    const prefix=/^(.+)-(?:imessage|telegram|weixin|qqbot)(?:-|$)/.exec(binding.id)?.[1]??''
     const key=JSON.stringify([prefix||binding.id,binding.cwd])
     let group=inferred.get(key)
     if(!group){

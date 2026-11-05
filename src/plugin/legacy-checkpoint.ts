@@ -10,7 +10,7 @@ const checkpointSchema = z.object({
 export function legacyCheckpoint(value: unknown, kind: string): { seen: string[]; legacySeen: string[]; channelCursor?: string } {
   const result = checkpointSchema.safeParse(value)
   // A cursor can contain sensitive session metadata: do not expose parse details.
-  if (!result.success || !['imessage','telegram','weixin','discord'].includes(kind)) throw new Error('Invalid legacy channel checkpoint')
+  if (!result.success || !['imessage','telegram','weixin'].includes(kind)) throw new Error('Invalid legacy channel checkpoint')
   const parsed = result.data, cursor = parsed.channelCursor
   if (cursor !== undefined && (kind === 'telegram' ? !/^(0|[1-9]\d*)$/.test(cursor) || !Number.isSafeInteger(Number(cursor)) : kind !== 'weixin')) throw new Error('Invalid legacy channel checkpoint')
   return { seen: [...new Set(parsed.seen)], legacySeen: [...new Set(parsed.seen)], ...(parsed.channelCursor === undefined ? {} : { channelCursor: parsed.channelCursor }) }

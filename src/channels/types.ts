@@ -8,6 +8,12 @@ export interface ChannelMessage {
   nativeVoice?: boolean
   /** Check the actual payload before native delivery; incompatible audio must use file delivery. */
   supportsNativeVoice?(media: OutboundMediaPayload): boolean
+  /** QQ-only native command and incremental presentation capabilities. */
+  commandChannel?: 'qqbot'
+  /** QQ callback acknowledgment follows actual one-time command validation. */
+  acknowledgeDecision?(accepted:boolean):Promise<void>
+  progressText?(fullText: string): Promise<void>
+  completeText?(fullText: string): Promise<void>
   origin?: 'desktop'
   /** Durable provider message id. */
   id: string

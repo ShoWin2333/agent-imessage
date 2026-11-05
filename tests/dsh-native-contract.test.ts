@@ -169,7 +169,9 @@ it('discarded and disposed inputs terminate without waiting for unrelated turns'
   f.emit('agent/inbox/discarded', { agent: {}, message: { id: 'a' } })
   f.emit('agent/inbox/discarded', { agent: f.agent, message: { id: 'a' } })
   expect((await a.result).reason).toBe('interrupted')
-  await session.close(); expect((await b.result).reason).toBe('interrupted')
+  // This fixture has no stored cancellation boundary; teardown cannot claim
+  // durability from a live flush after its writer has already been removed.
+  await session.close(); expect((await b.result).reason).toBe('uncertain')
 })
 it('failed durability is refused and disposes the exact owned handle', async () => {
   const f = runtime(); f.flush.mockResolvedValueOnce(false)
@@ -250,4 +252,31 @@ it.each([undefined,'high'] as const)('passes the full selected model to new nati
  const session=await new DshNativeHost(f.ctx,'/tmp','workspace-write','binding',selection).open()
  expect(f.ctx.agents.create).toHaveBeenCalledWith(expect.objectContaining({agentOptions:selection}))
  await session.close()
+})
+
+it('reads the committed cancellation after teardown instead of flushing a removed writer',async()=>{
+  const f=runtime(),native=await f.host.open()
+  let removed=false
+  f.agent.followup.mockImplementation(message=>f.agent.session.append('agent/inbox/spliced',{target:'next-turn',start:0,inserted:[message]}))
+  const operation=native.submit('queued-during-approval','synthetic',()=>{});await operation.admitted
+  f.flush.mockImplementation(async()=>{if(removed)throw new Error('writer removed');return true})
+  f.dispose.mockImplementation(async()=>{
+    removed=true
+    f.agent.session.append('agent/inbox/spliced',{target:'next-turn',start:0,removedCount:1,inserted:[],outcome:'canceled'})
+    f.emit('agent/inbox/discarded',{agent:f.agent,message:{id:'queued-during-approval'}})
+    f.emit('agent/disposed',{agent:f.agent})
+  })
+  vi.mocked(f.ctx.sessionPersistence.open).mockResolvedValue({read:async()=>({events:f.agent.session.snapshotEvents()}),close:async()=>{}} as any)
+  await native.close()
+  expect(await operation.result).toEqual({text:'已取消。',reason:'interrupted'})
+  expect(f.flush.mock.invocationCallOrder.at(-1)).toBeLessThan(f.dispose.mock.invocationCallOrder[0]!)
+})
+it('joins an already-started final flush before disposing its writer',async()=>{
+  const f=runtime(),native=await f.host.open()
+  f.agent.followup.mockImplementation(message=>f.emit('agent/inbox/claimed',{agent:f.agent,message,turn:1}))
+  const operation=native.submit('input','synthetic',()=>{});await operation.admitted
+  const release=deferred<boolean>();f.flush.mockImplementationOnce(()=>release.promise)
+  f.emit('session/event',f.agent.session,{type:'turn/end',data:{turn:1,reason:{kind:'completed'}}})
+  const closing=native.close();await Promise.resolve();expect(f.dispose).not.toHaveBeenCalled()
+  release.resolve(true);await closing;expect((await operation.result).reason).toBe('completed');expect(f.dispose).toHaveBeenCalledOnce()
 })

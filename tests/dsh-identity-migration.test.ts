@@ -8,13 +8,13 @@ import { mkdtemp, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { apply, channelDomain, pluginConfigSchema } from '../src/plugin/index.js'
-import { bindingKey, legacyBindingKey, migrateBindingState, ownedSessionIds } from '../src/plugin/identity.js'
+import { bindingKey, legacyBindingKey, migrateBindingState, ownedSessionIds,priorQQBindingKeys } from '../src/plugin/identity.js'
 import { DshNativeHost } from '../src/plugin/native.js'
 import { ChannelProjectGroups } from '../src/plugin/project-groups.js'
 import type { BindingState } from '../src/plugin/bridge.js'
 import type { ChannelMessage } from '../src/channels/types.js'
 
-const transport = vi.hoisted(() => ({ receive: undefined as undefined | ((message: ChannelMessage) => Promise<void>), delivered: [] as ChannelMessage[] }))
+const transport = vi.hoisted(() => ({ receive: undefined as undefined | ((message: ChannelMessage) => Promise<void>), delivered: [] as ChannelMessage[], change: undefined as undefined|((state:{phase:string})=>void) }))
 const message = (id: string): ChannelMessage => ({ id, text: 'synthetic input', send: vi.fn(async () => {}), responding: fn => fn(), sendFile: vi.fn(), sendVoice: vi.fn() })
 vi.mock('../src/channels/telegram.js', () => ({ TelegramAdapter: class {
   constructor(_config: unknown, _store: unknown, receive: typeof transport.receive, private onState: (state: { phase: string }) => void) { transport.receive = receive }
@@ -22,12 +22,18 @@ vi.mock('../src/channels/telegram.js', () => ({ TelegramAdapter: class {
   async stop() {}
   async scheduledMessage(id: string) { const result = message(id); transport.delivered.push(result); return result }
 } }))
+vi.mock('../src/channels/qqbot.js',()=>({QQBotAdapter:class{
+  constructor(_config:unknown,receive:typeof transport.receive,private onState:(state:{phase:string})=>void){transport.receive=receive;transport.change=onState}
+  async start(){this.onState({phase:'listening'})}
+  async stop(){}
+  async scheduledMessage(id:string){const result=message(id);transport.delivered.push(result);return result}
+}}))
 const cleanups: Array<() => Promise<void>> = []
-afterEach(async () => { for (const close of cleanups.splice(0)) await close(); transport.receive = undefined; transport.delivered = [] })
+afterEach(async () => { for (const close of cleanups.splice(0)) await close(); transport.receive = undefined; transport.delivered = [];transport.change=undefined })
 
-async function fixture() {
+async function fixture(kind:'telegram'|'qqbot'='telegram') {
   const cwd = await realpath(process.cwd())
-  const binding = pluginConfigSchema.parse({ bindings: [{ id: 'jane-telegram', enabled: true, cwd, credentialRef: 'SYNTHETIC_REF', permissionPreset: 'workspace-write', channel: { id: 'jane', kind: 'telegram', botId: '123', ownerUserId: '456' } }] }).bindings[0]!
+  const binding = pluginConfigSchema.parse({ bindings: [{ id: 'jane-telegram', enabled: true, cwd, credentialRef: 'SYNTHETIC_REF', permissionPreset: 'workspace-write', channel: kind==='qqbot'?{id:'jane',kind,appId:'12345678',ownerUserId:'owner_openid'}:{ id: 'jane', kind, botId: '123', ownerUserId: '456' } }] }).bindings[0]!
   const key = bindingKey(binding), oldKey = legacyBindingKey(binding)
   const rows = new Map<string, BindingState>(), adapters = new Map<string, unknown>(), sessions = new Map<string, Session>()
   const handlers = new Map<string, Set<(...args: any[]) => void>>()
@@ -62,8 +68,8 @@ async function fixture() {
   rows.set(oldKey, { sessionId: original, receipts: [] })
   adapters.set(oldKey, { seen: ['original-message'], channelCursor: '42' })
   vi.mocked(ctx.agents.create).mockClear()
-  const upgrade = async (credential = binding.credentialRef) => { await apply(ctx, { bindings: [{ ...binding, credentialRef: credential }] }); cleanups.push(stop) }
-  return { ctx, binding, key, oldKey, rows, adapters, sessions, original, follows, upgrade }
+  const upgrade = async (credential = binding.credentialRef,options={}) => { await apply(ctx, { bindings: [{ ...binding, credentialRef: credential,channel:{...binding.channel,...options} }] }); cleanups.push(stop) }
+  return { ctx, binding, key, oldKey, rows, adapters, sessions, original, follows, upgrade, emit }
 }
 
 it('continues a pre-upgrade session after migration and another credential rotation without changing its ID', async () => {
@@ -159,4 +165,45 @@ it('retains the exact migration grant across native JSON storage shutdown and re
       const resumed = await host.open(restored.sessionId); expect(resumed.id).toBe(f.original); await resumed.close()
     } finally { await reopened.close() }
   } finally { await domain.dispose(); await json.dispose(); await storage.dispose(); await rm(root, { recursive: true, force: true }) }
+})
+
+it('continues the current QQ account across new defaults and UI changes without merging or replacing either historical account',async()=>{
+  const f=await fixture('qqbot'),currentKey=priorQQBindingKeys(f.binding)[0]!
+  const current=await new DshNativeHost(f.ctx,f.binding.cwd,f.binding.permissionPreset,currentKey).open()
+  const currentId=current.id;await current.close()
+  const older=structuredClone(f.rows.get(f.oldKey)),recent:BindingState={sessionId:currentId,receipts:[]}
+  f.rows.set(currentKey,recent);f.adapters.set(currentKey,{seen:['already-consumed']})
+  vi.mocked(f.ctx.agents.create).mockClear()
+  await f.upgrade();await transport.receive!(message('qq-continued'))
+  await vi.waitFor(()=>expect(f.follows).toHaveBeenCalledWith(currentId,expect.anything()))
+  expect(f.rows.get(f.key)?.sessionId).toBe(currentId);expect(f.rows.get(f.key)?.scopeKey).toBe(currentKey)
+  expect(f.rows.get(f.oldKey)).toEqual(older);expect(f.rows.get(currentKey)).toEqual(recent)
+  expect(ownedSessionIds(f.rows.get(f.key),f.key)).toEqual([currentId])
+  await cleanups.pop()!()
+  const options={streaming:false,showToolResults:true,sendPresentedFiles:false,maxFiles:9,externalTurns:'off'}
+  expect(bindingKey({...f.binding,channel:{...f.binding.channel,...options}} as any)).toBe(f.key)
+  await f.upgrade('ROTATED_REF',options);await transport.receive!(message('qq-after-settings'))
+  await vi.waitFor(()=>expect(f.follows.mock.calls.at(-1)?.[0]).toBe(currentId))
+  expect(f.ctx.agents.create).not.toHaveBeenCalled()
+  expect(f.rows.get(f.oldKey)).toEqual(older);expect(f.rows.get(currentKey)).toEqual(recent)
+  expect(bindingKey({...f.binding,permissionPreset:'other'})).not.toBe(f.key)
+  expect(bindingKey({...f.binding,channel:{...f.binding.channel,ownerUserId:'other_owner'}} as any)).not.toBe(f.key)
+})
+
+it('re-runs binding recovery after QQ reconnect instead of retaining the completed startup recovery',async()=>{
+  const f=await fixture('qqbot');f.rows.set(f.key,{sessionId:f.original,scopeKey:f.oldKey,receipts:[]});await f.upgrade()
+  const state=f.rows.get(f.key)!,session=f.sessions.get(state.sessionId!)!
+  // Startup recovery has already completed; a later offline completion must still be picked up.
+  await Promise.resolve();transport.change!({phase:'retrying'})
+  session.append('turn/start',{turn:7})
+  session.append('user/message',{id:'desktop-input',role:'user',content:[{type:'text',text:'desktop task'}],source:{kind:'user'}} as never,{surfaceOp:'append'})
+  session.append('assistant/message',{turn:7,message:{content:[{type:'text',text:'offline completion'}]}} as never,{surfaceOp:'append'})
+  session.append('turn/end',{turn:7,reason:{kind:'completed'}})
+  f.emit('session/event',session,{type:'turn/end',data:{turn:7,reason:{kind:'completed'}}})
+  await vi.waitFor(()=>expect(f.rows.get(f.key)?.receipts.at(-1)).toMatchObject({delivery:'pending',result:{text:'offline completion'}}))
+  expect(transport.delivered).toHaveLength(0)
+  transport.change!({phase:'listening'})
+  await vi.waitFor(()=>expect(transport.delivered[0]?.send).toHaveBeenCalledWith('offline completion'))
+  expect(f.rows.get(f.key)?.receipts.at(-1)?.delivery).toBe('sent')
+  expect(f.follows).not.toHaveBeenCalled();expect(f.ctx.agents.create).not.toHaveBeenCalled()
 })

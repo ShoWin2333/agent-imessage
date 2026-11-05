@@ -2,15 +2,16 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import Tools from '@deepseek-ai/dsh-tools'
+import { registerQQPresented } from '../src/plugin/qqbot-presented.js'
 import { DshNativeHost } from '../src/plugin/native.js'
 
 const cleanup: Array<() => Promise<void>> = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close() })
 async function fixture({ presetFs = true, agentFs = false, channelKind = 'imessage' } = {}) {
-  const ctx = new Context(), agentCtx = new Context(), session = Session.create(SessionId('channels-binding-test'))
+  const ctx = new Context(), agentCtx = new Context(), session = Session.create(SessionId('channels-binding-test'),[],{...Session.create(SessionId('channels-binding-test')).header,cwd:'/workspace'})
   let live: any, decision = 'allowed-once'
   const agent = { id: session.id, session, ctx: agentCtx, inbox: { clear: vi.fn(), remove: vi.fn(() => false) }, cancel: vi.fn(), followup: vi.fn((input: any) => {
-    session.append('turn/start', { turn: 1 }); agentCtx.emit('agent/inbox/claimed', { agent, message: input, turn: 1 } as never)
+    session.append('turn/start', { turn: 1 }); session.append('user/message',input,{surfaceOp:'append'}); agentCtx.emit('agent/inbox/claimed', { agent, message: input, turn: 1 } as never)
   }) }
   live = agent
   const read = vi.fn(async () => Buffer.from('test'))
@@ -31,12 +32,17 @@ async function fixture({ presetFs = true, agentFs = false, channelKind = 'imessa
   const services = await provide(ctx), agentServices = await provide(agentCtx), tools = await agentCtx.plugin(Tools)
   const native = await new DshNativeHost(ctx, '/workspace', 'workspace-write', 'binding', undefined, undefined, channelKind).open()
   const send = vi.fn(async (): Promise<{ delivery: 'sent'; name: string; bytes: number; mode: 'image' | 'voice' }> => ({ delivery: 'sent', name: 'test.png', bytes: 4, mode: 'image' }))
-  const operation = native.submit('input', 'send image', () => {}, undefined, send); await operation.admitted
+  const notice=vi.fn(async()=>{})
+  if(channelKind==='qqbot'){
+    const release=registerQQPresented(agentCtx,{state:()=>({sessionId:session.id,receipts:[]}),bridge:{deliverExternalMedia:async(_message:any,request:any)=>send(request)} as any,adapter:{scheduledMessage:async()=>({send:notice})} as any,cwd:'/workspace',policy:'c2c',signal:new AbortController().signal,options:{}})
+    cleanup.push(async()=>release())
+  }
+  const operation = native.submit('input', 'send image', () => {}, undefined, send,undefined,notice); await operation.admitted
   const definition = agentCtx.tools.get('channel_send_media')!
   const exec = { agent, callId: 'call', signal: new AbortController().signal } as any
   const call = (overrides = {}, args = { path: 'test.png', kind: 'image' }) => definition.execute(args, { ...exec, ...overrides })
   cleanup.push(async () => { await native.close(); await operation.result; await tools.dispose(); await agentServices.dispose(); await services.dispose() })
-  return { ctx, agentCtx, agent, session, native, call, send, read, reader, agentRead, agentReader, request, flush, setDecision: (next: string) => { decision = next } }
+  return { ctx, agentCtx, agent, session, native, call, send, read, reader, agentRead, agentReader, request, flush, notice, setDecision: (next: string) => { decision = next } }
 }
 it('registers the capability through real Tools, approves before composed reads, flushes before sending, unregisters on close', async () => {
   const f = await fixture()
@@ -93,4 +99,23 @@ it('rechecks current ownership after approval before reading or uploading', asyn
   const f = await fixture()
   f.request.mockImplementationOnce(async () => { f.native.cancel(); return 'allowed-once' })
   await expect(f.call()).rejects.toThrow('cancelled'); expect(f.read).not.toHaveBeenCalled(); expect(f.send).not.toHaveBeenCalled()
+})
+
+it('automatically offers native present files through the existing approval, filesystem and media path', async () => {
+  const f=await fixture({channelKind:'qqbot'})
+  const exec={agent:f.agent,name:'present',callId:'present-call',signal:new AbortController().signal} as any
+  const result={isError:false,value:{turn:1,files:[{path:'report.pdf'}]},content:[]} as any
+  const next=vi.fn(async()=>({kind:'accept' as const}))
+  await f.agentCtx.waterfall('tools/post-execute',exec,result,next)
+  expect(f.request).toHaveBeenCalledOnce();expect(f.send).toHaveBeenCalledOnce()
+  expect(f.send.mock.calls[0]![0]).toMatchObject({kind:'file',callId:'present:present-call:0'})
+  await f.agentCtx.waterfall('tools/post-execute',exec,result,next)
+  expect(f.send).toHaveBeenCalledOnce()
+  const rejected={...exec,callId:'blocked-present'}
+  await f.agentCtx.waterfall('tools/post-execute',rejected,result,async()=>({kind:'block',feedback:[]}))
+  expect(f.request).toHaveBeenCalledOnce()
+  f.setDecision('rejected')
+  await f.agentCtx.waterfall('tools/post-execute',{...exec,callId:'denied-present'},result,next)
+  expect(f.read).toHaveBeenCalledOnce();expect(f.send).toHaveBeenCalledOnce()
+  await vi.waitFor(()=>expect(f.notice).toHaveBeenCalledWith(expect.stringContaining('未获批准')))
 })

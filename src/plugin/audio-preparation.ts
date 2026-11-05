@@ -118,10 +118,9 @@ export async function prepareVoiceMedia(
       '-ac', '1', '-ar', String(PCM_RATE), '-c:a', 'pcm_s16le', '-threads', '1', '-f', 's16le',
     ], MAX_PCM_BYTES, 'Voice audio exceeds the ten-minute duration limit.')
     if (!pcm.length || pcm.length % 2 !== 0) throw new Error('Voice audio decoded to invalid or empty PCM.')
-    const voice = { durationSeconds: pcm.length / 2 / PCM_RATE, waveform: pcmWaveform(pcm) }
     const basename = media.name.replaceAll('\\', '/').split('/').pop()!.replace(/[\x00-\x1f\x7f]/g, '_')
     const stem = basename.replace(/\.[^.]*$/, '') || 'voice'
-    return { status: 'prepared', media: { bytes: ogg, name: `${stem}.ogg`, mimeType: 'audio/ogg', voice } }
+    return { status: 'prepared', media: { bytes: ogg, name: `${stem}.ogg`, mimeType: 'audio/ogg' } }
   } finally {
     clearTimeout(timer)
     signal?.removeEventListener('abort', onAbort)
@@ -191,19 +190,4 @@ async function runPiped(
   } finally {
     cancellation.signal.removeEventListener('abort', onAbort)
   }
-}
-
-/** RMS amplitude, quantized to 0..255, over 256 equal time bins of decoded PCM. */
-function pcmWaveform(pcm: Buffer): string {
-  const samples = pcm.length / 2
-  const bins = Buffer.alloc(256)
-  for (let bin = 0; bin < bins.length; bin++) {
-    const start = Math.floor(bin * samples / bins.length)
-    // Sub-sample bins in very short clips use the observed nearest sample.
-    const end = Math.min(samples, Math.max(start + 1, Math.floor((bin + 1) * samples / bins.length)))
-    let squares = 0
-    for (let sample = start; sample < end; sample++) squares += (pcm.readInt16LE(sample * 2) / 32768) ** 2
-    bins[bin] = Math.min(255, Math.round(255 * Math.sqrt(squares / (end - start))))
-  }
-  return bins.toString('base64')
 }

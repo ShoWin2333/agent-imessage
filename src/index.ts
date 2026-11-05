@@ -3,11 +3,10 @@ export { apply, name, inject, Config } from './plugin/index.js'
 export type { Binding } from './plugin/index.js'
 export type { ChannelAdapter, ChannelMessage, ChannelConnection, ChannelFactory } from './channels/types.js'
 // Adapters are exported as types only. The Host entry imports each implementation on
-// demand, so a Telegram-only deployment never loads Discord, Feishu or Spectrum.
+// demand, so a Telegram-only deployment never loads Spectrum.
 export type { IMessageAdapter } from './channels/imessage.js'
 export type { TelegramAdapter } from './channels/telegram.js'
+export type {QQBotAdapter} from './channels/qqbot.js'
 export type { WeixinAdapter } from './channels/weixin.js'
-export type { DiscordAdapter } from './channels/discord.js'
-export type { FeishuAdapter } from './channels/feishu.js'
 
 export { ChannelsController } from './plugin/management.js'

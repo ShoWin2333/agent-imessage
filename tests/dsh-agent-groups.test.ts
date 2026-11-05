@@ -9,11 +9,11 @@ import {volatileForm,plainConfig,projectForm} from '../node_modules/@deepseek-ai
 
 const binding=(id='alice-telegram',cwd='/tmp/alice',botId='123')=>pluginConfigSchema.parse({bindings:[{id,cwd,enabled:true,credentialRef:'REF',permissionPreset:'workspace-write',channel:{id,kind:'telegram',botId,ownerUserId:'456'}}]}).bindings[0]!
 it('infers the previous prefix + cwd groups without changing any binding or session key',()=>{
- const rows=[binding(),binding('alice-discord','/tmp/alice','222'),binding('alice-feishu','/tmp/other','789'),binding('custom','/tmp/custom','999')]
+ const rows=[binding(),binding('alice-imessage','/tmp/alice','222'),binding('alice-weixin','/tmp/other','789'),binding('custom','/tmp/custom','999')]
  const before=structuredClone(rows),keys=rows.map(b=>[bindingKey(b),legacyBindingKey(b)])
  const groups=resolveAgentGroups(rows)
  expect(groups.map(g=>[g.name,g.cwd,g.bindingIds])).toEqual([
-  ['Alice','/tmp/alice',['alice-telegram','alice-discord']],['Alice','/tmp/other',['alice-feishu']],['custom','/tmp/custom',['custom']],
+  ['Alice','/tmp/alice',['alice-telegram','alice-imessage']],['Alice','/tmp/other',['alice-weixin']],['custom','/tmp/custom',['custom']],
  ])
  const migrated=pluginConfigSchema.parse({bindings:rows,agents:groups})
  expect(migrated.bindings).toEqual(before)

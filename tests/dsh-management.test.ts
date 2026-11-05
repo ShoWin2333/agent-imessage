@@ -115,7 +115,7 @@ it('legacy metadata suppresses exact old ids without inventing native receipts o
   expect(wasLegacyMessage(new Set(old.legacySeen),'telegram:42')).toBe(true)
   expect(wasLegacyMessage(new Set(old.legacySeen),'telegram:43')).toBe(false)
   expect(()=>legacyCheckpoint({seen:[],tasks:[{input:'private history must not be imported'}]},'telegram')).toThrow()
-  expect(()=>legacyCheckpoint({seen:[],channelCursor:'101'},'discord')).toThrow()
+  expect(()=>legacyCheckpoint({seen:[],channelCursor:'101'},'imessage')).toThrow()
   expect(()=>legacyCheckpoint({seen:[],channelCursor:'9007199254740992'},'telegram')).toThrow()
 })
 
@@ -151,4 +151,34 @@ it.each(['/workspace/project','C:\\workspace\\project','D:/workspace/project','\
 it.each(['relative/project','C:relative','\\relative','\\\\server'])('rejects relative or incomplete workspace %s in all schemas',cwd=>{
  const value={bindings:[{...binding(),cwd}]};expect(()=>pluginConfigSchema.parse(value)).toThrow()
  for(const schema of[Config,new Schema(JSON.parse(JSON.stringify(Config)))])expect(()=>schema(value)).toThrow()
+})
+
+it.each(['discord','feishu'])('rejects saved %s bindings before touching credentials, storage or runtime resources',async kind=>{
+ for(const enabled of [false,true]){
+  const retired={...binding('retired'),enabled,channel:{id:'retired',kind}}
+  const config={bindings:[binding('a',false),retired]},before=structuredClone(config)
+  const open=vi.fn(),resolve=vi.fn(),plugin=vi.fn(),register=vi.fn(),effect=vi.fn()
+  const ctx={logger:()=>({warn:vi.fn()}),storageDomain:{open},credentials:{resolve},plugin,tools:{register},effect} as unknown as Context
+  expect(pluginConfigSchema.safeParse(config).success).toBe(false)
+  for(const schema of [Config,new Schema(JSON.parse(JSON.stringify(Config)))])expect(()=>schema(config)).toThrow()
+  await expect(apply(ctx,config as never)).rejects.toThrow('Unsupported channel kind')
+  expect(open).not.toHaveBeenCalled();expect(resolve).not.toHaveBeenCalled();expect(plugin).not.toHaveBeenCalled();expect(register).not.toHaveBeenCalled();expect(effect).not.toHaveBeenCalled()
+  expect(config).toEqual(before)
+ }
+})
+it.each(['discord','feishu'])('rejects an external %s update while preserving accepted channel configuration',async kind=>{
+ const safe=binding('a',false)
+ let rows:unknown[]=[safe]
+ const handlers=new Map<string,()=>void>(),releases:Array<()=>unknown>=[]
+ const open=vi.fn(async()=>({close:async()=>{}})),resolve=vi.fn()
+ let manager!:ChannelManager
+ const ctx={logger:()=>({warn:vi.fn()}),get:()=>undefined,plugin:(_controller:unknown,value:ChannelManager)=>{manager=value},on:(name:string,fn:()=>void)=>handlers.set(name,fn),storageDomain:{open},credentials:{resolve},tools:{register:()=>()=>{}},effect:(fn:()=>()=>unknown)=>releases.push(fn())} as unknown as Context
+ try{
+  await apply(ctx,{bindings:{get:()=>rows},agents:{get:()=>[]}} as never)
+  rows=[safe,{...binding('retired',false),channel:{id:'retired',kind}}]
+  const before=structuredClone(rows)
+  handlers.get('loader/volatile-update')!()
+  expect(manager.bindings()).toEqual([safe]);expect(manager.status().configError).toBe('config-invalid')
+  expect(rows).toEqual(before);expect(open).toHaveBeenCalledOnce();expect(resolve).not.toHaveBeenCalled()
+ }finally{for(const release of releases.reverse())await release()}
 })

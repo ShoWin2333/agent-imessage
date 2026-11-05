@@ -3,8 +3,8 @@ import {selectJson} from '../src/plugin/json-select.js'
 import {legacyCheckpoint} from '../src/plugin/legacy-checkpoint.js'
 async function* chunks(value:string,size=1){const b=new TextEncoder().encode(value);for(let i=0;i<b.length;i+=size)yield b.slice(i,i+size)}
 it('projects only named credential slots without retaining other secrets or history',async()=>{
- const source=JSON.stringify({photon:{unrelated:'DO_NOT_KEEP',alice:'SYNTHETIC_A'},telegram:{'123':'SYNTHETIC_B'},discord:{'456':'SYNTHETIC_C'},tasks:[{text:'PRIVATE_HISTORY',nested:{secret:'UNRELATED'}}]})
- const selected=await selectJson(chunks(source),[['photon','alice'],['telegram','123'],['discord','456']]);expect([...selected.values()]).toEqual(['SYNTHETIC_A','SYNTHETIC_B','SYNTHETIC_C']);expect(JSON.stringify([...selected])).not.toMatch(/PRIVATE_HISTORY|DO_NOT_KEEP|UNRELATED/)
+ const source=JSON.stringify({photon:{unrelated:'DO_NOT_KEEP',alice:'SYNTHETIC_A'},telegram:{'123':'SYNTHETIC_B'},extra:{'456':'SYNTHETIC_C'},tasks:[{text:'PRIVATE_HISTORY',nested:{secret:'UNRELATED'}}]})
+ const selected=await selectJson(chunks(source),[['photon','alice'],['telegram','123'],['extra','456']]);expect([...selected.values()]).toEqual(['SYNTHETIC_A','SYNTHETIC_B','SYNTHETIC_C']);expect(JSON.stringify([...selected])).not.toMatch(/PRIVATE_HISTORY|DO_NOT_KEEP|UNRELATED/)
 })
 it('preserves UTF8, escaped delimiters and metadata types across chunk boundaries',async()=>{
  const source=JSON.stringify({skip:'escape \\" ] }',routes:[{id:'alice',channels:[{phase:'stopped',tasks:[{text:'skip'}]}]}],seen:['中文','escaped \\" }'],channelCursor:'234'})
@@ -18,8 +18,8 @@ it('rejects truncation, malformed selected JSON, excess input and duplicate sele
 })
 
 it('reports only credential field presence without decoding selected values',async()=>{
- const value=JSON.stringify({photon:{jane:'SYNTHETIC_SECRET'},discord:{bot:'OTHER_SECRET'},weixin:{account:{token:'SENSITIVE_TOKEN',ownerUserId:'metadata'}}})
- const selected=await selectJson(chunks(value),[['photon','jane'],['discord','bot'],['weixin','account','token'],['missing']],undefined,true)
+ const value=JSON.stringify({photon:{jane:'SYNTHETIC_SECRET'},extra:{bot:'OTHER_SECRET'},weixin:{account:{token:'SENSITIVE_TOKEN',ownerUserId:'metadata'}}})
+ const selected=await selectJson(chunks(value),[['photon','jane'],['extra','bot'],['weixin','account','token'],['missing']],undefined,true)
  expect([...selected.values()]).toEqual([true,true,true]);expect(selected.has('["missing"]')).toBe(false);expect(JSON.stringify([...selected])).not.toMatch(/SYNTHETIC_SECRET|OTHER_SECRET|SENSITIVE_TOKEN/)
 })
 

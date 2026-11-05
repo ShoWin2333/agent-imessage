@@ -107,7 +107,7 @@ it('keeps thought/tool payloads out of replies and isolates another turn', () =>
   expect(resultFromEvents(events, 'owned')).toEqual({ text: 'answer', reason: 'completed' })
 })
 const binding = { id: 'tg', enabled:true, cwd: '/tmp', channel: { id: 'tg', kind: 'telegram', botId: '123', ownerUserId: '456' }, credentialRef: 'SYNTHETIC_TOKEN', permissionPreset: 'workspace-write' }
-it('validates all five channels, owner/scope/permission changes cannot inherit session state', () => {
+it('validates all three channels, owner/scope/permission changes cannot inherit session state', () => {
   const b = pluginConfigSchema.parse({ bindings: [binding] }).bindings[0]!
   for (const change of [{ cwd: '/other' }, { permissionPreset: 'read-only' }, { channel: { ...b.channel, ownerUserId: '789' } }]) expect(bindingKey({ ...b, ...change } as typeof b)).not.toBe(bindingKey(b))
   expect(pluginConfigSchema.safeParse({ bindings: [binding, { ...binding, id: 'two' }] }).success).toBe(false)
@@ -115,8 +115,7 @@ it('validates all five channels, owner/scope/permission changes cannot inherit s
   for (const channel of [
     { id: 'i', kind: 'imessage', projectId: 'synthetic', senderPhoneNumber: '+15551234567', assignedPhoneNumber: '+15557654321' },
     { id: 'w', kind: 'weixin', accountId: 'bot@synthetic' },
-    {id:'f',kind:'feishu',appId:'cli_1234567890abcdef',tenantKey:'tenant',ownerUserId:'ou_owner',chatId:'oc_private'},
-    { id: 'd', kind: 'discord', botId: '123456789012345678', ownerUserId: '234567890123456789' }, binding.channel,
+    binding.channel,
   ]) expect(pluginConfigSchema.safeParse({ bindings: [{ ...binding, channel, weixin: { ownerUserId: 'owner', baseUrl: 'https://ilinkai.weixin.qq.com' } }] }).success).toBe(true)
 })
 it('empty plugin composition is inert; no credential reads or network connections', async () => {
