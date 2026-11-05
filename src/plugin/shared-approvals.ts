@@ -15,9 +15,10 @@ export function registerSharedApprovals(
   ownsSession: (request: ApprovalRequestEvent) => boolean,
   channel: ChannelAnswerer,
 ): () => void {
+  const desktopCopies = new WeakSet<ApprovalRequestEvent>()
   const lifetime = new AbortController()
   const answer: Events['approval/request'] = async function (request, next) {
-    if (lifetime.signal.aborted || !ownsSession(request)) return next()
+    if (lifetime.signal.aborted || desktopCopies.has(request) || !ownsSession(request)) return next()
     const service = ctx.get('approval')
     const { agent } = request
     const turn = openTurn(agent)
@@ -37,6 +38,8 @@ export function registerSharedApprovals(
     })
 
     const settled = Promise.withResolvers<ApprovalOutcome>()
+    const desktopRequest = { ...request, signal }
+    desktopCopies.add(desktopRequest)
     const decision = async (answer: () => Promise<ApprovalOutcome>) => {
       const result = await answer()
       if (!current() || (result !== 'allowed-once' && result !== 'rejected')) throw new Error('No active approval decision')
@@ -50,10 +53,13 @@ export function registerSharedApprovals(
       // Only the channel reply capability has an expiry. The desktop retains
       // its native request lifetime if the channel expires or is unavailable.
       outcome = await Promise.race([Promise.any([
-        // Continue the original dispatch snapshot once. Cordis does not support
-        // replacement request arguments: the desktop retains request.signal,
-        // and only the channel receives the coordinator's shorter lifetime.
-        decision(next),
+        // Cordis next() cannot replace its borrowed request. Dispatch a copy
+        // through the public scoped waterfall so native UI receives our
+        // settlement signal. The marker prevents another coordination round.
+        // This intentionally re-enters outer answerer middleware; see the
+        // composition limit in the migration guide. Never redispatch the
+        // ApprovalService, which alone owns policy checks and the audit pair.
+        decision(() => ctx.waterfall(this, 'approval/request', desktopRequest, async (): Promise<ApprovalOutcome> => 'unavailable')),
         decision(() => channel({ ...request, sessionId: agent.id, turn, signal, current }, settled.promise)),
       ]).catch((): ApprovalOutcome => 'unavailable'), aborted.promise])
       if (!current()) outcome = 'cancelled'

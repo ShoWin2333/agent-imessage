@@ -41,6 +41,7 @@ class ApprovalPresentation {
   private final = false
   private status: ApprovalPromptOutcome | undefined
   private update: ((outcome: ApprovalPromptOutcome) => Promise<void>) | undefined
+  private published: { update: (outcome: ApprovalPromptOutcome) => Promise<void>; outcome: ApprovalPromptOutcome } | undefined
   private tail = Promise.resolve()
   constructor(private readonly settled?: Promise<ApprovalOutcome>) {
     if (settled) void settled.then(outcome => { this.final = true; this.publish(outcome) })
@@ -59,7 +60,10 @@ class ApprovalPresentation {
   private publish(outcome: ApprovalPromptOutcome): void {
     this.status = outcome
     const update = this.update
-    if (update) this.tail = this.tail.then(() => bounded(update(outcome), 3000)).catch(() => {})
+    if (update && (this.published?.update !== update || this.published.outcome !== outcome)) {
+      this.published = { update, outcome }
+      this.tail = this.tail.then(() => bounded(update(outcome), 3000)).catch(() => {})
+    }
   }
 }
 function current(scope:Omit<InteractionScope,'inputId'>):boolean {try{return scope.current()}catch{return false}}

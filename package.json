@@ -101,6 +101,7 @@
     "@deepseek-ai/dsh-agent-default-model": "0.2.1-rc.2",
     "@deepseek-ai/dsh-agent-loop": "0.2.1-rc.2",
     "@deepseek-ai/dsh-agent-preset-registry": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-client-ui-approval": "0.2.1-rc.2",
     "@deepseek-ai/dsh-credentials": "0.2.1-rc.2",
     "@deepseek-ai/dsh-fs": "0.2.1-rc.2",
     "@deepseek-ai/dsh-llm": "0.2.1-rc.2",

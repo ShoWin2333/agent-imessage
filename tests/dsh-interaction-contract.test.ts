@@ -2,7 +2,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import Tools from '@deepseek-ai/dsh-tools'
+import Tools, { defineTool } from '@deepseek-ai/dsh-tools'
 import ApprovalService, { setApprovalPolicy, type ApprovalOutcome } from '@deepseek-ai/dsh-user-approval'
 import UserQuestionService, { UserQuestionError } from '@deepseek-ai/dsh-user-questions'
 import { DshNativeHost } from '../src/plugin/native.js'
@@ -62,7 +62,7 @@ async function fixture(before?:(ctx:Context)=>void, { input = 'synthetic', chann
   const ready=async()=>{await vi.waitFor(()=>expect(send).toHaveBeenCalled());await Promise.resolve();await Promise.resolve()}
   return {ctx,agent,session,native,broker,send,message,token,ready,media,executeMedia,unregister:removeApproval,replace:()=>{live={...agent}}}
 }
-it('runs outer and downstream middleware once without mutating a frozen native request', async () => {
+it('re-enters outer middleware but calls downstream once without mutating a frozen native request', async () => {
   const outer = vi.fn(), inner = vi.fn()
   const f = await fixture(ctx => {
     ctx.on('approval/request', async (_request, next) => { inner(); return next() })
@@ -72,13 +72,13 @@ it('runs outer and downstream middleware once without mutating a frozen native r
   const controller = new AbortController()
   const request = Object.freeze({ agent:f.agent as never, toolName:'write', reason:'Synthetic action', signal:controller.signal })
   expect(await f.ctx.approval.request(request)).toBe('rejected')
-  expect(outer).toHaveBeenCalledOnce()
+  expect(outer).toHaveBeenCalledTimes(2)
   expect(inner).toHaveBeenCalledOnce()
   expect(request.signal).toBe(controller.signal)
   expect(controller.signal.aborted).toBe(false)
 })
 
-it('preserves the original Cordis dispatch snapshot when downstream handlers change during an outer await', async () => {
+it('uses the public redispatch snapshot when downstream handlers change during an outer await', async () => {
   const old=vi.fn(async():Promise<ApprovalOutcome>=>'rejected')
   const replacement=vi.fn(async():Promise<ApprovalOutcome>=>'allowed-once')
   let remove!:()=>boolean
@@ -89,9 +89,9 @@ it('preserves the original Cordis dispatch snapshot when downstream handlers cha
   await entered.promise
   remove();f.ctx.on('approval/request',replacement)
   release.resolve()
-  expect(await result).toBe('rejected')
-  expect(old).toHaveBeenCalledOnce()
-  expect(replacement).not.toHaveBeenCalled()
+  expect(await result).toBe('allowed-once')
+  expect(old).not.toHaveBeenCalled()
+  expect(replacement).toHaveBeenCalledOnce()
 })
 
 it.each(['expired', 'delivery-failed'] as const)('keeps desktop approval open beyond two minutes after the channel is %s', async failure => {
@@ -109,6 +109,7 @@ it.each(['expired', 'delivery-failed'] as const)('keeps desktop approval open be
     await vi.advanceTimersByTimeAsync(120001)
     expect(finished).toBe(false)
     expect(showDesktop.mock.calls[0]![0].signal?.aborted).toBe(false)
+    expect(controller.signal.aborted).toBe(false)
     if (failure === 'expired') {
       expect(closeCard).toHaveBeenCalledExactlyOnceWith('expired')
       const token=vi.mocked(f.message.sendApproval).mock.calls[0]![1]
@@ -116,7 +117,7 @@ it.each(['expired', 'delivery-failed'] as const)('keeps desktop approval open be
     }
     desktop.resolve('allowed-once')
     expect(await result).toBe('allowed-once')
-    expect(showDesktop.mock.calls[0]![0].signal?.aborted).toBe(false)
+    expect(showDesktop.mock.calls[0]![0].signal?.aborted).toBe(true)
   } finally { vi.useRealTimers() }
 })
 
@@ -136,7 +137,7 @@ it('shows the actual desktop rejection when a simultaneous channel grant loses',
   expect(f.session.snapshotEvents().filter(e=>e.type==='approval/decided').map(e=>e.data.outcome)).toEqual(['rejected'])
 })
 
-it.each(['turn-end','unload','abort'] as const)('ends shared coordination on %s while preserving the native desktop signal', async action => {
+it.each(['turn-end','unload','abort'] as const)('withdraws desktop approval on %s without aborting the caller', async action => {
   const desktop = vi.fn((request: {signal?:AbortSignal}) => new Promise<ApprovalOutcome>(resolve=>{
     request.signal?.addEventListener('abort',()=>resolve('cancelled'),{once:true})
   }))
@@ -150,7 +151,8 @@ it.each(['turn-end','unload','abort'] as const)('ends shared coordination on %s 
   } else if(action==='unload') f.unregister()
   else controller.abort()
   expect(await result).toBe('cancelled')
-  expect(desktop.mock.calls[0]![0].signal).toBe(controller.signal)
+  expect(desktop.mock.calls[0]![0].signal).not.toBe(controller.signal)
+  expect(desktop.mock.calls[0]![0].signal?.aborted).toBe(true)
   expect(controller.signal.aborted).toBe(action==='abort')
 })
 it.each([
@@ -172,7 +174,7 @@ it.each([
   if (winner === 'mobile') f.broker.reply(`/approve ${token}`)
   else desktop.resolve('allowed-once')
   await expect(result).resolves.toMatchObject({ delivery: 'sent' })
-  expect(signal?.aborted).toBe(false)
+  expect(signal?.aborted).toBe(true)
   expect(closeCard).toHaveBeenCalledExactlyOnceWith('allowed-once')
   expect(() => f.broker.reply(`/deny ${token}`)).toThrow('失效')
   desktop.resolve('rejected')
@@ -219,6 +221,21 @@ it('shows a desktop-started approval in Telegram even before any channel input i
   expect(f.session.snapshotEvents().filter(e => e.type === 'approval/decided').map(e => e.data.outcome)).toEqual(['rejected'])
 })
 
+it('leaves ordinary desktop sessions on the native chain with shared approvals enabled', async () => {
+  const desktop = vi.fn(async (_request: { signal?: AbortSignal }): Promise<ApprovalOutcome> => 'allowed-once')
+  const f = await fixture(ctx => { ctx.on('approval/request', desktop) })
+  const session = Session.create(SessionId('ordinary-desktop'))
+  session.append('turn/start', { turn: 1 })
+  const other = { ...f.agent, id: session.id, session }
+  const signal = new AbortController().signal
+  expect(await f.ctx.approval.request({ agent: other as never, toolName: 'write', signal })).toBe('allowed-once')
+  expect(desktop).toHaveBeenCalledOnce()
+  expect(desktop.mock.calls[0]?.[0].signal).toBe(signal)
+  expect(signal.aborted).toBe(false)
+  expect(f.send).not.toHaveBeenCalled()
+  expect(session.snapshotEvents().filter(e => e.type === 'approval/decided').map(e => e.data.outcome)).toEqual(['allowed-once'])
+})
+
 it('keeps the desktop answer available if Telegram delivery fails', async () => {
   const desktop = Promise.withResolvers<ApprovalOutcome>()
   const f = await fixture(ctx => { ctx.on('approval/request', () => desktop.promise) }, { channel: 'telegram' })
@@ -240,7 +257,7 @@ it('invalidates channel replies when the DSH session changes to never', async ()
   setApprovalPolicy(f.session, 'never')
   f.ctx.emit('session/event', f.session, f.session.snapshotEvents().at(-1)!)
   expect(await result).toBe('cancelled')
-  expect(showDesktop.mock.calls[0]?.[0].signal).toBeUndefined()
+  expect(showDesktop.mock.calls[0]?.[0].signal?.aborted).toBe(true)
   expect(() => f.broker.reply(`/approve ${token}`)).toThrow('失效')
 })
 
@@ -252,6 +269,50 @@ it('never auto-approves a voice request under the shared DSH policy', async () =
   expect(showDesktop).not.toHaveBeenCalled()
   expect(f.send).not.toHaveBeenCalled()
   expect(f.media).not.toHaveBeenCalled()
+})
+
+it.each(['channel', 'desktop', 'review-denied', 'guard-denied', 'never'] as const)('keeps the native tool pipeline and review intact for %s', async route => {
+  const desktop = Promise.withResolvers<ApprovalOutcome>()
+  const showDesktop = vi.fn(() => desktop.promise)
+  const f = await fixture(ctx => { ctx.on('approval/request', showDesktop) })
+  const body = vi.fn(async () => true)
+  const removeTool = f.ctx.tools.register(defineTool({
+    name: 'synthetic_reviewed', description: 'Synthetic approval pipeline regression', parameters: {},
+    output: { schema: { type: 'boolean' }, render: () => [{ type: 'text', text: 'done' }] }, execute: body,
+  }))
+  const review = vi.fn(async () => route === 'review-denied'
+    ? { kind: 'deny' as const, reason: 'Synthetic review refusal' }
+    : { kind: 'ask' as const, reason: 'Synthetic reviewed action' })
+  const removeReview = f.ctx.on('tools/pre-execute', review, { prepend: true })
+  const removeGuard = f.ctx.tools.guard(() => route === 'guard-denied' ? 'Synthetic monotonic refusal' : undefined)
+  if (route === 'never') setApprovalPolicy(f.session, 'never')
+  const caller = new AbortController()
+  try {
+    const result = f.ctx.tools.execute({ agent: f.agent as never, callId: 'synthetic-native-pipeline' as never,
+      name: 'synthetic_reviewed', arguments: {}, signal: caller.signal })
+    if (route === 'channel' || route === 'desktop' || route === 'guard-denied') {
+      await f.ready()
+      expect(body).not.toHaveBeenCalled()
+      if (route === 'desktop') desktop.resolve('allowed-once')
+      else f.broker.reply(`/approve ${f.token()}`)
+      if (route === 'guard-denied') {
+        expect(await result).toMatchObject({ isError: true })
+        expect(body).not.toHaveBeenCalled()
+      } else {
+        expect(await result).toMatchObject({ isError: false, value: true })
+        expect(body).toHaveBeenCalledOnce()
+      }
+      expect(showDesktop).toHaveBeenCalledOnce()
+      expect(f.session.snapshotEvents().filter(e => e.type === 'approval/decided').map(e => e.data.outcome)).toEqual(['allowed-once'])
+    } else {
+      expect(await result).toMatchObject({ isError: true })
+      expect(body).not.toHaveBeenCalled()
+      expect(f.send).not.toHaveBeenCalled()
+      expect(showDesktop).not.toHaveBeenCalled()
+    }
+    expect(review).toHaveBeenCalledOnce()
+    expect(caller.signal.aborted).toBe(false)
+  } finally { removeGuard(); removeReview(); removeTool() }
 })
 
 it('uses real native approval policy/audit; never bypasses never, then allows exactly once',async()=>{
