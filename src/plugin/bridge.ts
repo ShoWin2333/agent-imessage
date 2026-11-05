@@ -54,6 +54,7 @@ export class ChannelBridge {
   private readonly work = new Set<Promise<void>>()
   private readonly receiving = new Set<string>()
   private readonly delivering = new Set<string>()
+  private readonly executing = new Set<string>()
   private readonly bindingStop = new AbortController()
   private closed = false
   private generation = 0
@@ -101,7 +102,7 @@ export class ChannelBridge {
       const pending=await this.serial(async()=>{
         if(this.closed)return
         let receipt=this.store.read().receipts.find(r=>r.id===id)
-        if(!receipt||this.delivering.has(id))return
+        if(!receipt||this.delivering.has(id)||this.executing.has(id))return
         if(receipt.media?.some(m=>m.delivery==='sending')){
           receipt={...receipt,media:receipt.media.map(m=>m.delivery==='sending'?{...m,delivery:'uncertain'}:m)}
           await this.replace(receipt)
@@ -200,9 +201,10 @@ export class ChannelBridge {
           : session.submit(receipt.inputId, message.text, () => {}, {
             question:request => this.interactions.question({...request,current:()=>request.current() && generation===this.generation && this.session===session && !this.closed},message),
           }, request => this.sendMedia(receipt.id, session, generation, message, request), stream, notice)
+        this.executing.add(receipt.id)
         const job = this.execute(operation.result, receipt, message, async()=>{await streamChain;return streamed})
         this.work.add(job)
-        void job.finally(() => this.work.delete(job)).catch(() => { })
+        void job.finally(() => {this.executing.delete(receipt.id);this.work.delete(job)}).catch(() => { })
         await operation.admitted
         if (generation !== this.generation || this.closed) session.cancel()
       })

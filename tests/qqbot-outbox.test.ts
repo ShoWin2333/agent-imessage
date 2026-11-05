@@ -45,3 +45,20 @@ it('does not resend an ambiguous external send or quarantine a still-running sen
   expect(f.store.read().receipts[0]?.delivery).toBe('uncertain')
   await f.bridge.recover(recovery);expect(send).toHaveBeenCalledOnce();await f.bridge.close()
 })
+
+it.each([false,true])('keeps live channel execution out of reconnect recovery; streaming=%s',async streaming=>{
+  const result=Promise.withResolvers<{text:string;reason:string}>(),inspect=vi.fn(async()=>undefined)
+  let delta:((text:string)=>void)|undefined
+  const native={id:'channels-live-task',cancel(){},close:async()=>{},submit:(_id:string,_text:string,_progress:unknown,_interactions:unknown,_media:unknown,stream?:((text:string)=>void))=>{delta=stream;return {admitted:Promise.resolve(),result:result.promise}}}
+  let state:BindingState={receipts:[]}
+  const bridge=new ChannelBridge({open:async()=>native,inspect},{read:()=>state,write:async value=>{state=value}})
+  const send=vi.fn(async()=>{}),progressText=vi.fn(async()=>{}),completeText=vi.fn(async()=>{})
+  const incoming={...message('live-task',send),text:'long task',...(streaming?{progressText,completeText}:{})}
+  await bridge.receive(incoming);bridge.setConnected(false);bridge.setConnected(true)
+  await bridge.recover(async id=>message(id,send))
+  expect(inspect).not.toHaveBeenCalled();expect(send).not.toHaveBeenCalled();expect(state.receipts[0]?.result).toBeUndefined()
+  delta?.('first delta after reconnect');result.resolve({text:'completed actual task',reason:'completed'});await bridge.drain()
+  if(streaming){expect(send).not.toHaveBeenCalled();expect(progressText).toHaveBeenCalledExactlyOnceWith('first delta after reconnect');expect(completeText).toHaveBeenCalledExactlyOnceWith('completed actual task')}
+  else expect(send).toHaveBeenCalledExactlyOnceWith('completed actual task')
+  expect(state.receipts[0]?.delivery).toBe('sent');await bridge.close()
+})

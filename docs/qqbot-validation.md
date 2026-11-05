@@ -8,7 +8,7 @@ Official reference: `tencent-connect/dsh-qqbot` `14d5eef97274e47f34f91dcaa833be9
 
 - Build passed: host compilation, generated native Remote protocol, browser compilation/bundle, and real management-panel rendering smoke check.
 - Host and browser typechecks passed.
-- Complete final test run: **33 files, 380 tests passed**.
+- Complete final test run: **33 files, 381 tests passed**.
 - Packaging dry run passed with a workspace-local npm cache: 282 files; no retired channel runtime or private diagnostic artifacts. `git diff --check` passed. The final .19 `npm run check` used a workspace-local cache and passed as one complete run.
 - Regression coverage includes real-SDK request serialization with mocked fetch; private-owner filtering and group rejection; media and ASR ingress; QR setup lifetime; native settings acknowledgments; shared approval acceptance, expiry and duplicate clicks; approved file delivery; session identity migration; and shutdown durability.
 - Tests use synthetic credentials/messages and mocked provider requests. They do not log in, send real messages or invoke paid models.
@@ -36,6 +36,6 @@ Validation does not publish npm or modify host binaries/security settings. Conne
 
 ## Independent-review fixes (.19)
 
-The review's three offline reproductions are covered by regressions: successful native present stays accepted when destination lookup or its failure notice throws; exhausted or expired passive targets deliver exactly one static final answer before any stream frame; offline desktop completion is journaled without acquiring transport and is delivered once after restart or reconnect. A stream that has already attempted sending remains uncertain and is never retried. An in-flight external send is not mistaken for a crashed send during recovery.
+The review's three offline reproductions are covered by regressions: successful native present stays accepted when destination lookup or its failure notice throws; exhausted or expired passive targets deliver exactly one static final answer before any stream frame; offline desktop completion is journaled without acquiring transport and is delivered once after restart or reconnect. A stream that has already attempted sending remains uncertain and is never retried. An in-flight external send or still-running native turn is not mistaken for interrupted work during recovery.
 
 Binding-level integration verifies startup recovery is run again after reconnect. The sole present hook covers channel and desktop sources with shared limits/duplicate suppression, rejects ended turns before reads, and uses the same approved-media helper as explicit sends. QQ commands exercise generic bridge reset/resume controls without entering the model. Upgrade-only .17 private fields normalize away while keeping the same binding identity; group configurations remain rejected. Shared approval broker and existing channel adapters are unchanged.
