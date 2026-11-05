@@ -1,6 +1,6 @@
 # Native DSH channel plugin migration
 
-This source supports DSH 0.2.1-rc.2 / Cordis 4.0.5 and DSH 0.2.2-rc.1 / Cordis 4.1.0. The published 1.1.0-dsh.11 package predates the 0.2.2 compatibility changes. The former `dsh-plugin` product line is now the default `main` branch; the independent macOS App history is preserved in `archive/standalone-macos-main-20261104`. Update raw/CDN index URLs to use `main`, since GitHub branch redirects do not cover every external CDN.
+This source supports DSH 0.2.1-rc.2 and 0.2.1-rc.5 / Cordis 4.0.5, plus DSH 0.2.2-rc.1 / Cordis 4.1.0. The published 1.1.0-dsh.11 package predates the 0.2.2 compatibility changes. The former `dsh-plugin` product line is now the default `main` branch; the independent macOS App history is preserved in `archive/standalone-macos-main-20261104`. Update raw/CDN index URLs to use `main`, since GitHub branch redirects do not cover every external CDN.
 
 ## Ownership
 
@@ -47,14 +47,16 @@ The suite uses synthetic channels and denies unmocked network access. Run `npm r
 
 ## SDK compatibility checks
 
-The 0.2.1 SDK consumes an entry-point-owned model selection reference, while 0.2.2 keeps the selection on the Agent. The plugin supplies the complete provider/model/optional effort to native create and resume, and calls the public installer through one compatible function signature. The older installer uses the state argument; the newer installer ignores it. No arity detection, SDK patching or version-specific execution path is needed. Saved request models remain the resume fallback; the newer Agent retains precedence for its durable model selection.
+Both tested 0.2.1 RCs consume an entry-point-owned model selection reference, while 0.2.2 keeps the selection on the Agent. The plugin supplies the complete provider/model/optional effort to native create and resume, and calls the public installer through one compatible function signature. The older installer uses the state argument; the newer installer ignores it. No arity detection, SDK patching or version-specific execution path is needed. Saved request models remain the resume fallback; the newer Agent retains precedence for its durable model selection.
 
-The repository lockfile remains the 0.2.1 baseline. The extra CI job prepares a separate 0.2.2 dependency environment on Node 26 and runs the same complete check. For local reproduction, choose a new directory outside the checkout:
+The repository lockfile remains the 0.2.1 baseline. The extra CI matrix prepares separate rc.5 / Node 22 and 0.2.2 / Node 26 dependency environments and runs the same complete check. For local reproduction, choose a new directory outside the checkout:
 
 ```sh
-node scripts/prepare-dsh-022-check.mjs /tmp/channels-dsh-022-check
-pnpm --dir /tmp/channels-dsh-022-check install --no-frozen-lockfile --ignore-scripts
-npm --prefix /tmp/channels-dsh-022-check run check
+node scripts/prepare-dsh-sdk-check.mjs /tmp/channels-dsh-sdk-check 0.2.2-rc.1
+pnpm --dir /tmp/channels-dsh-sdk-check install --no-frozen-lockfile --ignore-scripts
+npm --prefix /tmp/channels-dsh-sdk-check run check
 ```
 
 The preparation script only copies and rewrites test dependency declarations; it does not install anything or touch DSH profiles. The shared tests supply the new approval projection and native tool executor, and exercise both the legacy request hooks and modern Agent-owned model state. Host application installation, live channel activation and npm publication are separate from these checks.
+
+Use `0.2.1-rc.5` as the preparation script’s final argument for that SDK. The persistence regression uses the real JSONL backend, real Session/AgentLoop instances, fresh Contexts across each close/reopen, and an offline model adapter. It verifies an actual request after changing provider/model and effort, then clears effort and reopens again; modern SDKs also cover a pending durable choice with no intervening model request.

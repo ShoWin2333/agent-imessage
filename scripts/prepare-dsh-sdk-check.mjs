@@ -5,6 +5,11 @@ import { dirname, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+const sdk = process.argv[3] ?? '0.2.2-rc.1'
+if (!['0.2.1-rc.5', '0.2.2-rc.1'].includes(sdk)) throw new Error('Unsupported SDK test version')
+const modern = sdk === '0.2.2-rc.1'
+const cordis = modern ? '4.1.0' : '4.0.5'
+const loader = modern ? '1.1.0' : '1.0.6'
 const destination = resolve(process.argv[2] ?? '')
 const within = relative(root, destination)
 if (!process.argv[2] || !within.startsWith(`..${sep}`) || existsSync(destination)) {
@@ -16,15 +21,15 @@ const manifest = JSON.parse(readFileSync(resolve(destination, 'package.json'), '
 for (const section of ['devDependencies', 'overrides']) {
   for (const [name, version] of Object.entries(manifest[section] ?? {})) {
     if (!name.startsWith('@deepseek-ai/')) continue
-    if (version === '0.2.1-rc.2') manifest[section][name] = '0.2.2-rc.1'
-    if (name === '@deepseek-ai/cordis') manifest[section][name] = '4.1.0'
-    if (name === '@deepseek-ai/cordis-plugin-loader') manifest[section][name] = '1.1.0'
+    if (version === '0.2.1-rc.2') manifest[section][name] = sdk
+    if (name === '@deepseek-ai/cordis') manifest[section][name] = cordis
+    if (name === '@deepseek-ai/cordis-plugin-loader') manifest[section][name] = loader
   }
 }
-manifest.devDependencies['@deepseek-ai/dsh-tool-executor-native'] = '0.2.2-rc.1'
+if (modern) manifest.devDependencies['@deepseek-ai/dsh-tool-executor-native'] = sdk
 writeFileSync(resolve(destination, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`)
 const workspacePath = resolve(destination, 'pnpm-workspace.yaml')
 writeFileSync(workspacePath, readFileSync(workspacePath, 'utf8')
-  .replaceAll('0.2.1-rc.2', '0.2.2-rc.1').replaceAll('4.0.5', '4.1.0').replaceAll('1.0.6', '1.1.0')
-  .replace('overrides:\n', 'overrides:\n  "@deepseek-ai/cordis-plugin-include": "1.1.0"\n'))
+  .replaceAll('0.2.1-rc.2', sdk).replaceAll('4.0.5', cordis).replaceAll('1.0.6', loader)
+  .replace('overrides:\n', `overrides:\n  "@deepseek-ai/cordis-plugin-include": "${loader}"\n`))
 console.log(destination)
