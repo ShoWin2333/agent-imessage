@@ -115,3 +115,26 @@ it('unloads promptly while real root-owned Agent preset initialization is suspen
     releasePreset.resolve();stopObserving();await transport.dispose();await close()
   }
 })
+
+it.each([undefined, 'high'] as const)('retains the full configured model in the real Agent runtime (effort %s)', async reasoningEffort => {
+  const {world,close}=await runtime()
+  const selection={provider:'configured',model:'selected',...(reasoningEffort?{reasoningEffort}:{})}
+  const native=await new DshNativeHost(world,'/tmp','workspace-write','binding',selection,undefined,'telegram',
+    world.root.extend({[Context.isolate]:world[Context.isolate]})).open()
+  try {
+    const agent=world.agents.get(native.id as never)!
+    expect(agent.options).toMatchObject(selection)
+    if ('model' in agent) {
+      expect((agent.model as {current():unknown}).current()).toEqual(selection)
+    } else {
+      // 0.2.1 keeps the live selection in the installed scoped assembly and
+      // request hooks. Exercise those real hooks, including clearing an
+      // inherited effort when the user selected adapter defaults.
+      await world.waterfall('system-prompt/assemble',{} as never,{} as never,
+        async()=>({variables:{}}) as never)
+      const config=await world.waterfall('agent/request',{} as never,
+        async()=>({provider:'wrong',model:'wrong',reasoningEffort:'inherited'}) as never)
+      expect(config).toEqual(selection)
+    }
+  } finally {await native.close();await close()}
+})

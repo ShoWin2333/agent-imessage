@@ -25,3 +25,25 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile --ignore-scripts
       - run: npm run check
+
+  dsh-sdk:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - sdk: '0.2.1-rc.5'
+            node: '22.19.0'
+          - sdk: '0.2.2-rc.1'
+            node: '26'
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.28.5
+          run_install: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ matrix.node }}
+      - run: node scripts/prepare-dsh-sdk-check.mjs "$RUNNER_TEMP/channels-sdk" "${{ matrix.sdk }}"
+      - run: pnpm --dir "$RUNNER_TEMP/channels-sdk" install --no-frozen-lockfile --ignore-scripts
+      - run: npm --prefix "$RUNNER_TEMP/channels-sdk" run check
