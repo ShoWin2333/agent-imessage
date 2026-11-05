@@ -47,14 +47,28 @@
         ]
       },
       "dist-tags": {
-        "latest": "1.1.0-dsh.11"
+        "latest": "1.1.0-dsh.12"
       },
       "versions": [
         {
+          "version": "1.1.0-dsh.12",
+          "publishTimestamp": 1793861395,
+          "source": {
+            "type": "npm"
+          },
+          "engines": {
+            "dsh": "0.2.1-rc.2 || 0.2.1-rc.5 || 0.2.2-rc.1"
+          }
+        },
+        {
           "version": "1.1.0-dsh.11",
           "publishTimestamp": 1793781353,
-          "source": { "type": "npm" },
-          "engines": { "dsh": ">=0.2.1-rc.2 <0.3.0" }
+          "source": {
+            "type": "npm"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.2 <0.3.0"
+          }
         },
         {
           "version": "1.1.0-dsh.10",
