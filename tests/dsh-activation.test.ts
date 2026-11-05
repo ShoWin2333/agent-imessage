@@ -27,6 +27,7 @@ async function setup(options:{importGate?:ReturnType<typeof deferred<void>>;star
   let manager!:ChannelManager
   const domainClose=vi.fn(async()=>{})
   const ctx={
+    root:{extend:()=>ctx},
     logger:()=>({warn:vi.fn()}),permissionPresets:{resolve:vi.fn()},credentials:{resolve:vi.fn(async()=>({value:'synthetic'}))},
     storageDomain:{open:async()=>({table:(name:string)=>{let rows=tables.get(name);if(!rows){rows=new Map();tables.set(name,rows)}return {get:(key:string)=>rows!.get(key),put:async(key:string,value:unknown)=>{rows!.set(key,value)}}},close:domainClose})},
     effect:(fn:()=>()=>Promise<void>|void)=>{effects.push(fn())},tools:{register:()=>()=>{}},get:()=>undefined,on:vi.fn(()=>()=>{}),

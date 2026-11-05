@@ -78,6 +78,22 @@ it('runs outer and downstream middleware once without mutating a frozen native r
   expect(controller.signal.aborted).toBe(false)
 })
 
+it('preserves the original Cordis dispatch snapshot when downstream handlers change during an outer await', async () => {
+  const old=vi.fn(async():Promise<ApprovalOutcome>=>'rejected')
+  const replacement=vi.fn(async():Promise<ApprovalOutcome>=>'allowed-once')
+  let remove!:()=>boolean
+  const f=await fixture(ctx=>{remove=ctx.on('approval/request',old)})
+  const entered=Promise.withResolvers<void>(),release=Promise.withResolvers<void>()
+  f.ctx.on('approval/request',async(_request,next)=>{entered.resolve();await release.promise;return next()},{prepend:true})
+  const result=f.ctx.approval.request({agent:f.agent as never,toolName:'write',reason:'Synthetic action'})
+  await entered.promise
+  remove();f.ctx.on('approval/request',replacement)
+  release.resolve()
+  expect(await result).toBe('rejected')
+  expect(old).toHaveBeenCalledOnce()
+  expect(replacement).not.toHaveBeenCalled()
+})
+
 it.each(['expired', 'delivery-failed'] as const)('keeps desktop approval open beyond two minutes after the channel is %s', async failure => {
   const desktop = Promise.withResolvers<ApprovalOutcome>()
   const showDesktop = vi.fn((_request: { signal?: AbortSignal }) => desktop.promise)
@@ -88,7 +104,8 @@ it.each(['expired', 'delivery-failed'] as const)('keeps desktop approval open be
   vi.useFakeTimers()
   try {
     let finished = false
-    const result = f.ctx.approval.request({agent:f.agent as never,toolName:'write',reason:'Synthetic action'}).then(value => {finished=true;return value})
+    const controller=new AbortController()
+    const result = f.ctx.approval.request({agent:f.agent as never,toolName:'write',reason:'Synthetic action',signal:controller.signal}).then(value => {finished=true;return value})
     await vi.advanceTimersByTimeAsync(120001)
     expect(finished).toBe(false)
     expect(showDesktop.mock.calls[0]![0].signal?.aborted).toBe(false)
@@ -99,7 +116,7 @@ it.each(['expired', 'delivery-failed'] as const)('keeps desktop approval open be
     }
     desktop.resolve('allowed-once')
     expect(await result).toBe('allowed-once')
-    expect(showDesktop.mock.calls[0]![0].signal?.aborted).toBe(true)
+    expect(showDesktop.mock.calls[0]![0].signal?.aborted).toBe(false)
   } finally { vi.useRealTimers() }
 })
 
@@ -119,7 +136,7 @@ it('shows the actual desktop rejection when a simultaneous channel grant loses',
   expect(f.session.snapshotEvents().filter(e=>e.type==='approval/decided').map(e=>e.data.outcome)).toEqual(['rejected'])
 })
 
-it.each(['turn-end','unload','abort'] as const)('withdraws both answerers on %s without a channel-wide timeout', async action => {
+it.each(['turn-end','unload','abort'] as const)('ends shared coordination on %s while preserving the native desktop signal', async action => {
   const desktop = vi.fn((request: {signal?:AbortSignal}) => new Promise<ApprovalOutcome>(resolve=>{
     request.signal?.addEventListener('abort',()=>resolve('cancelled'),{once:true})
   }))
@@ -133,7 +150,8 @@ it.each(['turn-end','unload','abort'] as const)('withdraws both answerers on %s 
   } else if(action==='unload') f.unregister()
   else controller.abort()
   expect(await result).toBe('cancelled')
-  expect(desktop.mock.calls[0]![0].signal?.aborted).toBe(true)
+  expect(desktop.mock.calls[0]![0].signal).toBe(controller.signal)
+  expect(controller.signal.aborted).toBe(action==='abort')
 })
 it.each([
   ['telegram', 'mobile'], ['telegram', 'desktop'], ['discord', 'mobile'], ['discord', 'desktop'],
@@ -154,7 +172,7 @@ it.each([
   if (winner === 'mobile') f.broker.reply(`/approve ${token}`)
   else desktop.resolve('allowed-once')
   await expect(result).resolves.toMatchObject({ delivery: 'sent' })
-  expect(signal?.aborted).toBe(true)
+  expect(signal?.aborted).toBe(false)
   expect(closeCard).toHaveBeenCalledExactlyOnceWith('allowed-once')
   expect(() => f.broker.reply(`/deny ${token}`)).toThrow('失效')
   desktop.resolve('rejected')
@@ -211,7 +229,7 @@ it('keeps the desktop answer available if Telegram delivery fails', async () => 
   expect(await result).toBe('allowed-once')
 })
 
-it('withdraws both prompts when the DSH session changes to never', async () => {
+it('invalidates channel replies when the DSH session changes to never', async () => {
   const showDesktop = vi.fn((request: { signal?: AbortSignal }) => new Promise<ApprovalOutcome>(resolve => {
     request.signal?.addEventListener('abort', () => resolve('cancelled'), { once: true })
   }))
@@ -222,7 +240,7 @@ it('withdraws both prompts when the DSH session changes to never', async () => {
   setApprovalPolicy(f.session, 'never')
   f.ctx.emit('session/event', f.session, f.session.snapshotEvents().at(-1)!)
   expect(await result).toBe('cancelled')
-  expect(showDesktop.mock.calls[0]?.[0].signal?.aborted).toBe(true)
+  expect(showDesktop.mock.calls[0]?.[0].signal).toBeUndefined()
   expect(() => f.broker.reply(`/approve ${token}`)).toThrow('失效')
 })
 

@@ -45,6 +45,7 @@ async function fixture() {
   }
   let stop!: () => Promise<void>
   const ctx = {
+    root:{extend:()=>ctx},
     logger: () => ({ warn: vi.fn() }), get: () => undefined, plugin: vi.fn(), tools: { register: () => () => {} },
     effect: (fn: () => () => Promise<void>) => { stop = fn() },
     on: (name: string, fn: (...args: any[]) => void) => { if (!handlers.has(name)) handlers.set(name, new Set()); handlers.get(name)!.add(fn); return () => handlers.get(name)!.delete(fn) },

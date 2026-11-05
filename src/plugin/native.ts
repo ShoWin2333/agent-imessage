@@ -67,7 +67,7 @@ function reasonText(reason: unknown): string {
 }
 
 export class DshNativeHost implements NativeHost {
-  constructor(private readonly ctx: Context, private readonly cwd: string, private readonly permissionPreset: string, private readonly binding: string, private readonly model?: {provider:string;model:string;reasoningEffort?:string | undefined}, private readonly legacyIdentity?: LegacySessionIdentity, private readonly channelKind?: string) { }
+  constructor(private readonly ctx: Context, private readonly cwd: string, private readonly permissionPreset: string, private readonly binding: string, private readonly model?: {provider:string;model:string;reasoningEffort?:string | undefined}, private readonly legacyIdentity?: LegacySessionIdentity, private readonly channelKind?: string, private readonly lifetime: Context = ctx) { }
   async inspect(sessionId: string, inputId: string): Promise<NativeResult | undefined> {
     if (!sessionId) return undefined
     const snapshot = await this.ctx.sessionPersistence.stat(SessionId(sessionId))
@@ -108,8 +108,8 @@ export class DshNativeHost implements NativeHost {
     const options = { provider: selection.provider, model: selection.model }
     let handle: AgentHandle
     try {
-      handle = id ? await this.ctx.agents.resume({ resumeSessionId: SessionId(id), agentOptions: options, setup })
-        : await this.ctx.agents.create({ sessionId: SessionId(`channels-${this.binding}-${randomUUID()}`), meta: { cwd: this.cwd, agentPreset: preset }, agentOptions: options, setup })
+      handle = id ? await this.lifetime.agents.resume({ resumeSessionId: SessionId(id), agentOptions: options, setup })
+        : await this.lifetime.agents.create({ sessionId: SessionId(`channels-${this.binding}-${randomUUID()}`), meta: { cwd: this.cwd, agentPreset: preset }, agentOptions: options, setup })
     } catch (error) {
       // Desktop can claim the session while the plugin is reading its saved state.
       const live = id && error instanceof Error && error.name === 'SessionAlreadyOwnedError'

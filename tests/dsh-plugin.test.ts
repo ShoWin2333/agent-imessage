@@ -172,6 +172,7 @@ it('unload while credential resolution is pending cannot start a late channel', 
   const records = new Map<string, unknown>()
   const put = vi.fn(async (key: string, value: unknown) => { if (closed) throw new Error('write after close'); records.set(key, value) })
   const ctx = {
+    root:{extend:()=>ctx},
 logger: () => ({ warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() }), plugin: vi.fn(), get: () => undefined, on: vi.fn(), tools: { register: vi.fn(() => () => {}) },
 permissionPresets: { resolve: () => { } }, storageDomain: { open: async () => ({ table: () => ({ get: (key: string) => records.get(key), put }), close: async () => { closed = true } }) },
     credentials: { resolve: resolveCredential }, effect: (fn: () => () => Promise<void>) => { stop = fn() },

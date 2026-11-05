@@ -1,7 +1,7 @@
 import type { RuntimeView } from '../types.js'
 import { realpath } from 'node:fs/promises'
 import { Config as NativeConfig } from './schema.js'
-import type { Context, Volatile } from '@deepseek-ai/cordis'
+import { Context, type Volatile } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-settings'
 import type {} from '@deepseek-ai/cordis-plugin-loader'
 import type {} from '@deepseek-ai/dsh-user-approval'
@@ -78,7 +78,11 @@ export async function apply(ctx: Context, config: Config | { bindings: Volatile<
     if (!table.get(key)) await wait(table.put(key, { receipts: [] }))
     ensureActive()
     let adapter: ChannelAdapter | undefined
-    const bridge = new ChannelBridge(new DshNativeHost(ctx, binding.cwd, binding.permissionPreset, key, binding.model, table.get(key)?.legacyIdentity, binding.channel.kind), {
+    // Shared conversations belong to the application, not this reloadable
+    // transport plugin. Preserve the caller's service isolation labels while
+    // using the root fiber as the factory transaction/lifecycle owner.
+    const lifetime = ctx.root.extend({ [Context.isolate]: ctx[Context.isolate] })
+    const bridge = new ChannelBridge(new DshNativeHost(ctx, binding.cwd, binding.permissionPreset, key, binding.model, table.get(key)?.legacyIdentity, binding.channel.kind, lifetime), {
       read: () => table.get(key)!, write: value => table.put(key, value),
     })
     bridge.setConnected(false)
