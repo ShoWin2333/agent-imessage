@@ -48,9 +48,19 @@
         ]
       },
       "dist-tags": {
-        "latest": "1.1.0-dsh.12"
+        "latest": "1.1.0-dsh.13"
       },
       "versions": [
+        {
+          "version": "1.1.0-dsh.13",
+          "publishTimestamp": 1793866331,
+          "source": {
+            "type": "npm"
+          },
+          "engines": {
+            "dsh": "0.2.1-rc.2 || 0.2.1-rc.5 || 0.2.2-rc.1"
+          }
+        },
         {
           "version": "1.1.0-dsh.12",
           "publishTimestamp": 1793861395,
