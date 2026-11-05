@@ -1,10 +1,11 @@
-import { randomUUID } from 'node:crypto'
+import { randomBytes, randomUUID } from 'node:crypto'
 import { z } from 'zod'
 import type { ChannelMessage } from '../channels/types.js'
 import type { ApprovalOutcome } from '@deepseek-ai/dsh-user-approval'
 import { UserQuestionError, type AskUserQuestionAnswer, type AskUserQuestionItem } from '@deepseek-ai/dsh-user-questions'
 import type { ApprovalInteraction, QuestionInteraction, InteractionScope } from './interaction-types.js'
 import { bounded } from './delivery.js'
+import { approvalStatus, type ApprovalPromptOutcome } from '../channels/approval.js'
 
 const MAX_PROMPT = 12000
 const option = z.object({label:z.string().min(1),description:z.string().optional()}).strict()
@@ -24,28 +25,85 @@ const answerSchema = z.object({answers:z.array(z.object({
 }).strict()).max(16)}).strict()
 interface Pending {
   kind:'approval'|'question'
-  scope:InteractionScope
+  scope:Omit<InteractionScope,'inputId'>
   expires:number
   ready:boolean
   questions?:AskUserQuestionItem[]
   complete(value:ApprovalOutcome|AskUserQuestionAnswer):void
-  cancel(unavailable?:boolean):void
+  cancel(reason?:WaitResult['end']):void
 }
-function current(scope:InteractionScope):boolean {try{return scope.current()}catch{return false}}
+interface WaitResult {
+  value: ApprovalOutcome | AskUserQuestionAnswer
+  end: 'answered' | 'expired' | 'unavailable' | 'cancelled'
+}
+/** Presentation follows the final winner; a local expiry never invents a grant. */
+class ApprovalPresentation {
+  private final = false
+  private status: ApprovalPromptOutcome | undefined
+  private update: ((outcome: ApprovalPromptOutcome) => Promise<void>) | undefined
+  private published: { update: (outcome: ApprovalPromptOutcome) => Promise<void>; outcome: ApprovalPromptOutcome } | undefined
+  private tail = Promise.resolve()
+  constructor(private readonly settled?: Promise<ApprovalOutcome>) {
+    if (settled) void settled.then(outcome => { this.final = true; this.publish(outcome) })
+  }
+  delivered(update: (outcome: ApprovalPromptOutcome) => Promise<void>): void {
+    this.update = update
+    if (this.status) this.publish(this.status)
+  }
+  finish(result: WaitResult): ApprovalOutcome {
+    const value = typeof result.value === 'string' ? result.value : 'unavailable'
+    if (!this.final && (!this.settled || result.end !== 'answered')) {
+      this.publish(result.end === 'expired' ? 'expired' : value)
+    }
+    return value
+  }
+  private publish(outcome: ApprovalPromptOutcome): void {
+    this.status = outcome
+    const update = this.update
+    if (update && (this.published?.update !== update || this.published.outcome !== outcome)) {
+      this.published = { update, outcome }
+      this.tail = this.tail.then(() => bounded(update(outcome), 3000)).catch(() => {})
+    }
+  }
+}
+function current(scope:Omit<InteractionScope,'inputId'>):boolean {try{return scope.current()}catch{return false}}
 const invalid = () => new Error('请求已失效、尚未送达或不属于本渠道；没有执行任何授权。')
 
 /** Ephemeral reply capabilities only; native DSH retains policy, audit and execution. */
 export class ChannelInteractions {
   private readonly pending = new Map<string,Pending>()
   constructor(private readonly healthy:()=>boolean,private readonly timeoutMs=120000) {}
-  async approval(scope:ApprovalInteraction,message:ChannelMessage):Promise<ApprovalOutcome> {
+  async approval(scope:ApprovalInteraction,message:ChannelMessage, settled?:Promise<ApprovalOutcome>):Promise<ApprovalOutcome> {
     const informed = scope.displayReason?.zh?.trim() || scope.displayReason?.en?.trim() || scope.reason?.trim()
     if(!informed) return 'unavailable' // Never ask for an uninformed grant.
-    const token=`a-${randomUUID()}`
-    const prompt=`DSH 单次审批\n会话：${scope.sessionId}\n轮次：${scope.turn}\n工具：${scope.toolName}\n${scope.callId ? `调用：${scope.callId}\n` : ''}原因：${informed}\n\n仅批准这一次请求，不改变宿主权限。\n/approve ${token}\n/deny ${token}\n有效期 ${Math.ceil(this.timeoutMs/1000)} 秒。`
+    const seconds = Math.ceil(this.timeoutMs / 1000)
+    const sendApproval = message.sendApproval?.bind(message)
+    const presentation = new ApprovalPresentation(settled)
+    // Text-only surfaces need an explicit code the owner can type. Keep the
+    // full UUID for existing Telegram callbacks and legacy channel prompts.
+    let token: string
+    do {
+      token = settled && !sendApproval ? randomBytes(6).toString('base64url') : `a-${randomUUID()}`
+    } while (this.pending.has(token))
+    if (sendApproval) {
+      const action = scope.toolName === 'channel_send_media' ? '发送媒体或附件' : scope.toolName
+      const prompt = `DSH 单次审批\n${action}\n${informed}\n\n本渠道 ${seconds} 秒内有效，也可在 DSH 桌面处理。`
+      if (prompt.length > MAX_PROMPT) return 'unavailable'
+      const result = await this.wait(token, 'approval', scope, async signal => {
+        const update = await sendApproval(prompt, token, signal)
+        if (update) presentation.delivered(update)
+      })
+      return presentation.finish(result)
+    }
+    const prompt = settled
+      ? `DSH 单次审批\n${scope.toolName}\n${informed}\n\n批准：/approve ${token}\n拒绝：/deny ${token}\n也可在 DSH 桌面处理，任选一端。有效期 ${seconds} 秒。`
+      : `DSH 单次审批\n会话：${scope.sessionId}\n轮次：${scope.turn}\n工具：${scope.toolName}\n${scope.callId ? `调用：${scope.callId}\n` : ''}原因：${informed}\n\n仅批准这一次请求，不改变宿主权限。\n/approve ${token}\n/deny ${token}\n有效期 ${Math.ceil(this.timeoutMs/1000)} 秒。`
     if(prompt.length>MAX_PROMPT) return 'unavailable'
-    const result=await this.wait(token,'approval',scope,message,prompt)
-    return typeof result==='string' ? result : 'unavailable'
+    const result=await this.wait(token,'approval',scope,async()=>{
+      await message.send(prompt)
+      if (settled) presentation.delivered(outcome => message.send(`DSH 审批 ${token}：${approvalStatus(outcome)}。`))
+    })
+    return presentation.finish(result)
   }
   async question(scope:QuestionInteraction,message:ChannelMessage):Promise<AskUserQuestionAnswer> {
     const parsed=questionsSchema.safeParse(scope.questions)
@@ -55,34 +113,34 @@ export class ChannelInteractions {
     const sample={answers:questions.map(q=>({id:q.id,selected:[],custom:'填写回答'}))}
     const prompt=`DSH 问答\n会话：${scope.sessionId}\n轮次：${scope.turn}\n\n${body}\n\n/answer ${token} ${JSON.stringify(sample)}\n${questions.length===1?'单题也可用选项数字（多选用逗号）或 text:自由文本；计划审批必须明确选择一个选项。\n':''}答案包含所有题目 ID，selected 填原选项标签；示例不是默认答案。\n有效期 ${Math.ceil(this.timeoutMs/1000)} 秒；/cancel 取消本渠道工作。`
     if(prompt.length>MAX_PROMPT) throw new UserQuestionError('问答内容过长，渠道未展示、未作答；请使用 DSH 宿主。','CHANNEL_UNAVAILABLE')
-    const result=await this.wait(token,'question',scope,message,prompt,questions)
-    if(typeof result==='string') throw new UserQuestionError('渠道问答已取消或不可用。','ASK_ABORTED')
-    return result
+    const result=await this.wait(token,'question',scope,()=>message.send(prompt),questions)
+    if(typeof result.value==='string') throw new UserQuestionError('渠道问答已取消或不可用。','ASK_ABORTED')
+    return result.value
   }
-  private wait(token:string,kind:Pending['kind'],scope:InteractionScope,message:ChannelMessage,prompt:string,questions?:AskUserQuestionItem[]):Promise<ApprovalOutcome|AskUserQuestionAnswer> {
-    if(!this.healthy() || !current(scope) || scope.signal.aborted) return kind==='approval' ? Promise.resolve('unavailable') : Promise.reject(new UserQuestionError('渠道问答不可用。','ASK_ABORTED'))
+  private wait(token:string,kind:Pending['kind'],scope:Omit<InteractionScope,'inputId'>,send:(signal:AbortSignal)=>Promise<void>,questions?:AskUserQuestionItem[]):Promise<WaitResult> {
+    if(!this.healthy() || !current(scope) || scope.signal.aborted) return kind==='approval' ? Promise.resolve({value:'unavailable',end:'unavailable'}) : Promise.reject(new UserQuestionError('渠道问答不可用。','ASK_ABORTED'))
     return new Promise((resolve,reject)=>{
       const sending=new AbortController()
       let finished=false,timer:ReturnType<typeof setTimeout>
       const cleanup=()=>{finished=true;this.pending.delete(token);clearTimeout(timer);scope.signal.removeEventListener('abort',abort);sending.abort()}
-      const cancel=(unavailable=false)=>{
+      const cancel=(end:WaitResult['end']='cancelled')=>{
         if(finished) return
         cleanup()
-        if(kind==='approval') resolve(unavailable?'unavailable':'cancelled')
+        if(kind==='approval') resolve({value:end==='cancelled'?'cancelled':'unavailable',end})
         else reject(new UserQuestionError('渠道问答已取消、过期或投递未确认。','ASK_ABORTED'))
       }
       const abort=()=>cancel()
       const pending:Pending={kind,scope,expires:Date.now()+this.timeoutMs,ready:false,...(questions?{questions}:{}),
-        complete:value=>{if(finished)return;cleanup();resolve(value)},cancel}
-      timer=setTimeout(()=>cancel(true),this.timeoutMs)
+        complete:value=>{if(finished)return;cleanup();resolve({value,end:'answered'})},cancel}
+      timer=setTimeout(()=>cancel('expired'),this.timeoutMs)
       this.pending.set(token,pending)
       scope.signal.addEventListener('abort',abort,{once:true})
-      void bounded(Promise.resolve().then(()=>message.send(prompt)),30000,sending.signal).then(()=>{
+      void bounded(Promise.resolve().then(()=>send(sending.signal)),30000,sending.signal).then(()=>{
         if(!finished) {
           if(!this.healthy() || !current(scope) || scope.signal.aborted || Date.now()>=pending.expires) cancel()
           else pending.ready=true
         }
-      },()=>cancel(true))
+      },()=>cancel('unavailable'))
     })
   }
   /** Must be called only after durable command admission in this binding's bridge. */

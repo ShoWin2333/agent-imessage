@@ -50,6 +50,7 @@ export class WeixinAdapter implements ChannelAdapter {
     this.stopping = work.finally(()=>{this.stopping=undefined})
     return this.stopping
   }
+  approvalMessage() { return this.scheduledMessage('approval', '') }
   async scheduledMessage(id: string, text: string): Promise<ChannelMessage> {
     const context = this.store.state.weixinContext, signal = this.controller?.signal
     if (!context || !signal || signal.aborted || this.state.phase !== 'listening') throw new Error('WeChat needs an active conversation')

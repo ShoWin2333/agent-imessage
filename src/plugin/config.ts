@@ -11,10 +11,11 @@ export const bindingSchema = z.object({
   cwd: z.string().regex(absoluteWorkspacePattern),
   channel: channelSchema,
   credentialRef: reference,
+  directTelegramVoice: z.boolean().optional(),
   // Required deliberately: select a preset already configured in the DSH host.
   permissionPreset: z.string().min(1),
   weixin: z.object({ ownerUserId: z.string().min(1), baseUrl: z.string().regex(ORIGIN_RE) }).strict().optional(),
-}).strict()
+}).strict().transform(({ directTelegramVoice: _retired, ...binding }) => binding)
 
 /**
  * Structure stays declarative so the native Settings page can reserialize it.

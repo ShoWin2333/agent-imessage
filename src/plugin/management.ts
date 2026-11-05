@@ -1,6 +1,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import type { Binding } from './index.js'
+import type { TelegramRetryReason } from '../types.js'
 
 declare module '@deepseek-ai/cordis' { interface Context { channelsController: ChannelsController } }
 
@@ -14,7 +15,7 @@ export class BindingActivationError extends Error {
     super(message ?? code, options)
   }
 }
-type Factory = (binding: Binding, signal: AbortSignal, state: (phase: string) => void) => Promise<BindingResource>
+type Factory = (binding: Binding, signal: AbortSignal, state: (phase: string, retryReason?: TelegramRetryReason) => void) => Promise<BindingResource>
 type Logger = (message: string, details?: unknown) => void
 const fingerprint = (binding: Binding) => JSON.stringify(binding)
 
@@ -79,8 +80,8 @@ export class ChannelManager {
       this.live.set(binding.id, item)
       this.setState({ id: binding.id, phase: 'starting' })
       try {
-        const resource = await this.start(binding, item.abort.signal, phase => {
-          if (!this.closed && !item.abort.signal.aborted && this.live.get(binding.id) === item) this.setState({ id: binding.id, phase })
+        const resource = await this.start(binding, item.abort.signal, (phase, retryReason) => {
+          if (!this.closed && !item.abort.signal.aborted && this.live.get(binding.id) === item) this.setState({ id: binding.id, phase, ...(retryReason ? { error: retryReason } : {}) })
         })
         item.resource = resource
         if (item.abort.signal.aborted || this.closed) await resource.close()

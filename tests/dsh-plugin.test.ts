@@ -129,7 +129,7 @@ it('empty plugin composition is inert; no credential reads or network connection
 it('native ownership rejects another consumer and cross-workspace sessions', async () => {
   const ctx = { agents: { get: vi.fn(() => ({ id: 'occupied' })) } } as unknown as Context
   const host = new DshNativeHost(ctx, '/tmp', 'workspace-write', 'binding')
-  await expect(host.open('occupied')).rejects.toThrow('already owned')
+  await expect(host.open('occupied')).rejects.toThrow('Session binding mismatch')
 })
 it('replayed old cancel cannot cancel a new task', async () => {
   const f = fixture(); await f.bridge.receive(message('cancel', '/cancel'))
@@ -172,6 +172,7 @@ it('unload while credential resolution is pending cannot start a late channel', 
   const records = new Map<string, unknown>()
   const put = vi.fn(async (key: string, value: unknown) => { if (closed) throw new Error('write after close'); records.set(key, value) })
   const ctx = {
+    root:{extend:()=>ctx},
 logger: () => ({ warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() }), plugin: vi.fn(), get: () => undefined, on: vi.fn(), tools: { register: vi.fn(() => () => {}) },
 permissionPresets: { resolve: () => { } }, storageDomain: { open: async () => ({ table: () => ({ get: (key: string) => records.get(key), put }), close: async () => { closed = true } }) },
     credentials: { resolve: resolveCredential }, effect: (fn: () => () => Promise<void>) => { stop = fn() },
@@ -184,17 +185,14 @@ permissionPresets: { resolve: () => { } }, storageDomain: { open: async () => ({
 })
 it('interaction commands use durable admission, never become model prompts and cannot replay a grant',async()=>{
   const f=fixture(),task=message('task')
-  let handlers:import('../src/plugin/interaction-types.js').InteractionHandlers|undefined
-  const original=vi.mocked(f.session.submit).getMockImplementation()!
-  vi.mocked(f.session.submit).mockImplementation((id,text,progress,interactions)=>{handlers=interactions;return original(id,text,progress,interactions)})
   await f.bridge.receive(task)
-  const signal=new AbortController().signal
-  const outcome=handlers!.approval({sessionId:f.session.id,inputId:f.runs[0]!.id,turn:1,signal,current:()=>true,toolName:'write_file',reason:'Write synthetic file'})
+  const settlement=deferred<import('@deepseek-ai/dsh-user-approval').ApprovalOutcome>()
+  const outcome=f.bridge.approveShared({sessionId:f.session.id,turn:1,signal:new AbortController().signal,current:()=>true,toolName:'write_file',reason:'Write synthetic file'},async()=>task,settlement.promise)
   await vi.waitFor(()=>expect(task.send).toHaveBeenCalled());await Promise.resolve();await Promise.resolve()
-  const prompt=vi.mocked(task.send).mock.calls[0]![0],token=prompt.match(/\/approve (a-[a-f0-9-]+)/)![1]!
+  const prompt=vi.mocked(task.send).mock.calls[0]![0],token=prompt.match(/\/approve ([A-Za-z0-9_-]+)/)![1]!
   const approve=message('approval',`/approve ${token}`)
   await Promise.all([f.bridge.receive(approve),f.bridge.receive(approve)])
-  expect(await outcome).toBe('allowed-once');expect(f.session.submit).toHaveBeenCalledTimes(1)
+  expect(await outcome).toBe('allowed-once');settlement.resolve('allowed-once');expect(f.session.submit).toHaveBeenCalledTimes(1)
   expect(f.store.read().receipts.find(r=>r.id==='approval')?.delivery).toBe('sent')
   const invalid=message('late',`/approve ${token}`);await f.bridge.receive(invalid)
   expect(invalid.send).toHaveBeenCalledWith(expect.stringContaining('失效'))
@@ -204,16 +202,15 @@ it('interaction commands use durable admission, never become model prompts and c
   await restarted.bridge.close()
 })
 it('failed interaction command persistence cannot resolve the native approval',async()=>{
-  const f=fixture(),task=message('task');let handlers:import('../src/plugin/interaction-types.js').InteractionHandlers|undefined
-  const original=vi.mocked(f.session.submit).getMockImplementation()!
-  vi.mocked(f.session.submit).mockImplementation((id,text,progress,interactions)=>{handlers=interactions;return original(id,text,progress,interactions)})
+  const f=fixture(),task=message('task')
   await f.bridge.receive(task)
-  const outcome=handlers!.approval({sessionId:f.session.id,inputId:f.runs[0]!.id,turn:1,signal:new AbortController().signal,current:()=>true,toolName:'write_file',reason:'Write synthetic file'})
+  const settlement=deferred<import('@deepseek-ai/dsh-user-approval').ApprovalOutcome>()
+  const outcome=f.bridge.approveShared({sessionId:f.session.id,turn:1,signal:new AbortController().signal,current:()=>true,toolName:'write_file',reason:'Write synthetic file'},async()=>task,settlement.promise)
   await vi.waitFor(()=>expect(task.send).toHaveBeenCalled());await Promise.resolve();await Promise.resolve()
-  const token=vi.mocked(task.send).mock.calls[0]![0].match(/\/approve (a-[a-f0-9-]+)/)![1]!
+  const token=vi.mocked(task.send).mock.calls[0]![0].match(/\/approve ([A-Za-z0-9_-]+)/)![1]!
   f.store.write.mockRejectedValueOnce(new Error('synthetic persistence failure'))
   await expect(f.bridge.receive(message('approval',`/approve ${token}`))).rejects.toThrow('persistence')
-  f.bridge.setConnected(false);expect(await outcome).toBe('cancelled')
+  f.bridge.setConnected(false);expect(await outcome).toBe('cancelled');settlement.resolve('cancelled')
   f.runs[0]!.result.resolve({text:'cancelled',reason:'interrupted'});await f.bridge.drain();await f.bridge.close()
 })
 it('does not send fixed progress or a second reply for an admitted same-turn steering input',async()=>{

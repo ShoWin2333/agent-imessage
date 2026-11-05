@@ -1,10 +1,12 @@
-import { Client, ChannelType, Events, GatewayIntentBits, Partials, PermissionFlagsBits, Routes, MessageType, MessageFlags, type Message, type ClientOptions } from 'discord.js'
+import { Client, ChannelType, Events, GatewayIntentBits, Partials, PermissionFlagsBits, Routes, MessageType, MessageFlags, ButtonStyle, ComponentType, type Message, type ClientOptions } from 'discord.js'
 import type { ChannelConfig } from '../channels/config.js'
 import type { ChannelAdapter, ChannelMessage } from './types.js'
 import type { RuntimeView } from '../types.js'
 import type { OutboundMediaPayload } from '../media.js'
 import { pause } from './weixin-api.js'
 import { oggOpusDuration } from './ogg-opus.js'
+import { SNOWFLAKE_RE } from '../shared/rules.js'
+import { approvalStatus, APPROVAL_STATUS_RESERVE } from './approval.js'
 
 /** Discord voice needs Opus in Ogg plus real duration and a sampled waveform. */
 export function supportsDiscordVoice(media: OutboundMediaPayload): boolean {
@@ -19,15 +21,16 @@ export function supportsDiscordVoice(media: OutboundMediaPayload): boolean {
 export type DiscordScope = Extract<ChannelConfig, {kind: 'discord'}>
 export type DiscordClientFactory = (options: ClientOptions) => Client
 const noMentions = {parse: [], replied_user: false}
+const approvalButton = /^dsh:(approve|deny):(a-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})$/
 class DiscordBindingError extends Error {}
 
 /** Discord counts UTF-16 code units. Never split a surrogate pair or grapheme. */
-export function splitDiscordText(text: string): string[] {
+export function splitDiscordText(text: string, limit = 2000): string[] {
   const parts: string[] = []
   let part = ''
   for (const {segment} of new Intl.Segmenter(undefined, {granularity:'grapheme'}).segment(text)) {
-    if (segment.length > 2000) throw new Error('Discord text contains an oversized segment')
-    if (part.length + segment.length > 2000) { parts.push(part); part = '' }
+    if (segment.length > limit) throw new Error('Discord text contains an oversized segment')
+    if (part.length + segment.length > limit) { parts.push(part); part = '' }
     part += segment
   }
   if (part) parts.push(part)
@@ -70,6 +73,7 @@ export class DiscordAdapter implements ChannelAdapter {
     this.destination = undefined
     this.publish({phase:'failed',error:{code:'runtime-failed',message}})
   }
+  approvalMessage() { return this.scheduledMessage('approval', '') }
   async scheduledMessage(id: string, text: string): Promise<ChannelMessage> {
     const signal = this.controller?.signal, client = this.client, destination = this.destination
     if (!signal || signal.aborted || !client?.isReady() || !destination || this.state.phase !== 'listening') throw new Error('Discord is not connected')
@@ -80,9 +84,11 @@ export class DiscordAdapter implements ChannelAdapter {
       signal.throwIfAborted()
       if (client !== this.client || !client.isReady() || destination !== this.destination || this.state.phase !== 'listening') throw new Error('Discord connection changed')
     }
-    const post = async (body: object) => {
+    const post = async (body: object, cancellation?: AbortSignal) => {
       ready()
-      try { await client.rest.post(Routes.channelMessages(destination), {body,signal}) }
+      const deliverySignal = cancellation ? AbortSignal.any([signal, cancellation]) : signal
+      deliverySignal.throwIfAborted()
+      try { return await client.rest.post(Routes.channelMessages(destination), {body,signal:deliverySignal}) }
       catch { throw new Error('Discord message delivery failed. Check channel permissions and attachment limits.') }
     }
     const upload = async (media: OutboundMediaPayload, cancellation?: AbortSignal, voice = false) => {
@@ -103,6 +109,30 @@ export class DiscordAdapter implements ChannelAdapter {
     }
     return {id,text,nativeVoice:true,supportsNativeVoice:supportsDiscordVoice,
       send: async value => {for (const part of splitDiscordText(value)) await post({content:part,allowed_mentions:noMentions})},
+      sendApproval: async (value, token, cancellation) => {
+        const parts = splitDiscordText(value, 2000 - APPROVAL_STATUS_RESERVE)
+        const last = parts.pop()
+        if (!last) throw new Error('Discord approval prompt is empty')
+        for (const part of parts) await post({content:part,allowed_mentions:noMentions}, cancellation)
+        const sent = await post({
+          content:last, allowed_mentions:noMentions,
+          components:[{type:ComponentType.ActionRow,components:[
+            {type:ComponentType.Button,style:ButtonStyle.Success,label:'批准一次',custom_id:`dsh:approve:${token}`},
+            {type:ComponentType.Button,style:ButtonStyle.Danger,label:'拒绝',custom_id:`dsh:deny:${token}`},
+          ]}],
+        }, cancellation)
+        const messageId = sent && typeof sent === 'object' && 'id' in sent ? sent.id : undefined
+        if (typeof messageId !== 'string' || !SNOWFLAKE_RE.test(messageId)) return
+        return async outcome => {
+          ready()
+          const status = approvalStatus(outcome)
+          const content = `${last}\n\n${status}`
+          await client.rest.patch(Routes.channelMessage(destination,messageId), {
+            body:{content,allowed_mentions:noMentions,components:[]},
+            signal:AbortSignal.any([signal,AbortSignal.timeout(3000)]),
+          })
+        }
+      },
       sendImage: upload,
       sendFile: upload,
       sendVoice: (media, cancellation) => upload(media,cancellation,true),
@@ -170,15 +200,29 @@ export class DiscordAdapter implements ChannelAdapter {
       // discord.js error events must always have listeners; never publish raw errors/tokens.
       client.on(Events.Error, () => {})
       client.on(Events.ShardError, () => {})
-      client.on(Events.MessageCreate, raw => {
-        if (!current() || !validated || this.state.phase !== 'listening') return
-        const text = this.accepted(raw,client)
-        if (!text || queued >= 32) return
-        const message = this.message(`discord:${raw.channelId}:${raw.id}`,text,client,this.destination!,signal)
+      const canReceive = () => current() && validated && this.state.phase === 'listening' && queued < 32
+      const enqueue = (message: ChannelMessage) => {
         queued++
         queue = queue.then(async () => {
           if (current() && this.state.phase === 'listening') await this.onMessage(message)
         }).catch(() => {}).finally(() => {queued--})
+      }
+      client.on(Events.MessageCreate, raw => {
+        if (!canReceive()) return
+        const text = this.accepted(raw,client)
+        if (text) enqueue(this.message(`discord:${raw.channelId}:${raw.id}`,text,client,this.destination!,signal))
+      })
+      client.on(Events.InteractionCreate, interaction => {
+        if (!canReceive() || !interaction.isButton()
+          || interaction.guildId !== (this.scope.guildId ?? null) || interaction.channelId !== this.destination
+          || interaction.user.bot || interaction.user.id !== this.scope.ownerUserId
+          || !interaction.message.author.bot || interaction.message.author.id !== this.scope.botId) return
+        const match = approvalButton.exec(interaction.customId)
+        if (!match) return
+        // Acknowledge before waiting on durable admission, which can take longer
+        // than Discord's interaction deadline. Only the bridge records a decision.
+        void interaction.deferUpdate().catch(() => {})
+        enqueue(this.message(`discord-button:${interaction.id}`,`/${match[1]} ${match[2]}`,client,this.destination!,signal))
       })
       const timeout = AbortSignal.timeout(30_000), combined = AbortSignal.any([signal,timeout])
       let onAbort!: () => void

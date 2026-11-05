@@ -8,13 +8,14 @@ function deferred<T>() { let resolve!: (value: T) => void; const promise = new P
 function runtime() {
   const handlers = new Map<string, Set<(...args: any[]) => void>>()
   const emit = (event: string, ...args: any[]) => { for (const fn of handlers.get(event) ?? []) fn(...args) }
-  const liveSession = Session.create(SessionId('channels-binding-synthetic'))
-  const agent = { id: liveSession.id, session: liveSession, inbox: { clear: vi.fn() }, cancel: vi.fn(), followup: vi.fn(), ctx: undefined as unknown as Context }
+  const id = SessionId('channels-binding-synthetic')
+  const liveSession = Session.create(id, [], { ...Session.create(id).header, cwd: '/tmp' })
+  const agent = { id: liveSession.id, session: liveSession, inbox: { clear: vi.fn(), remove: vi.fn(() => true) }, cancel: vi.fn(), followup: vi.fn(), ctx: undefined as unknown as Context }
   const dispose = vi.fn(async () => { emit('agent/disposed', { agent }) })
   const flush = vi.fn(async () => true)
   const ctx = {
 on: (event: string, fn: (...args: any[]) => void) => { if (!handlers.has(event)) handlers.set(event, new Set()); handlers.get(event)!.add(fn); return () => handlers.get(event)!.delete(fn) },
-    agents: { get: vi.fn(() => undefined), create: vi.fn(async () => ({ agent, dispose })), resume: vi.fn(async () => ({ agent, dispose })) },
+    agents: { get: vi.fn(() => undefined), roots: vi.fn(() => [agent]), create: vi.fn(async () => ({ agent, dispose })), resume: vi.fn(async () => ({ agent, dispose })) },
     agentDefaultModel: { currentSelection: () => ({ provider: 'synthetic', model: 'no-paid-model' }) }, agentPresets: { defaultId: 'synthetic-preset', mount: vi.fn() },
     permissionPresets: { resolve: vi.fn(), set: vi.fn() }, sessions: { flush },
     sessionPersistence: { stat: vi.fn(async () => ({ header: { cwd: '/tmp', agentPreset: 'synthetic-preset' } })), open: vi.fn(async () => ({ read: async () => ({ events: [] }), close: vi.fn(async () => { }) })) },
@@ -56,9 +57,106 @@ it('resume clears quarantined native inbox before new input, flushes it, preserv
   expect(f.agent.inbox.clear).toHaveBeenCalledTimes(1)
   expect(f.flush).toHaveBeenCalledWith(f.agent.session)
   expect(f.ctx.permissionPresets.set).not.toHaveBeenCalled()
-  session.cancel(); expect(f.agent.cancel).toHaveBeenCalledWith({ kind: 'user' })
+  session.cancel(); expect(f.agent.cancel).not.toHaveBeenCalled()
   await session.close()
 })
+
+it.each(['create','resume'] as const)('forwards a creation-only cancellation signal to %s and detaches it after success', async mode => {
+  const f=runtime(),binding=new AbortController()
+  const session=await f.host.open(mode==='resume'?'channels-binding-synthetic':undefined,binding.signal)
+  const options=(mode==='resume'?vi.mocked(f.ctx.agents.resume):vi.mocked(f.ctx.agents.create)).mock.calls[0]![0]
+  expect(options.signal).toBeInstanceOf(AbortSignal)
+  expect(options.signal).not.toBe(binding.signal)
+  binding.abort(new Error('Binding stopped after open'))
+  expect(options.signal?.aborted).toBe(false)
+  await session.close()
+})
+
+it('refuses an already cancelled opening before touching the native factory', async () => {
+  const f=runtime(),binding=new AbortController()
+  binding.abort(new Error('Binding already stopped'))
+  await expect(f.host.open(undefined,binding.signal)).rejects.toThrow('Binding already stopped')
+  expect(f.ctx.agents.create).not.toHaveBeenCalled()
+  expect(f.ctx.agents.resume).not.toHaveBeenCalled()
+})
+it('shares the exact desktop-opened session without clearing or cancelling desktop work', async () => {
+  const f = runtime()
+  const agent = f.agent as typeof f.agent & { status: string; steer: ReturnType<typeof vi.fn> }
+  agent.status = 'running'
+  agent.steer = vi.fn()
+  vi.mocked(f.ctx.agents.get).mockReturnValue(agent as never)
+  agent.session.append('turn/start', { turn: 1 })
+
+  const session = await f.host.open(agent.id)
+  expect(f.ctx.agents.resume).not.toHaveBeenCalled()
+  expect(agent.inbox.clear).not.toHaveBeenCalled()
+  const operation = session.submit('telegram-input', 'Telegram request', () => {})
+  await operation.admitted
+  expect(agent.followup).toHaveBeenCalledOnce()
+  expect(agent.steer).not.toHaveBeenCalled()
+
+  session.cancel()
+  expect(agent.inbox.remove).toHaveBeenCalledWith('telegram-input')
+  expect(agent.cancel).not.toHaveBeenCalled()
+  expect(await operation.result).toMatchObject({ reason: 'interrupted' })
+  await session.close()
+  expect(f.dispose).not.toHaveBeenCalled()
+  expect(session.isLive?.()).toBe(false)
+})
+
+it('reuses the matching desktop Agent when the desktop wins the resume race', async () => {
+  const f = runtime()
+  vi.mocked(f.ctx.agents.resume).mockImplementationOnce(async () => {
+    vi.mocked(f.ctx.agents.get).mockReturnValue(f.agent as never)
+    throw Object.assign(new Error('Synthetic concurrent resume'), { name: 'SessionAlreadyOwnedError' })
+  })
+  const session = await f.host.open(f.agent.id)
+  expect(session.id).toBe(f.agent.id)
+  expect(f.agent.inbox.clear).not.toHaveBeenCalled()
+  await session.close()
+  expect(f.dispose).not.toHaveBeenCalled()
+})
+
+it.each(['channel-first','desktop-first'] as const)('preserves a desktop turn and its queue on channel cancel/close (%s)', async order => {
+  const f=runtime(),live=f.agent as any
+  live.status='running'
+  live.inbox.nextTurn=[createUserMessage({content:[{type:'text',text:'desktop queued'}],source:{kind:'user'}})]
+  live.inbox.nextStep=[]
+  if(order==='desktop-first') vi.mocked(f.ctx.agents.get).mockReturnValue(live)
+  const session=await f.host.open(order==='desktop-first'?live.id:undefined)
+  vi.mocked(f.ctx.agents.get).mockReturnValue(live)
+  live.session.append('turn/start',{turn:1})
+  session.cancel()
+  await session.close()
+  expect(live.cancel).not.toHaveBeenCalled()
+  expect(live.inbox.remove).not.toHaveBeenCalled()
+  expect(f.dispose).not.toHaveBeenCalled()
+  expect(live.inbox.nextTurn).toHaveLength(1)
+})
+
+it('cancels a channel-owned turn with keepInbox even when the channel created the Agent', async () => {
+  const f=runtime(),live=f.agent as any,session=await f.host.open()
+  vi.mocked(f.ctx.agents.get).mockReturnValue(live)
+  live.session.append('turn/start',{turn:1})
+  live.followup.mockImplementation((message:any)=>f.emit('agent/inbox/claimed',{agent:live,message,turn:1}))
+  const operation=session.submit('channel-input','task',()=>{})
+  await operation.admitted
+  session.cancel()
+  expect(live.cancel).toHaveBeenCalledWith({kind:'user'},{keepInbox:true})
+  expect(live.inbox.clear).not.toHaveBeenCalled()
+  await session.close();await operation.result
+})
+
+it('does not attach to a desktop Agent outside the binding workspace or root scope', async () => {
+  const f = runtime()
+  vi.mocked(f.ctx.agents.get).mockReturnValue(f.agent as never)
+  const otherWorkspace = new DshNativeHost(f.ctx, '/different', 'workspace-write', 'binding')
+  await expect(otherWorkspace.open(f.agent.id)).rejects.toThrow('Session binding mismatch')
+  vi.mocked(f.ctx.agents.roots).mockReturnValue([])
+  await expect(f.host.open(f.agent.id)).rejects.toThrow('Session binding mismatch')
+  expect(f.ctx.agents.resume).not.toHaveBeenCalled()
+})
+
 it('rejects wrong binding identity even when workspace matches; closes read handles', async () => {
   const f = runtime()
   await expect(f.host.open('channels-other-binding-synthetic')).rejects.toThrow('mismatch')
@@ -129,9 +227,8 @@ it('queues channel input behind a host-owned turn instead of steering or owning 
  const f=runtime(),session=await f.host.open(),live=f.agent as any;live.status='running';live.steer=vi.fn();vi.mocked(f.ctx.agents.get).mockReturnValue(live)
  const foreign=createUserMessage({content:[{type:'text',text:'host input'}],source:{kind:'user'}})
  live.session.append('turn/start',{turn:20});live.session.append('user/message',foreign,{surfaceOp:'append'});f.emit('agent/inbox/claimed',{agent:live,message:foreign,turn:20})
- const approval=vi.fn(),question=vi.fn();const operation=session.submit('channel','channel task',()=>{},{approval,question});await operation.admitted
+ const question=vi.fn();const operation=session.submit('channel','channel task',()=>{},{question});await operation.admitted
  expect(live.steer).not.toHaveBeenCalled();expect(live.followup).toHaveBeenCalledTimes(1)
- const next=vi.fn(async()=> 'unavailable');const hook=[...f.handlers.get('approval/request')!][0]!;await hook({agent:live},next);expect(next).toHaveBeenCalled();expect(approval).not.toHaveBeenCalled()
  f.emit('session/event',live.session,{type:'assistant/message',data:{turn:20,message:{content:[{type:'text',text:'host-only response'}]}}});f.emit('session/event',live.session,{type:'turn/end',data:{turn:20,reason:{kind:'completed'}}})
  let resolved=false;void operation.result.then(()=>{resolved=true});await Promise.resolve();expect(resolved).toBe(false)
  const input=live.followup.mock.calls[0][0];live.session.append('turn/end',{turn:20,reason:{kind:'completed'}});live.session.append('agent/inbox/spliced',{target:'next-turn',start:0,inserted:[input]});live.session.append('turn/start',{turn:21});live.session.append('agent/inbox/spliced',{target:'next-turn',start:0,removedCount:1,inserted:[]});f.emit('agent/inbox/claimed',{agent:live,message:input,turn:21})

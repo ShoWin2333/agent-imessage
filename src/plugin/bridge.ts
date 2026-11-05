@@ -2,19 +2,21 @@ import { randomUUID } from 'node:crypto'
 import { ChannelInteractions } from './interactions.js'
 import { bounded } from './delivery.js'
 import type { LegacySessionIdentity } from './identity.js'
-import type { InteractionHandlers } from './interaction-types.js'
+import type { ApprovalOutcome } from '@deepseek-ai/dsh-user-approval'
+import type { ApprovalInteraction, InteractionHandlers } from './interaction-types.js'
 import type { ChannelMessage } from '../channels/types.js'
 import type { MediaHandler, MediaInteraction, MediaDeliveryResult, StoredMediaReceipt } from './media-delivery.js'
 
 export interface NativeResult { text: string; reason: string; suppressed?: boolean | undefined }
 export interface NativeSession {
   readonly id: string
+  isLive?(): boolean
   submit(id: string, text: string, progress: () => void, interactions?: InteractionHandlers, media?: MediaHandler): { admitted: Promise<void>; result: Promise<NativeResult> }
   cancel(): void
   close(): Promise<void>
 }
 export interface NativeHost {
-  open(id?: string): Promise<NativeSession>
+  open(id?: string, signal?: AbortSignal): Promise<NativeSession>
   inspect(sessionId: string, inputId: string): Promise<NativeResult | undefined>
 }
 /** Receipts track delivery only. DSH remains the execution and inbox authority. */
@@ -47,13 +49,17 @@ export class ChannelBridge {
   private tail = Promise.resolve()
   private readonly work = new Set<Promise<void>>()
   private readonly receiving = new Set<string>()
-  private readonly deliveryStop = new AbortController()
+  private readonly bindingStop = new AbortController()
   private closed = false
   private generation = 0
   private connected = true
   private readonly interactions = new ChannelInteractions(() => this.connected && !this.closed)
   constructor(private readonly host: NativeHost, private readonly store: BindingStore) { }
   setConnected(healthy: boolean): void {this.connected=healthy;if(!healthy)this.interactions.cancel()}
+  async approveShared(scope: ApprovalInteraction, destination: () => Promise<ChannelMessage>, settled: Promise<ApprovalOutcome>): Promise<ApprovalOutcome> {
+    if (!this.connected || this.closed || this.store.read().sessionId !== scope.sessionId) return 'unavailable'
+    return this.interactions.approval(scope, await destination(), settled)
+  }
   private serial<T>(fn: () => Promise<T>): Promise<T> {
     const next = this.tail.then(fn)
     this.tail = next.then(() => { }, () => { })
@@ -120,7 +126,10 @@ export class ChannelBridge {
           reply = receipt
           return
         }
-        this.session ??= await this.host.open(this.store.read().sessionId)
+        if (!this.session || this.session.isLive?.() === false) {
+          await this.session?.close()
+          this.session = await this.host.open(this.store.read().sessionId, this.bindingStop.signal)
+        }
         const state = this.store.read()
         await this.store.write({ ...state, sessionId: this.session.id })
         const receipt: Receipt = { id: message.id, inputId: randomUUID(), sessionId: this.session.id, delivery: 'pending' }
@@ -129,7 +138,6 @@ export class ChannelBridge {
         const operation = generation !== this.generation || this.closed
           ? { admitted: Promise.resolve(), result: Promise.resolve({ text: '已取消。', reason: 'interrupted' }) }
           : session.submit(receipt.inputId, message.text, () => {}, {
-            approval:request => this.interactions.approval({...request,current:()=>request.current() && generation===this.generation && this.session===session && !this.closed},message),
             question:request => this.interactions.question({...request,current:()=>request.current() && generation===this.generation && this.session===session && !this.closed},message),
           }, request => this.sendMedia(receipt.id, session, generation, message, request))
         const job = this.execute(operation.result, receipt, message)
@@ -167,7 +175,7 @@ export class ChannelBridge {
     let delivery: 'sent' | 'uncertain' = 'uncertain'
     try {
       if (!current()) throw new Error('Channel media delivery cancelled.')
-      const signal = AbortSignal.any([request.signal, this.deliveryStop.signal, AbortSignal.timeout(30000)])
+      const signal = AbortSignal.any([request.signal, this.bindingStop.signal, AbortSignal.timeout(30000)])
       const send = mode === 'voice' ? message.sendVoice.bind(message)
         : mode === 'image' ? (message.sendImage ?? message.sendFile).bind(message) : message.sendFile.bind(message)
       await bounded(send(request.media, signal), 30000, signal)
@@ -200,14 +208,14 @@ export class ChannelBridge {
     })
     if (!claimed) return
     let delivery: Receipt['delivery'] = 'sent'
-    try { await bounded(message.send(receipt.result.text || `DSH 已结束：${receipt.result.reason}`), 30000, this.deliveryStop.signal) }
+    try { await bounded(message.send(receipt.result.text || `DSH 已结束：${receipt.result.reason}`), 30000, this.bindingStop.signal) }
     catch { delivery = 'uncertain' }
     // A crash or failed commit here leaves 'sending'; recovery quarantines it.
     await this.serial(() => this.replace({ ...receipt, delivery }))
   }
   async drain(): Promise<void> { await this.tail; await Promise.all([...this.work]); await this.tail }
   async close(): Promise<void> {
-    this.closed = true; this.generation++; this.interactions.cancel(); this.deliveryStop.abort()
+    this.closed = true; this.generation++; this.interactions.cancel(); this.bindingStop.abort()
     this.session?.cancel()
     await this.tail
     this.session?.cancel()

@@ -57,6 +57,10 @@ it('survives the actual native Settings schema projection and second wire serial
   expect(browser({bindings:[b]}).bindings).toEqual([b])
 })
 it('enabled is activation state, while a model change partitions durable binding identity',()=>{
+  const direct = { ...binding(), directTelegramVoice: true }
+  expect(pluginConfigSchema.parse({ bindings: [direct] }).bindings[0]).toEqual(binding())
+  expect(Config({ bindings: [direct] }).bindings.get()[0].directTelegramVoice).toBe(true)
+  expect(bindingKey(pluginConfigSchema.parse({ bindings: [direct] }).bindings[0]!)).toBe(bindingKey(binding()))
   const b=binding();expect(bindingKey(b)).toBe(bindingKey({...b,enabled:false}))
   expect(bindingKey(b)).not.toBe(bindingKey({...b,model:{provider:'synthetic',model:'other'}}))
   // Rotating a secret must keep the same channel session and receipts.

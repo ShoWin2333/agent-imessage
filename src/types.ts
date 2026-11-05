@@ -21,6 +21,12 @@ export interface RuntimeListening {
 }
 
 /** Spectrum is waiting before an automatic reconnect. */
+export type TelegramRetryReason =
+  | 'telegram-verify'
+  | 'telegram-poll'
+  | 'telegram-admission'
+  | 'telegram-checkpoint'
+
 export interface RuntimeRetrying {
   /** Discriminator for reconnect backoff. */
   phase: 'retrying'
@@ -28,6 +34,8 @@ export interface RuntimeRetrying {
   attempt: number
   /** Unix time in milliseconds when the next start will be attempted. */
   retryAt: number
+  /** Safe stage identifier. Never include provider errors or message content. */
+  retryReason?: TelegramRetryReason
 }
 
 /** Spectrum exhausted or encountered a non-recoverable local failure. */

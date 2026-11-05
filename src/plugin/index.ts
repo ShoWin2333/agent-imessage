@@ -1,6 +1,7 @@
+import type { RuntimeView } from '../types.js'
 import { realpath } from 'node:fs/promises'
 import { Config as NativeConfig } from './schema.js'
-import type { Context, Volatile } from '@deepseek-ai/cordis'
+import { Context, type Volatile } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-settings'
 import type {} from '@deepseek-ai/cordis-plugin-loader'
 import type {} from '@deepseek-ai/dsh-user-approval'
@@ -11,9 +12,10 @@ import { z } from 'zod'
 import type { ChannelAdapter } from '../channels/types.js'
 import type { RouteState } from '../channels/state.js'
 import { ChannelBridge } from './bridge.js'
-import { bindingKey, legacyBindingKey, migrateBindingState } from './identity.js'
+import { bindingKey, legacyBindingKey, migrateBindingState, ownsSession } from './identity.js'
 import { wasLegacyMessage } from './legacy-checkpoint.js'
 import { DshNativeHost } from './native.js'
+import { registerSharedApprovals } from './shared-approvals.js'
 import { channelStatusTool } from './tool.js'
 import { pluginConfigSchema, type Binding } from './config.js'
 
@@ -75,15 +77,21 @@ export async function apply(ctx: Context, config: Config | { bindings: Volatile<
     }
     if (!table.get(key)) await wait(table.put(key, { receipts: [] }))
     ensureActive()
-    const bridge = new ChannelBridge(new DshNativeHost(ctx, binding.cwd, binding.permissionPreset, key, binding.model, table.get(key)?.legacyIdentity, binding.channel.kind), {
+    let adapter: ChannelAdapter | undefined
+    // Shared conversations belong to the application, not this reloadable
+    // transport plugin. Preserve the caller's service isolation labels while
+    // using the root fiber as the factory transaction/lifecycle owner.
+    const lifetime = ctx.root.extend({ [Context.isolate]: ctx[Context.isolate] })
+    const bridge = new ChannelBridge(new DshNativeHost(ctx, binding.cwd, binding.permissionPreset, key, binding.model, table.get(key)?.legacyIdentity, binding.channel.kind, lifetime), {
       read: () => table.get(key)!, write: value => table.put(key, value),
     })
     bridge.setConnected(false)
-    let adapter: ChannelAdapter | undefined
+    let unregisterApprovals: (() => void) | undefined
     let starting: Promise<void> | undefined
     let startSettled = false
     let closing: Promise<void> | undefined
     const close = () => closing ??= (async () => {
+      unregisterApprovals?.()
       bridge.setConnected(false)
       const acquired = adapter
       const results = await Promise.allSettled([
@@ -113,7 +121,11 @@ export async function apply(ctx: Context, config: Config | { bindings: Volatile<
       let recovery: Promise<void> | undefined
       const recover = () => recovery ??= bridge.recover(id => adapter!.scheduledMessage!(id, '')).catch(error => { recovery = undefined; throw new BindingActivationError('activation-failed', 'Channel recovery incomplete', { cause: error }) })
       const receive = async (message: Parameters<ChannelBridge['receive']>[0]) => { ensureActive(); if (wasLegacyMessage(legacySeen, message.id)) return; await recover(); ensureActive(); await bridge.receive(message) }
-      const onState = (state: { phase: string }) => { bridge.setConnected(!signal.aborted && state.phase === 'listening'); stateChanged(state.phase); if (state.phase === 'listening' && !signal.aborted) void recover().catch(() => {}) }
+      const onState = (state: RuntimeView) => {
+        bridge.setConnected(!signal.aborted && state.phase === 'listening')
+        stateChanged(state.phase, state.phase === 'retrying' ? state.retryReason : undefined)
+        if (state.phase === 'listening' && !signal.aborted) void recover().catch(() => {})
+      }
       const c = binding.channel
       // Adapters load on demand: a Telegram-only deployment never imports Discord or Spectrum.
       if (c.kind === 'imessage') {
@@ -132,6 +144,15 @@ export async function apply(ctx: Context, config: Config | { bindings: Volatile<
         const { WeixinAdapter } = await wait(import('../channels/weixin.js'))
         ensureActive()
         adapter = new WeixinAdapter({ accountId: c.accountId, token: secret.value, ...binding.weixin! }, store, receive, onState)
+      }
+      const destination = adapter.approvalMessage?.bind(adapter)
+      if (destination) {
+        unregisterApprovals = registerSharedApprovals(ctx, ({ agent }) => {
+          const state = table.get(key)
+          return !!state && state.sessionId === agent.id && agent.session.id === agent.id
+            && agent.session.header.cwd === cwd && ctx.agents.get(agent.id) === agent
+            && ownsSession(agent.id, key, state.legacyIdentity)
+        }, (scope, settled) => bridge.approveShared(scope, destination, settled))
       }
       starting = Promise.resolve().then(() => { ensureActive(); return adapter!.start() }).finally(() => { startSettled = true })
       await wait(starting); ensureActive()
