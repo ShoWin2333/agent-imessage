@@ -30,6 +30,15 @@ describe('native channel settings panel',()=>{
     expect(screen.queryByRole('textbox',{name:/密钥/})).toBeNull()
     await waitFor(()=>expect(f.models).toHaveBeenCalledTimes(1))
   })
+  it('edits and saves an inert Feishu binding with identity fields and a credential reference',async()=>{
+    const f=fixture([]);f.show();fireEvent.click(screen.getByRole('button',{name:'＋ 飞书'}))
+    const fields=[['项目目录','/tmp/project'],['宿主权限预设','workspace-write'],['凭据引用（宿主已配置）','FEISHU_SECRET'],
+      ['飞书 App ID','cli_1234567890abcdef'],['飞书租户 Key','tenant'],['允许的飞书用户 Open ID','ou_owner'],['飞书单聊 Chat ID','oc_private']]
+    for(const [name,value] of fields) fireEvent.change(screen.getByLabelText(name!),{target:{value}})
+    expect(f.mutate).not.toHaveBeenCalled();expect(screen.queryByLabelText('App Secret')).toBeNull()
+    fireEvent.click(screen.getByRole('button',{name:'保存配置'}));await waitFor(()=>expect(f.mutate).toHaveBeenCalledOnce())
+    expect(f.snapshot().value?.bindings[0]).toMatchObject({enabled:false,credentialRef:'FEISHU_SECRET',channel:{kind:'feishu',appId:'cli_1234567890abcdef',tenantKey:'tenant',ownerUserId:'ou_owner',chatId:'oc_private'}})
+  })
   it('saves the complete binding array with its read revision, then enables only explicitly',async()=>{
     const f=fixture();f.show();fireEvent.change(screen.getByLabelText('项目目录'),{target:{value:'/tmp/changed'}})
     fireEvent.click(screen.getByRole('button',{name:'保存配置'}))

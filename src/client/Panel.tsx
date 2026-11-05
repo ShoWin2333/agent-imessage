@@ -7,11 +7,12 @@ import {NS,fallbackTranslate} from './locale.js'
 
 export type Translate=(key:string)=>string
 const labels:Record<Binding['channel']['kind'],string>={
-  imessage:'kind.imessage',telegram:'kind.telegram',weixin:'kind.weixin',discord:'kind.discord',
+  imessage:'kind.imessage',telegram:'kind.telegram',weixin:'kind.weixin',discord:'kind.discord',feishu:'kind.feishu',
 }
 const channelFields:Record<Binding['channel']['kind'],Array<[string,string]>>={
   imessage:[['projectId','field.projectId'],['senderPhoneNumber','field.senderPhoneNumber'],['assignedPhoneNumber','field.assignedPhoneNumber']],
   telegram:[['botId','field.botId'],['ownerUserId','field.ownerUserId']],
+  feishu:[['appId','field.appId'],['tenantKey','field.tenantKey'],['ownerUserId','field.feishuOwner'],['chatId','field.chatId']],
   weixin:[['accountId','field.accountId']],
   discord:[['botId','field.botId'],['ownerUserId','field.ownerUserId'],['guildId','field.guildId'],['channelId','field.channelId']],
 }
@@ -47,7 +48,7 @@ const canonical=(value:unknown):unknown=>Array.isArray(value)?value.map(canonica
 const same=(a:unknown,b:unknown)=>JSON.stringify(canonical(a))===JSON.stringify(canonical(b))
 export function agentGroups(bindings:Binding[],t:Translate=fallbackTranslate){
  const groups=new Map<string,{id:string;name:string;cwd:string;prefix:string;ids:string[]}>()
- for(const b of bindings){const prefix=/^(.+)-(?:imessage|telegram|weixin|discord)(?:-|$)/.exec(b.id)?.[1]??'',identity=prefix||b.id,id=JSON.stringify([identity,b.cwd]);let group=groups.get(id);if(!group){const name=prefix?prefix.replace(/^./,c=>c.toUpperCase()):(b.cwd.split('/').filter(Boolean).at(-1)||t('agent.new'));group={id,name,cwd:b.cwd,prefix,ids:[]};groups.set(id,group)}group.ids.push(b.id)}
+ for(const b of bindings){const prefix=/^(.+)-(?:imessage|telegram|weixin|discord|feishu)(?:-|$)/.exec(b.id)?.[1]??'',identity=prefix||b.id,id=JSON.stringify([identity,b.cwd]);let group=groups.get(id);if(!group){const name=prefix?prefix.replace(/^./,c=>c.toUpperCase()):(b.cwd.split('/').filter(Boolean).at(-1)||t('agent.new'));group={id,name,cwd:b.cwd,prefix,ids:[]};groups.set(id,group)}group.ids.push(b.id)}
  return [...groups.values()]
 }
 function ChannelEditor({ctx,form,t}:{ctx:ClientContext;form:ConfigForm;t:Translate}){

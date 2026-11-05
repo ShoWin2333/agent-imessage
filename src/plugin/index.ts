@@ -127,7 +127,7 @@ export async function apply(ctx: Context, config: Config | { bindings: Volatile<
         if (state.phase === 'listening' && !signal.aborted) void recover().catch(() => {})
       }
       const c = binding.channel
-      // Adapters load on demand: a Telegram-only deployment never imports Discord or Spectrum.
+      // Adapters load on demand: a Telegram-only deployment never imports Discord, Feishu or Spectrum.
       if (c.kind === 'imessage') {
         const { IMessageAdapter } = await wait(import('../channels/imessage.js'))
         ensureActive()
@@ -136,6 +136,10 @@ export async function apply(ctx: Context, config: Config | { bindings: Volatile<
         const { TelegramAdapter } = await wait(import('../channels/telegram.js'))
         ensureActive()
         adapter = new TelegramAdapter({ ...c, token: secret.value }, store, receive, onState)
+      } else if (c.kind === 'feishu') {
+        const { FeishuAdapter } = await wait(import('../channels/feishu.js'))
+        ensureActive()
+        adapter = new FeishuAdapter(c, secret.value, store, receive, onState)
       } else if (c.kind === 'discord') {
         const { DiscordAdapter } = await wait(import('../channels/discord.js'))
         ensureActive()

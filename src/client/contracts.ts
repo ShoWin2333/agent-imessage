@@ -4,7 +4,7 @@ export interface Binding {
   cwd: string
   credentialRef: string
   permissionPreset: string
-  channel: {id:string;kind:'imessage'|'telegram'|'weixin'|'discord';[key:string]:string}
+  channel: {id:string;kind:'imessage'|'telegram'|'weixin'|'discord'|'feishu';[key:string]:string}
   weixin?: {ownerUserId:string;baseUrl:string}
   model?: {provider:string;model:string;reasoningEffort?:string}
 }

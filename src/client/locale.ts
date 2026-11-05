@@ -6,7 +6,7 @@ export const NS = 'dsh-channels'
 
 const zh: Record<string, string> = {
   'nav.title': '消息渠道',
-  'summary': '管理 iMessage、Telegram、微信和 Discord，复用宿主模型与权限；新增渠道默认停用。',
+  'summary': '管理 iMessage、Telegram、微信、Discord 和飞书，复用宿主模型与权限；新增渠道默认停用。',
   'heading': 'Agent 与消息渠道',
   'intro': '先选择 Agent，再配置它的消息渠道。运行中也可编辑草稿；保存只影响当前渠道。',
   'agentGroups': 'Agent 分组',
@@ -84,6 +84,11 @@ const zh: Record<string, string> = {
   'kind.telegram': 'Telegram',
   'kind.weixin': '微信',
   'kind.discord': 'Discord',
+  'kind.feishu': '飞书',
+  'field.appId': '飞书 App ID',
+  'field.tenantKey': '飞书租户 Key',
+  'field.feishuOwner': '允许的飞书用户 Open ID',
+  'field.chatId': '飞书单聊 Chat ID',
   'issue.too-many': '最多配置 32 个渠道。',
   'issue.id-format': '渠道标识须为 1–64 个字母、数字、下划线或短横线。',
   'issue.id-duplicate': '渠道标识必须唯一。',
@@ -124,7 +129,7 @@ const zh: Record<string, string> = {
 
 const en: Record<string, string> = {
   'nav.title': 'Message channels',
-  'summary': 'Manage iMessage, Telegram, Weixin and Discord channels while reusing Host models and permissions. New channels start disabled.',
+  'summary': 'Manage iMessage, Telegram, Weixin, Discord and Feishu channels while reusing Host models and permissions. New channels start disabled.',
   'heading': 'Agents and message channels',
   'intro': 'Pick an Agent, then configure its channels. You may edit a draft while connected; saving affects only this channel.',
   'agentGroups': 'Agent groups',
@@ -202,6 +207,11 @@ const en: Record<string, string> = {
   'kind.telegram': 'Telegram',
   'kind.weixin': 'Weixin',
   'kind.discord': 'Discord',
+  'kind.feishu': 'Feishu',
+  'field.appId': 'Feishu App ID',
+  'field.tenantKey': 'Feishu tenant key',
+  'field.feishuOwner': 'Allowed Feishu user Open ID',
+  'field.chatId': 'Feishu private Chat ID',
   'issue.too-many': 'At most 32 channels.',
   'issue.id-format': 'Channel id must be 1–64 letters, digits, underscores or hyphens.',
   'issue.id-duplicate': 'Channel ids must be unique.',

@@ -2,21 +2,21 @@
 
 **默认分支 `main` 现为 DSH 渠道插件产品线。旧独立 macOS App 已归档至 `archive/standalone-macos-main-20261104`，历史完整保留。**
 
-将 iMessage、Telegram、微信 iLink、Discord 消息送入 **DeepSeek Harness（DSH）** 的原生会话，并回传执行结果。`1.1.0-dsh.12` 源码分别验证 DSH `0.2.1-rc.2`、`0.2.1-rc.5` 和 `0.2.2-rc.1`，版本声明仅包含这三版；开发依赖固定在旧版基线，另有新版 SDK 的隔离测试。
+将 iMessage、Telegram、微信 iLink、Discord、飞书消息送入 **DeepSeek Harness（DSH）** 的原生会话，并回传执行结果。待发布的 `1.1.0-dsh.12` 源码分别验证 DSH `0.2.1-rc.2`、`0.2.1-rc.5` 和 `0.2.2-rc.1`，版本声明仅包含这三版；开发依赖固定在旧版基线，另有新版 SDK 的隔离测试。
 
 DSH 负责 Agent、模型、工具、权限、执行队列、取消和会话日志；本插件负责消息渠道、固定身份绑定、去重和回复投递。宿主与浏览器端均为原生 Cordis 插件，没有独立平台、服务安装器或执行后端。
 
 ## 安装
 
-本版支持 DSH `0.2.1-rc.2`、`0.2.1-rc.5` 和 `0.2.2-rc.1`。iMessage 通道额外要求 macOS 与本机 Messages；Telegram、微信 iLink、Discord 跨平台。
+当前已发布的 `1.1.0-dsh.11` 面向 DSH `0.2.1-rc.2`；DSH `0.2.2-rc.1` 需要包含本次兼容修复的构建，该修复尚未发布。iMessage 通道额外要求 macOS 与本机 Messages；Telegram、微信 iLink、Discord、飞书跨平台。
 
 npm 包：`@showin2333/dsh-plugin-channels`。安装后以 bundle 形式挂载两条 Cordis 行（`dsh-channels` 与项目分组），浏览器面板由 `dsh.client` 自动发现。
 
 原 npm 名称 `@showin2333/dsh-channels` 已迁至此名称。升级保留设置行 ID、渠道绑定与会话记录；先停止旧包，再切换依赖和模块引用，勿同时加载两个包。详见迁移指南。
 
-本版版本号为 `1.1.0-dsh.12`；索引仅列出此新包名下实际存在的版本。
+当前已发布版本为 `1.1.0-dsh.11`；索引仅列出此新包名下实际存在的版本。
 
-- **直接安装**：DSH → 插件 → 安装，输入 `@showin2333/dsh-plugin-channels@1.1.0-dsh.12`。
+- **直接安装**：DSH → 插件 → 安装，输入 `@showin2333/dsh-plugin-channels@1.1.0-dsh.11`。
 - **市场安装**：先启用 `@deepseek-ai/dsh-experimental-plugin-market-bundle`，在 插件 → 发现 → 添加索引源 填入下方地址，再从卡片安装。
 - **本地开发**：`pnpm install && npm run build`，在 profile 的 `dependencies` 中以 `link:` 指向本仓库。
 
@@ -83,6 +83,8 @@ Telegram/Discord 的 `voice` 请求会在宿主具备 ffmpeg、Agent 子进程�
           ownerUserId: '234567'
 ```
 
+飞书企业自建机器人使用官方 SDK 长连接，仅接受指定租户和 Owner 单聊文字。App Secret 通过宿主凭据引用提供，配置、最少权限与联调步骤见 [飞书接入](docs/feishu.md)。本分支已实现飞书通道，尚未发布或做真实租户联调。
+
 其他渠道的 `channel` 字段：
 
 ```yaml
@@ -114,7 +116,7 @@ channel:
   channelId: '456789012345678901'
 ```
 
-同一个 Bot、微信账号或 Photon project 只能有一个消费者。真实切换前需核对旧消费者和备份。凭据轮换需由宿主更新引用并重新加载绑定。
+同一个飞书 App、Bot、微信账号或 Photon project 只能有一个消费者。真实切换前需核对旧消费者和备份。凭据轮换需由宿主更新引用并重新加载绑定。
 
 ## 本地验证
 
@@ -124,6 +126,6 @@ pnpm install --frozen-lockfile --ignore-scripts
 npm run check
 ```
 
-检查包括类型检查、合成消息/模拟渠道测试、构建和打包清单检查。开发依赖和主锁文件固定在 `0.2.1-rc.2`，隔离矩阵另行验证 `0.2.1-rc.5` 与 `0.2.2-rc.1`；运行时 peer 仅接受明确验证过的版本。`cordis` 和 `zod` 也固定在经过验证的版本。没有真实消息或付费模型测试脚本。
+检查包括类型检查、合成消息/模拟渠道测试、构建和打包清单检查。所有 DSH 包固定在 `0.2.1-rc.2`，避免预发布 peer 范围混入其他 RC。`cordis` 和 `zod` 也固定在经过验证的版本。没有真实消息或付费模型测试脚本。
 
 接口依据、恢复语义和已知边界见 [迁移指南](docs/dsh-channel-migration.md)。[English](README.en.md) · [安全边界](SECURITY.md)

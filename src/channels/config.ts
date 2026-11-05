@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { IDENTIFIER_RE, PHONE_RE, SNOWFLAKE_RE, TELEGRAM_ID_RE } from '../shared/rules.js'
+import { FEISHU_APP_RE, FEISHU_USER_RE, FEISHU_CHAT_RE, FEISHU_TENANT_RE, IDENTIFIER_RE, PHONE_RE, SNOWFLAKE_RE, TELEGRAM_ID_RE } from '../shared/rules.js'
 
 const identifier = z.string().regex(IDENTIFIER_RE)
 const phone = z.string().regex(PHONE_RE)
@@ -12,6 +12,7 @@ export const channelSchema = z.discriminatedUnion('kind', [
   }).strict(),
   z.object({ id: identifier, kind: z.literal('telegram'), botId: z.string().regex(TELEGRAM_ID_RE), ownerUserId: z.string().regex(TELEGRAM_ID_RE) }).strict(),
   z.object({ id: identifier, kind: z.literal('weixin'), accountId: z.string().min(1).max(256) }).strict(),
+  z.object({id:identifier, kind:z.literal('feishu'), appId:z.string().regex(FEISHU_APP_RE), tenantKey:z.string().regex(FEISHU_TENANT_RE), ownerUserId:z.string().regex(FEISHU_USER_RE), chatId:z.string().regex(FEISHU_CHAT_RE)}).strict(),
   z.object({
     id: identifier, kind: z.literal('discord'), botId: discordId, ownerUserId: discordId,
     guildId: discordId.optional(), channelId: discordId.optional()
