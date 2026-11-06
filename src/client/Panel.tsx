@@ -1,5 +1,5 @@
 import {useEffect,useRef,useState,useSyncExternalStore} from 'react'
-import type {AgentGroup,Binding,Catalog,ClientContext,ConfigForm,FormSnapshot,RuntimeStatus,StatusFrame} from './contracts.js'
+import type {AgentGroup,Binding,Catalog,ClientContext,ConfigForm,FormSnapshot,PermissionCatalog,RuntimeStatus,StatusFrame} from './contracts.js'
 import {bindingIssues,isChannelKind,type BindingIssue,type RuleBinding} from '../shared/rules.js'
 import {agentGroupIssue,MAX_AGENTS,resolveAgentGroups} from '../shared/agents.js'
 import {isPhase} from '../shared/phases.js'
@@ -26,9 +26,16 @@ const phaseKey=(phase:string)=>`phase.${isPhase(phase)?phase:'unknown'}`
 export function phaseLabel(phase:string|undefined,enabled:boolean,t:Translate=fallbackTranslate){
   return phase===undefined?(enabled?t('phase.pending'):t('phase.stopped')):t(phaseKey(phase))
 }
+const statusTone=(phase:string|undefined):'is-ok'|'is-warn'|'is-error'|'is-idle'=>
+  phase==='listening'?'is-ok':
+  phase==='starting'||phase==='retrying'||phase==='stopping'?'is-warn':
+  phase==='failed'||phase==='error'?'is-error':'is-idle'
+/** Keep long host identifiers out of the visual line; the full value stays in the tooltip. */
+const shortId=(value:string)=>value.length>14?`${value.slice(0,8)}…${value.slice(-4)}`:value
 function issueText(issue:BindingIssue,t:Translate):string{
-  const body=t(`issue.${issue.code}`)+(issue.field?`（${t(`field.${issue.field}`)}）`:'')
-  return issue.bindingId?`${issue.bindingId} — ${body}`:body
+  const field=issue.field?`${t('punct.fieldOpen')}${t(`field.${issue.field}`)}${t('punct.fieldClose')}`:''
+  const body=`${t(`issue.${issue.code}`)}${field}`
+  return issue.bindingId?`${issue.bindingId} · ${body}`:body
 }
 /** Shared semantic rules; the Host runs the same function before activation. */
 export function validateBindings(bindings:Binding[],t:Translate=fallbackTranslate):string|undefined{
@@ -36,14 +43,14 @@ export function validateBindings(bindings:Binding[],t:Translate=fallbackTranslat
   return issue===undefined?undefined:issueText(issue,t)
 }
 
-export function ChannelPanel({ctx,channelForm,view}:{ctx:ClientContext;channelForm:ConfigForm;view?:string}){
+export function ChannelPanel({ctx,channelForm,view,presets}:{ctx:ClientContext;channelForm:ConfigForm;view?:string;presets?:PermissionCatalog|undefined}){
   const [t,setT]=useState<Translate>(()=>translate(ctx))
   useEffect(()=>{
     setT(()=>translate(ctx))
     return ctx.locale?.subscribe(()=>setT(()=>translate(ctx)))
   },[ctx])
   if(view==='summary')return t('summary')
-  return <ChannelEditor ctx={ctx} form={channelForm} t={t}/>
+  return <ChannelEditor ctx={ctx} form={channelForm} t={t} presets={presets}/>
 }
 type Edit={value:Binding;base?:Binding;agentId?:string}
 type Removal={kind:'agent'|'channel';agent:AgentGroup;rows:Binding[];draftIds:string[];label:string}
@@ -56,7 +63,7 @@ const canonical=(value:unknown):unknown=>{
  return Object.fromEntries(Object.entries(object).filter(([,v])=>v!==undefined).sort(([a],[b])=>a.localeCompare(b)).map(([k,v])=>[k,canonical(v)]))
 }
 const same=(a:unknown,b:unknown)=>JSON.stringify(canonical(a))===JSON.stringify(canonical(b))
-function ChannelEditor({ctx,form,t}:{ctx:ClientContext;form:ConfigForm;t:Translate}){
+function ChannelEditor({ctx,form,t,presets}:{ctx:ClientContext;form:ConfigForm;t:Translate;presets?:PermissionCatalog|undefined}){
  const snapshot=useSyncExternalStore(listener=>form.subscribe(listener),()=>form.getSnapshot(),()=>form.getSnapshot())
  const persisted=snapshot.value?.bindings??[]
  const unsupported=persisted.some(b=>!isChannelKind(b.channel.kind))
@@ -80,6 +87,8 @@ function ChannelEditor({ctx,form,t}:{ctx:ClientContext;form:ConfigForm;t:Transla
  const dirty=Boolean(edit&&!same(edit.value,edit.base)),conflict=Boolean(edit&&!same(edit.base,current))
  const status=runtime.find(s=>s.id===id),selected=binding?.model?JSON.stringify([binding.model.provider,binding.model.model]):''
  const model=catalog?.groups.find(g=>g.id===binding?.model?.provider)?.models.find(m=>m.id===binding?.model?.model)
+ const preset=presets?.options.find(option=>option.value===binding?.permissionPreset)
+ const presetListed=presets===undefined||preset!==undefined||!binding?.permissionPreset
  // Host project membership is authoritative and may use a canonical path. Drafts and
  // the Agent default must not override the selected channel’s actual ownership.
  const project=current?projects.find(p=>p.bindingIds.includes(id)):undefined
@@ -189,11 +198,11 @@ function ChannelEditor({ctx,form,t}:{ctx:ClientContext;form:ConfigForm;t:Transla
  if(unsupported)return <section className="dsh-channel-panel"><style>{styles}</style><h2>{t('heading')}</h2><p role="alert" className="dsh-channel-notice dsh-channel-error">{t('issue.channel-kind')}</p><p className="dsh-channel-muted">{t('config.unsupported')}</p></section>
  return <section className="dsh-channel-panel"><style>{styles}</style>
   <h2>{t('heading')}</h2><p className="dsh-channel-muted">{t('intro')}</p>
-  <div className="dsh-channel-toolbar"><button disabled={busy||!writable||groups.length>=MAX_AGENTS} onClick={()=>setNewAgent({name:'',cwd:''})}>{t('action.addAgent')}</button></div>
+  <div className="dsh-channel-toolbar"><button className="dsh-channel-add" disabled={busy||!writable||groups.length>=MAX_AGENTS} onClick={()=>setNewAgent({name:'',cwd:''})}>{t('action.addAgent')}</button></div>
   {newAgent&&<form className="dsh-channel-card" aria-label={t('agent.create')} onSubmit={event=>{event.preventDefault();void createAgent()}}><fieldset disabled={busy} style={{border:0,padding:0,margin:0}}><div className="dsh-channel-grid"><Field label={t('agent.name')} value={newAgent.name} set={name=>setNewAgent(previous=>previous?{...previous,name}:previous)}/><label className="dsh-channel-field">{t('agent.cwd')}<div className="dsh-channel-path"><input aria-label={t('agent.cwd')} value={newAgent.cwd} onChange={event=>{const cwd=event.target.value;setNewAgent(previous=>previous?{...previous,cwd}:previous)}}/><button type="button" onClick={()=>void chooseAgentDirectory()}>{t('action.choose')}</button></div></label></div><p className="dsh-channel-muted">{t('agent.hint')}</p><div className="dsh-channel-actions"><button type="button" onClick={()=>setNewAgent(null)}>{t('action.cancel')}</button><button className="dsh-channel-primary" disabled={!writable}>{t('action.createAgent')}</button></div></fieldset></form>}
   <div className="dsh-agent-layout"><nav className="dsh-agent-tabs" aria-label={t('agentGroups')}>{groups.map(g=><button key={g.id} aria-pressed={g.id===group?.id} onClick={()=>{setSelectedAgentId(g.id);setSelectedId(g.bindingIds[0]??'');setConfirmation(null);setRemoval(null);setNotice('')}}><strong>{g.name}</strong><span>{g.bindingIds.length} {t('channelsUnit')}</span></button>)}</nav><div className="dsh-agent-detail">
-  {group&&<header className="dsh-agent-header"><div className="dsh-channel-heading"><h3>{group.name}</h3><button disabled={busy||!writable} onClick={()=>requestRemoval('agent')}>{t('action.removeAgent')}</button></div><p className="dsh-channel-path-text">{t('agent.cwd')}：{group.cwd||t('project.none')}</p><p className="dsh-channel-muted">{t('agent.cwdHint')}</p><p className="dsh-channel-muted">{t('model.inheritHint')}</p></header>}
-  <div className="dsh-channel-toolbar"><div className="dsh-channel-actions">{Object.entries(labels).map(([kind,key])=><button key={kind} disabled={busy||baseRows.length>=32||!writable||!group} onClick={()=>add(kind as Binding['channel']['kind'])}>＋ {t(key)}</button>)}</div><span className="dsh-channel-muted">{t('channels.saved')} {persisted.length} {t('channelsUnit')}{baseRows.length>persisted.length?` · ${baseRows.length-persisted.length} ${t('channels.drafts')}`:''}</span></div>
+  {group&&<header className="dsh-agent-header"><div className="dsh-channel-heading"><h3>{group.name}</h3><button className="dsh-channel-danger" disabled={busy||!writable} onClick={()=>requestRemoval('agent')}>{t('action.removeAgent')}</button></div><p className="dsh-channel-path-text">{t('agent.cwd')}{t('punct.colon')}{group.cwd||t('project.none')}</p><p className="dsh-channel-muted">{t('agent.cwdHint')}</p><p className="dsh-channel-muted">{t('model.inheritHint')}</p></header>}
+  <div className="dsh-channel-toolbar"><div className="dsh-channel-actions">{Object.entries(labels).map(([kind,key])=><button className="dsh-channel-add" key={kind} disabled={busy||baseRows.length>=32||!writable||!group} onClick={()=>add(kind as Binding['channel']['kind'])}>＋ {t(key)}</button>)}</div><span className="dsh-channel-muted">{t('channels.saved')} {persisted.length} {t('channelsUnit')}{baseRows.length>persisted.length?` · ${baseRows.length-persisted.length} ${t('channels.drafts')}`:''}</span></div>
   {snapshot.status!=='ready'&&<p className="dsh-channel-notice">{snapshot.value?t('syncing'):t('reading')}</p>}
   {notice&&<p role={failure?'alert':'status'} className={`dsh-channel-notice ${failure?'dsh-channel-error':''}`}>{notice}</p>}
   {metadataIssue&&<p role="alert" className="dsh-channel-notice dsh-channel-error">{t(`issue.${metadataIssue}`)}</p>}
@@ -202,31 +211,31 @@ function ChannelEditor({ctx,form,t}:{ctx:ClientContext;form:ConfigForm;t:Transla
   {!binding&&group&&<div className="dsh-channel-card"><h3>{t('noBinding.title')}</h3><p className="dsh-channel-muted">{t('noBinding.body')}</p></div>}
   {group&&<nav className="dsh-channel-tabs" aria-label={t('agentChannels')}>{group.bindingIds.map(key=>{const b=baseRows.find(v=>v.id===key)!;return <button key={key} aria-pressed={key===id} onClick={()=>{setSelectedId(key);setConfirmation(null);setRemoval(null);setNotice('')}}>{t(labels[b.channel.kind])}{edits[key]&&!same(edits[key]!.value,edits[key]!.base)?t('notice.unsaved'):''}</button>})}</nav>}
   {binding&&<article className="dsh-channel-card" key={id}>
-   <div className="dsh-channel-heading"><h3>{t(labels[binding.channel.kind])} <span className="dsh-channel-badge">{phaseLabel(status?.phase,current?.enabled??false,t)}</span></h3><button disabled={busy||dirty||!current||!writable} onClick={()=>current&&void commit(id,{...current,enabled:!current.enabled},current)}>{current?.enabled?t('action.stop'):t('action.start')}</button></div>
+   <div className="dsh-channel-heading"><h3>{t(labels[binding.channel.kind])} <span className={`dsh-channel-badge dsh-channel-status ${statusTone(status?.phase)}`}>{phaseLabel(status?.phase,current?.enabled??false,t)}</span></h3><button disabled={busy||dirty||!current||!writable} onClick={()=>current&&void commit(id,{...current,enabled:!current.enabled},current)}>{current?.enabled?t('action.stop'):t('action.start')}</button></div>
    <p className="dsh-channel-muted">{current?.enabled?t('notice.running'):t('notice.stopped')} {t('notice.identity')}</p>
-   <p className="dsh-channel-muted">{project?`${t('project.owned')}${project.title} · ${project.id} · ${project.cwd}`:t('project.pending')}</p>
+   <p className="dsh-channel-muted" title={project?`${project.id} · ${project.cwd}`:undefined}>{project?`${t('project.owned')}${project.title} · ${shortId(project.id)}`:t('project.pending')}</p>
    {conflict&&<p role="alert" className="dsh-channel-notice dsh-channel-error">{t('notice.conflict')}</p>}
    {status?.error&&<p role="alert" className="dsh-channel-notice dsh-channel-error">{statusMessage(status.error)}</p>}
    {binding.channel.kind==='qqbot'?<QQBotSetup ctx={ctx} t={t} disabled={busy||!writable||!!current?.enabled} onBound={value=>update(b=>({...b,credentialRef:value.credentialRef,channel:{...b.channel,appId:value.appId,ownerUserId:value.ownerUserId}}))}/>:null}
    {binding.channel.kind==='qqbot'?<QQBotCredentials ctx={ctx} t={t} reference={binding.credentialRef} disabled={busy||!writable||!!current?.enabled} onSaved={credentialRef=>update(b=>({...b,credentialRef}))}/>:null}
-   <fieldset disabled={busy||!writable} style={{border:0,padding:0,margin:0}}><div className="dsh-channel-grid">
+   <fieldset disabled={busy||!writable} style={{border:0,padding:0,margin:0}}><div className="dsh-channel-stack">
     <label className="dsh-channel-field">{t('model.label')}<select value={selected} onChange={e=>{const value=e.target.value;update(b=>{const {model:_,...rest}=b;return value?{...rest,model:{provider:JSON.parse(value)[0],model:JSON.parse(value)[1]}}:rest})}}><option value="">{t('model.inherit')}{catalog?` · ${catalog.default.model}`:''}</option>{binding.model&&!catalog?.groups.some(g=>g.id===binding.model?.provider&&g.models.some(m=>m.id===binding.model?.model))&&<option value={selected}>{t('model.current')} · {binding.model.provider}/{binding.model.model}{t('model.unknown')}</option>}{catalog?.groups.map(g=><optgroup key={g.id} label={g.name}>{g.models.map(m=><option key={m.id} value={JSON.stringify([g.id,m.id])}>{m.name}</option>)}</optgroup>)}</select></label>
     {model?.reasoning&&<label className="dsh-channel-field">{t('model.reasoning')}<select value={binding.model?.reasoningEffort??''} onChange={e=>{const value=e.target.value;update(b=>{if(!b.model)return b;const {reasoningEffort:_,...selection}=b.model;return {...b,model:{...selection,...(value?{reasoningEffort:value}:{})}}})}}><option value="">{t('model.default')}</option>{model.reasoning.efforts.map(e=><option key={e.id} value={e.id}>{e.name}</option>)}</select></label>}
    </div><p className="dsh-channel-muted">{t('model.note')}</p>
-   {binding.channel.kind==='qqbot'?<details><summary>{t('qq.options')}</summary><div className="dsh-channel-grid">{(['streaming','showToolResults','sendPresentedFiles'] as const).map(key=><label key={key}><input type="checkbox" checked={binding.channel[key]===undefined?key!=='showToolResults':!!binding.channel[key]} onChange={e=>{const checked=e.target.checked;update(b=>({...b,channel:{...b.channel,[key]:checked}}))}}/>{t(`qq.option.${key}`)}</label>)}<label><input type="checkbox" checked={binding.channel.externalTurns!=='off'} onChange={e=>{const value=e.target.checked?'c2c':'off';update(b=>({...b,channel:{...b.channel,externalTurns:value}}))}}/>{t('qq.option.externalTurns')}</label><label>{t('qq.maxFiles')}<input type="number" min={1} max={32} value={Number(binding.channel.maxFiles??4)} onChange={e=>{const value=e.target.valueAsNumber;if(Number.isInteger(value))update(b=>({...b,channel:{...b.channel,maxFiles:value}}))}}/></label></div><p>{t('qq.deliveryHint')}</p></details>:null}
+   {binding.channel.kind==='qqbot'?<details><summary>{t('qq.options')}</summary><div className="dsh-channel-options">{(['streaming','showToolResults','sendPresentedFiles'] as const).map(key=><label className="dsh-channel-option" key={key}><input type="checkbox" checked={binding.channel[key]===undefined?key!=='showToolResults':!!binding.channel[key]} onChange={e=>{const checked=e.target.checked;update(b=>({...b,channel:{...b.channel,[key]:checked}}))}}/><span>{t(`qq.option.${key}`)}</span></label>)}<label className="dsh-channel-option"><input type="checkbox" checked={binding.channel.externalTurns!=='off'} onChange={e=>{const value=e.target.checked?'c2c':'off';update(b=>({...b,channel:{...b.channel,externalTurns:value}}))}}/><span>{t('qq.option.externalTurns')}</span></label><label className="dsh-channel-inline"><span>{t('qq.maxFiles')}</span><input type="number" min={1} max={32} value={Number(binding.channel.maxFiles??4)} onChange={e=>{const value=e.target.valueAsNumber;if(Number.isInteger(value))update(b=>({...b,channel:{...b.channel,maxFiles:value}}))}}/></label></div><p className="dsh-channel-muted">{t('qq.deliveryHint')}</p></details>:null}
    <details><summary>{t('details.label')}</summary><div className="dsh-channel-grid">
     <label className="dsh-channel-field">{t('field.bindingId')}<input value={binding.id} readOnly/></label>
     <Field label={t('field.credential')} value={binding.credentialRef} set={value=>update(b=>({...b,credentialRef:value}))}/>
-    <label className="dsh-channel-field dsh-channel-wide">{t('field.cwd')}<div className="dsh-channel-path"><input aria-label={t('field.cwd')} value={binding.cwd} placeholder="/Users/…/project" onChange={e=>{const value=e.target.value;update(b=>({...b,cwd:value}))}}/><button onClick={()=>void choose()}>{t('action.choose')}</button></div></label>
+    <label className="dsh-channel-field dsh-channel-wide">{t('field.cwd')}<div className="dsh-channel-path"><input aria-label={t('field.cwd')} value={binding.cwd} placeholder={t('field.cwdPlaceholder')} onChange={e=>{const value=e.target.value;update(b=>({...b,cwd:value}))}}/><button onClick={()=>void choose()}>{t('action.choose')}</button></div></label>
     <p className="dsh-channel-muted dsh-channel-wide">{t('field.cwdHint')}</p>
-    <Field label={t('field.permission')} value={binding.permissionPreset} set={value=>update(b=>({...b,permissionPreset:value}))}/>
+    {presets?<label className="dsh-channel-field">{t('field.permission')}<select value={binding.permissionPreset} disabled={busy||!writable} onChange={e=>update(b=>({...b,permissionPreset:e.target.value}))}><option value="">{t('permission.choose')}</option>{!presetListed?<option value={binding.permissionPreset}>{binding.permissionPreset}{t('permission.unknown')}</option>:null}{presets.options.map(option=><option key={option.value} value={option.value}>{option.name}</option>)}</select>{preset?.description?<span className="dsh-channel-muted">{preset.description}</span>:null}</label>:<Field label={t('field.permission')} value={binding.permissionPreset} set={value=>update(b=>({...b,permissionPreset:value}))}/>}
     {channelFields[binding.channel.kind].map(([field,key])=><Field key={field} label={t(key)} value={String(binding.channel[field]??'')} set={value=>update(b=>{const channel={...b.channel};if(b.channel.kind==='qqbot'&&['visionProvider','visionModel'].includes(field)&&!value.trim())delete channel[field];else channel[field]=value;return {...b,channel}})}/>)}
     {binding.channel.kind==='weixin'&&<><Field label={t('field.weixinOwner')} value={binding.weixin?.ownerUserId??''} set={value=>update(b=>({...b,weixin:{ownerUserId:value,baseUrl:b.weixin?.baseUrl??''}}))}/><Field label={t('field.weixinBase')} value={binding.weixin?.baseUrl??''} set={value=>update(b=>({...b,weixin:{ownerUserId:b.weixin?.ownerUserId??'',baseUrl:value}}))}/></>}
    </div></details></fieldset>
-   {confirmation?.id===id&&<div ref={confirmRef} role="dialog" aria-modal="true" aria-label={t('dialog.apply')} className="dsh-channel-notice" onKeyDown={event=>{if(event.key==='Escape')setConfirmation(null)}}><strong>{t('confirm.title')} {group?.name} / {t(labels[binding.channel.kind])}？</strong><p>{t('confirm.body')}</p><div className="dsh-channel-actions"><button onClick={()=>setConfirmation(null)}>{t('action.continue')}</button><button ref={confirmButton} className="dsh-channel-primary" disabled={busy} onClick={()=>void commit(confirmation.id,confirmation.value,confirmation.expected,true)}>{t('action.apply')}</button></div></div>}
-   <div className="dsh-channel-toolbar"><span className="dsh-channel-muted">{dirty?t('notice.dirty'):t('notice.clean')}</span><div className="dsh-channel-actions"><button disabled={busy||!writable} onClick={()=>requestRemoval('channel')}>{t('action.removeChannel')}</button><button disabled={busy||!dirty} onClick={discard}>{t('action.discard')}</button><button className="dsh-channel-primary" disabled={busy||!dirty||!writable} onClick={requestSave}>{busy?t('action.saving'):t('action.save')}</button></div></div>
+   {confirmation?.id===id&&<div ref={confirmRef} role="dialog" aria-modal="true" aria-label={t('dialog.apply')} className="dsh-channel-notice" onKeyDown={event=>{if(event.key==='Escape')setConfirmation(null)}}><strong>{t('confirm.title')} {group?.name} / {t(labels[binding.channel.kind])}{t('punct.question')}</strong><p>{t('confirm.body')}</p><div className="dsh-channel-actions"><button className="dsh-channel-ghost" onClick={()=>setConfirmation(null)}>{t('action.continue')}</button><button ref={confirmButton} className="dsh-channel-primary" disabled={busy} onClick={()=>void commit(confirmation.id,confirmation.value,confirmation.expected,true)}>{t('action.apply')}</button></div></div>}
+   <div className="dsh-channel-footer"><span className="dsh-channel-muted">{dirty?t('notice.dirty'):t('notice.clean')}</span><div className="dsh-channel-actions"><button className="dsh-channel-danger" disabled={busy||!writable} onClick={()=>requestRemoval('channel')}>{t('action.removeChannel')}</button><button className="dsh-channel-ghost" disabled={busy||!dirty} onClick={discard}>{t('action.discard')}</button><button className="dsh-channel-primary" disabled={busy||!dirty||!writable} onClick={requestSave}>{busy?t('action.saving'):t('action.save')}</button></div></div>
   </article>}
-  {removal&&<div className="dsh-channel-modal"><div ref={confirmRef} role="dialog" aria-modal="true" aria-label={t('dialog.remove')} className="dsh-channel-notice"><strong>{t('remove.title')} {removal.label}</strong><p>{t('remove.body')}</p><p>{t('remove.channels')}</p><ul>{removal.rows.length?removal.rows.map(row=><li key={row.id}>{row.id} · {t(labels[row.channel.kind])} · {row.enabled?t('remove.enabled'):t('remove.disabled')}</li>):<li>{t('remove.none')}</li>}</ul>{removal.draftIds.length>0&&<p>{t('remove.drafts')}</p>}<div className="dsh-channel-actions"><button ref={confirmButton} disabled={busy} onClick={()=>setRemoval(null)}>{t('action.cancel')}</button><button disabled={busy||!writable} onClick={()=>void remove()}>{t('action.confirmRemove')}</button></div></div></div>}
+  {removal&&<div className="dsh-channel-modal"><div ref={confirmRef} role="dialog" aria-modal="true" aria-label={t('dialog.remove')} className="dsh-channel-notice"><strong>{t('remove.title')} {removal.label}</strong><p>{t('remove.body')}</p><p>{t('remove.channels')}</p><ul>{removal.rows.length?removal.rows.map(row=><li key={row.id}>{row.id} · {t(labels[row.channel.kind])} · {row.enabled?t('remove.enabled'):t('remove.disabled')}</li>):<li>{t('remove.none')}</li>}</ul>{removal.draftIds.length>0&&<p>{t('remove.drafts')}</p>}<div className="dsh-channel-actions"><button className="dsh-channel-ghost" ref={confirmButton} disabled={busy} onClick={()=>setRemoval(null)}>{t('action.cancel')}</button><button className="dsh-channel-danger" disabled={busy||!writable} onClick={()=>void remove()}>{t('action.confirmRemove')}</button></div></div></div>}
   {modelsError&&<p className="dsh-channel-muted">{modelsError}</p>}{catalog?.failures.length?<p className="dsh-channel-muted">{t('error.modelsUnavailable')}</p>:null}
  </div></div></section>
 }
