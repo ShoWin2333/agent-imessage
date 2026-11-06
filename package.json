@@ -23,7 +23,7 @@
     "qqbot"
   ],
   "engines": {
-    "node": "^22.19.0 || >=24.0.0",
+    "node": ">=24.9.0",
     "dsh": "0.2.2-rc.1"
   },
   "publishConfig": {
@@ -31,6 +31,7 @@
   },
   "main": "./lib/types/index.js",
   "types": "./lib/types/index.d.ts",
+  "icon": "./icon.svg",
   "exports": {
     ".": {
       "types": "./lib/types/index.d.ts",
@@ -58,26 +59,24 @@
       "default": "./lib/types/plugin/project-groups.js"
     },
     "./locale/*.json": "./locale/*.json",
+    "./cordis.channels.patch.yml": "./cordis.channels.patch.yml",
     "./icon": "./icon.svg"
   },
   "files": [
-    "lib/types",
-    "cordis.channels.patch.yml",
-    "locale/*.json",
-    "icon.svg",
-    "README.md",
-    "README.en.md",
-    "SECURITY.md",
-    "docs/dsh-channel-migration.md",
-    "LICENSE",
-    "THIRD_PARTY_NOTICES.md",
+    "lib/types/**/*.js",
+    "lib/types/**/*.d.ts",
     "lib/client.js",
     "lib/typert.host.js",
     "lib/typert.host.d.ts",
     "lib/typert.remote-client.js",
     "lib/typert.remote-client.d.ts",
-    "lib/typert.remote-client.d.ts.map",
-    "docs/qqbot.md"
+    "cordis.channels.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "docs/dsh-channel-migration.md",
+    "docs/qqbot.md",
+    "SECURITY.md",
+    "THIRD_PARTY_NOTICES.md"
   ],
   "scripts": {
     "clean": "node ./scripts/clean.mjs",
@@ -90,14 +89,14 @@
     "prepublishOnly": "npm run check"
   },
   "dependencies": {
-    "@spectrum-ts/core": "12.7.0",
-    "@spectrum-ts/imessage": "12.7.0",
-    "zod": "4.6.6",
-    "@tencent-connect/qqbot-nodejs": "1.0.5",
-    "qrcode": "1.5.4"
+    "zod": "4.6.6"
   },
   "optionalDependencies": {
-    "@tencent-connect/qqbot-connector": "1.2.0"
+    "@tencent-connect/qqbot-connector": "1.2.0",
+    "@spectrum-ts/core": "12.7.0",
+    "@spectrum-ts/imessage": "12.7.0",
+    "@tencent-connect/qqbot-nodejs": "1.0.5",
+    "qrcode": "1.5.4"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.1.0",
@@ -188,6 +187,9 @@
     },
     "client": {
       "platform": "web",
+      "external": [
+        "zod"
+      ],
       "inject": [
         "@deepseek-ai/dsh-api-remotes",
         "@deepseek-ai/dsh-client-ui-settings",
@@ -196,7 +198,7 @@
     }
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "4.1.0",
+    "@deepseek-ai/cordis": "~4.1.0",
     "@deepseek-ai/cordis-plugin-loader": "1.1.0",
     "@deepseek-ai/dsh-agent": "0.2.2-rc.1",
     "@deepseek-ai/dsh-agent-default-model": "0.2.2-rc.1",
@@ -212,8 +214,7 @@
     "@deepseek-ai/dsh-typert-protocol": "0.2.2-rc.1",
     "@deepseek-ai/dsh-user-approval": "0.2.2-rc.1",
     "@deepseek-ai/dsh-user-questions": "0.2.2-rc.1",
-    "@deepseek-ai/schemastery": "3.18.5",
-    "react": "^18.3.1 || ^19.0.0"
+    "@deepseek-ai/schemastery": "3.18.5"
   },
   "packageManager": "pnpm@11.28.5"
 }
