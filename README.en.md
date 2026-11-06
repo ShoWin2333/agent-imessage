@@ -12,6 +12,8 @@ One read-only Agent tool, `channel_status`, reports each configured channel's en
 
 ## Install
 
+The source version is **`1.1.0` (unpublished)**. The DSH plugin is now `main`, so versions use ordinary SemVer without the `-dsh.N` suffix previously used to distinguish the standalone macOS App. The package remains `@showin2333/dsh-plugin-channels`; the old App stays archived, and existing releases and Git tags are retained. Stable `1.1.0` sorts above the earlier `1.1.0-dsh.N` prereleases.
+
 This version supports DSH `0.2.2-rc.1`. The iMessage channel additionally requires macOS with Messages; Telegram, Weixin iLink and QQ Bot are cross-platform.
 
 The npm package is `@showin2333/dsh-plugin-channels`. Installing it mounts two Cordis rows as a bundle (`dsh-channels` and the project grouping); the browser panel is discovered from `dsh.client`.

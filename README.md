@@ -10,6 +10,8 @@ DSH 负责 Agent、模型、工具、权限、执行队列、取消和会话日�
 
 ## 安装
 
+当前源码版本为 **`1.1.0`（尚未发布）**。DSH 插件已成为 `main`，版本号改用普通 SemVer，不再添加用于区分旧 macOS App 的 `-dsh.N` 后缀。包名仍为 `@showin2333/dsh-plugin-channels`；旧 App 留在归档分支，既有发布版本与 Git 标签保留。`1.1.0` 高于此前的 `1.1.0-dsh.N` 预发布版本，不需要重置版本序列。
+
 本版支持 DSH `0.2.2-rc.1`。iMessage 通道额外要求 macOS 与本机 Messages；Telegram、微信 iLink、QQ Bot 跨平台。
 
 npm 包：`@showin2333/dsh-plugin-channels`。安装后以 bundle 形式挂载两条 Cordis 行（`dsh-channels` 与项目分组），浏览器面板由 `dsh.client` 自动发现。
