@@ -198,10 +198,13 @@ export async function apply(ctx: Context, config: Config | { bindings: Volatile<
   ctx.plugin(ChannelsController, manager)
   const settings = ctx.get('settings')
   if (settings) ctx.effect(() => settings.configure({ auto: false }))
-  ctx.on('loader/volatile-update', () => {
-    // Invalid external settings must never interrupt an accepted running binding.
-    try { const next = read(); void manager.update(next).catch(() => {}) }
+  // The loader event is an optional accelerator; the value is always re-read from
+  // the volatile config, so a Host that stops emitting it only loses immediacy.
+  const reload = (event: string) => {
+    try { const next = read(); void manager.update(next).catch(error => channelLog(`${event}-failed`, error)) }
     catch { manager.rejectConfiguration() }
-  })
+  }
+  ctx.on('loader/volatile-update', () => reload('config-update'))
+  ctx.on('app-boot/config-reload' as never, () => reload('config-reload'))
   await manager.update(initial)
 }

@@ -166,7 +166,7 @@ export class DshNativeHost implements NativeHost {
     const scoped = agent.ctx
     let closing=false
     const finishing=new Set<Promise<void>>()
-    const pending = new Map<string, { turn?: number; suppressed?: boolean; text: string; resolve: (value: NativeResult) => void; progress: () => void; controller:AbortController; interactions?:InteractionHandlers | undefined; media?:MediaHandler | undefined; stream?:((text:string)=>void)|undefined; notice?:((text:string)=>Promise<void>)|undefined; streamedText?:string }>()
+    const pending = new Map<string, { turn?: number; suppressed?: boolean; text: string; resolve: (value: NativeResult) => void; progress: () => void; controller:AbortController; interactions?:InteractionHandlers | undefined; media?:MediaHandler | undefined; stream?:((text:string)=>void)|undefined; notice?:((text:string)=>Promise<void>)|undefined; streamedText?:string; watchdog?:ReturnType<typeof setTimeout>|undefined }>()
     const leaders = new Map<number, string>()
     const claimed = scoped.on('agent/inbox/claimed', payload => {
       if (payload.agent !== agent) return
@@ -185,6 +185,7 @@ export class DshNativeHost implements NativeHost {
     const finish = (id: string, result: NativeResult) => {
       const input = pending.get(id)
       if (!input) return
+      if (input.watchdog !== undefined) clearTimeout(input.watchdog)
       // During teardown the SDK owns the final drain. Calling live-session
       // flush concurrently with handle disposal races its writer removal.
       if(closing){input.controller.abort();return}
@@ -286,9 +287,11 @@ export class DshNativeHost implements NativeHost {
         let rejectResult!: (reason: unknown) => void
         const result = new Promise<NativeResult>((resolve, reject) => {
           rejectResult = reject
-          pending.set(id, {
-            text: '', resolve, progress, interactions, media, stream, notice, controller: new AbortController(),
-          })
+          const entry={ text: '', resolve, progress, interactions, media, stream, notice, controller: new AbortController(), watchdog: undefined as ReturnType<typeof setTimeout>|undefined }
+          pending.set(id, entry)
+          // A Host that neither claims nor discards an admitted input must not pin the binding forever.
+          entry.watchdog = setTimeout(() => finish(id, { text: 'DSH 长时间未确认完成；请检查会话。未自动重跑。', reason: 'interrupted' }), 30 * 60_000)
+          entry.watchdog.unref?.()
         })
         try {
           if (!isLive()) throw new Error('Channel session is no longer live')
