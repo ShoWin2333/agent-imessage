@@ -8,11 +8,11 @@ DSH owns agents, models, tools, permissions, inboxes, cancellation and durable s
 
 One read-only Agent tool, `channel_status`, reports each configured channel's enabled flag, connection phase and stable error code, without message content, credentials or session identifiers. The plugin does not load when the Host provides no `tools` service.
 
-**This working tree removes Discord and Feishu; the removal has not been published. The published `1.1.0-dsh.13` package still contains the retired channels. The install commands below do not install these unpublished changes.** See [safe handling of old configurations](docs/dsh-channel-migration.md#removed-channel-configurations).
+**Version `1.1.0` removes Discord and Feishu. The older `1.1.0-dsh.13` package still contains both retired channels.** See [safe handling of old configurations](docs/dsh-channel-migration.md#removed-channel-configurations).
 
 ## Install
 
-The source version is **`1.1.0` (unpublished)**. The DSH plugin is now `main`, so versions use ordinary SemVer without the `-dsh.N` suffix previously used to distinguish the standalone macOS App. The package remains `@showin2333/dsh-plugin-channels`; the old App stays archived, and existing releases and Git tags are retained. Stable `1.1.0` sorts above the earlier `1.1.0-dsh.N` prereleases.
+This version is **`1.1.0`**. The DSH plugin is now `main`, so versions use ordinary SemVer without the `-dsh.N` suffix previously used to distinguish the standalone macOS App. The package remains `@showin2333/dsh-plugin-channels`; the old App stays archived, and existing releases and Git tags are retained. Stable `1.1.0` sorts above the earlier `1.1.0-dsh.N` prereleases.
 
 This version supports DSH `0.2.2-rc.1`. The iMessage channel additionally requires macOS with Messages; Telegram, Weixin iLink and QQ Bot are cross-platform.
 
@@ -20,9 +20,9 @@ The npm package is `@showin2333/dsh-plugin-channels`. Installing it mounts two C
 
 This package replaces `@showin2333/dsh-channels`. Keep existing row IDs, channel bindings and session records when switching. Stop the old bundle before replacing dependency/module references; do not load both names together. See the migration guide.
 
-The current published release is `1.1.0-dsh.13`; this local removal does not change the published package or online market index.
+Direct installation uses `1.1.0`. The market index still points to `1.1.0-dsh.13` and requires a separate update before it installs this version.
 
-- **Direct install**: DSH → Plugins → Install, then enter `@showin2333/dsh-plugin-channels@1.1.0-dsh.13`.
+- **Direct install**: DSH → Plugins → Install, then enter `@showin2333/dsh-plugin-channels@1.1.0`.
 - **Market install**: enable `@deepseek-ai/dsh-experimental-plugin-market-bundle`, then Plugins → Discover → Add index source with the URL below.
 - **Local development**: `pnpm install && npm run build`, then point the profile dependency at this checkout with `link:`.
 
@@ -58,4 +58,4 @@ npm run check
 Tests use synthetic messages and mocked provider requests; no live sending, login, model calls or service changes. The migration leaves existing installations and user histories untouched. Rollback uses Git and an installation backup, rather than keeping a second product entry point.
 
 
-QQ Bot was rebuilt from the QQ-free baseline using Tencent’s official SDK and DSH plugin reference. It includes QR binding, owner-only private chats, media, streaming, session commands and native shared approvals. See [the feature comparison and integration requirements](docs/qqbot.md) and [validation record](docs/qqbot-validation.md). These changes are unpublished; the local build has been installed for user testing. Automated tests use synthetic credentials and mocked requests.
+QQ Bot was rebuilt from the QQ-free baseline using Tencent’s official SDK and DSH plugin reference. It includes QR binding, owner-only private chats, media, streaming, session commands and native shared approvals. See [the feature comparison and integration requirements](docs/qqbot.md) and [validation record](docs/qqbot-validation.md). These changes are included in `1.1.0`; the preceding local build was installed for user testing. Automated tests use synthetic credentials and mocked requests.

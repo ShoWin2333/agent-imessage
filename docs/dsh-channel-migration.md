@@ -1,6 +1,6 @@
 # Native DSH channel plugin migration
 
-The prepared source version is `1.1.0` (unpublished), targeting DSH `0.2.2-rc.1` / Cordis `4.1.0` only. Earlier `1.1.0-dsh.N` releases remain historical prereleases; removing the suffix does not rename the npm package, configuration rows or storage domains. The former `dsh-plugin` product line is now the default `main` branch; the independent macOS App history is preserved in `archive/standalone-macos-main-20261104`. Update raw/CDN index URLs to use `main`, since GitHub branch redirects do not cover every external CDN.
+This version is `1.1.0`, targeting DSH `0.2.2-rc.1` / Cordis `4.1.0` only. Earlier `1.1.0-dsh.N` releases remain historical prereleases; removing the suffix does not rename the npm package, configuration rows or storage domains. The former `dsh-plugin` product line is now the default `main` branch; the independent macOS App history is preserved in `archive/standalone-macos-main-20261104`. Update raw/CDN index URLs to use `main`, since GitHub branch redirects do not cover every external CDN.
 
 ## Ownership
 
@@ -27,11 +27,11 @@ Credential references are excluded from the current key. On the first upgrade fr
 
 ## Removed channel configurations
 
-This unpublished working tree removes Discord and Feishu adapters and their SDK dependencies. It does not migrate, filter, stop or delete existing user bindings automatically. Unsupported kinds are rejected by both native and runtime configuration validation before credentials or storage are opened on startup. An invalid live configuration update preserves the last accepted consumers and reports `config-invalid`. The settings panel shows a read-only error rather than deleting unsupported bindings or changing their Agent membership.
+Version `1.1.0` removes Discord and Feishu adapters and their SDK dependencies. It does not migrate, filter, stop or delete existing user bindings automatically. Unsupported kinds are rejected by both native and runtime configuration validation before credentials or storage are opened on startup. An invalid live configuration update preserves the last accepted consumers and reports `config-invalid`. The settings panel shows a read-only error rather than deleting unsupported bindings or changing their Agent membership.
 
 Do not switch an existing profile containing either retired kind to this build without a separately reviewed configuration change. Inventory the affected enabled consumers and stop them in the currently installed version first. Any later configuration-only removal must remove the exact retired bindings and their ids from `agents[].bindingIds` together, while retaining empty Agent groups and every remaining binding field. This source change does not perform that operation.
 
-Existing storage-domain journals, dedupe/cursor metadata, session files, Host credential references/values, Workspace metadata and project files remain untouched. Surviving bindings retain their identity keys. A rejected retired binding does not grant another channel access to its old session or replay its messages. Removing configuration must not be implemented by clearing the storage domain or deleting session files. The currently published package and market version are unchanged by this local work.
+Existing storage-domain journals, dedupe/cursor metadata, session files, Host credential references/values, Workspace metadata and project files remain untouched. Surviving bindings retain their identity keys. A rejected retired binding does not grant another channel access to its old session or replay its messages. Removing configuration must not be implemented by clearing the storage domain or deleting session files. Older published packages and historical market entries retain their original version identities.
 
 ## Controlled cutover
 

@@ -6,11 +6,11 @@
 
 DSH 负责 Agent、模型、工具、权限、执行队列、取消和会话日志；本插件负责消息渠道、固定身份绑定、去重和回复投递。宿主与浏览器端均为原生 Cordis 插件，没有独立平台、服务安装器或执行后端。
 
-**本工作区已移除 Discord 和飞书接入，此裁剪尚未发布。已发布的 `1.1.0-dsh.13` 仍含旧渠道；下列安装入口不会安装本次未发布改动。** 旧配置的安全处理见[迁移指南](docs/dsh-channel-migration.md#removed-channel-configurations)。
+**`1.1.0` 已移除 Discord 和飞书接入；旧版 `1.1.0-dsh.13` 仍含这两个渠道。** 旧配置的安全处理见[迁移指南](docs/dsh-channel-migration.md#removed-channel-configurations)。
 
 ## 安装
 
-当前源码版本为 **`1.1.0`（尚未发布）**。DSH 插件已成为 `main`，版本号改用普通 SemVer，不再添加用于区分旧 macOS App 的 `-dsh.N` 后缀。包名仍为 `@showin2333/dsh-plugin-channels`；旧 App 留在归档分支，既有发布版本与 Git 标签保留。`1.1.0` 高于此前的 `1.1.0-dsh.N` 预发布版本，不需要重置版本序列。
+本版为 **`1.1.0`**。DSH 插件已成为 `main`，版本号改用普通 SemVer，不再添加用于区分旧 macOS App 的 `-dsh.N` 后缀。包名仍为 `@showin2333/dsh-plugin-channels`；旧 App 留在归档分支，既有发布版本与 Git 标签保留。`1.1.0` 高于此前的 `1.1.0-dsh.N` 预发布版本，不需要重置版本序列。
 
 本版支持 DSH `0.2.2-rc.1`。iMessage 通道额外要求 macOS 与本机 Messages；Telegram、微信 iLink、QQ Bot 跨平台。
 
@@ -18,9 +18,9 @@ npm 包：`@showin2333/dsh-plugin-channels`。安装后以 bundle 形式挂载�
 
 原 npm 名称 `@showin2333/dsh-channels` 已迁至此名称。升级保留设置行 ID、渠道绑定与会话记录；先停止旧包，再切换依赖和模块引用，勿同时加载两个包。详见迁移指南。
 
-当前已发布版本为 `1.1.0-dsh.13`；本次裁剪未变更已发布包和线上市场索引。
+本版直接安装使用 `1.1.0`。市场索引暂仍指向 `1.1.0-dsh.13`，市场入口需另行更新后才会安装本版。
 
-- **直接安装**：DSH → 插件 → 安装，输入 `@showin2333/dsh-plugin-channels@1.1.0-dsh.13`。
+- **直接安装**：DSH → 插件 → 安装，输入 `@showin2333/dsh-plugin-channels@1.1.0`。
 - **市场安装**：先启用 `@deepseek-ai/dsh-experimental-plugin-market-bundle`，在 插件 → 发现 → 添加索引源 填入下方地址，再从卡片安装。
 - **本地开发**：`pnpm install && npm run build`，在 profile 的 `dependencies` 中以 `link:` 指向本仓库。
 
@@ -28,7 +28,7 @@ npm 包：`@showin2333/dsh-plugin-channels`。安装后以 bundle 形式挂载�
 
 安装后不会自动连接任何渠道：先按「Desktop 管理面板」配置 workspace、权限预设和凭据引用，再显式启用绑定。升级需要先卸载再安装，DSH 目前没有原地更新动作。
 
-QQ Bot 在独立干净基线上按腾讯官方 DSH 插件重做，含扫码、所有者私聊、媒体、流式和原生会话命令，审批沿用现有机制。详见[官方功能对照、差异与联调事项](docs/qqbot.md)。该重做尚未发布。
+QQ Bot 在独立干净基线上按腾讯官方 DSH 插件重做，含扫码、所有者私聊、媒体、流式和原生会话命令，审批沿用现有机制。详见[官方功能对照、差异与联调事项](docs/qqbot.md)。该能力包含于 `1.1.0`。
 
 ## 当前闭环
 

@@ -1,6 +1,6 @@
 # QQ Bot 官方参考重做
 
-本次从不含 QQ 的 `4f7f603`（已移除 Discord、飞书）建立独立分支 `qqbot-official-rebuild`，没有复制上一版 QQ 的代码、补丁或测试。没有修改 DSH 本体；后续应用户要求，以本地包安装到 Mac mini 的现有 profile。未发布 npm，也未由本次验证发送真实 QQ 消息。
+本次从不含 QQ 的 `4f7f603`（已移除 Discord、飞书）建立独立分支 `qqbot-official-rebuild`，没有复制上一版 QQ 的代码、补丁或测试。没有修改 DSH 本体；后续应用户要求，以本地包安装到 Mac mini 的现有 profile。重做阶段通过本地包验证，没有由验证脚本发送真实 QQ 消息；正式版本使用 `1.1.0`。
 
 官方来源：[腾讯 QQ Bot 接入文档](https://bot.qq.com/wiki/agent-qqbot/)、[tencent-connect/dsh-qqbot](https://github.com/tencent-connect/dsh-qqbot)，本次核对版本 `0.5.5`，源码 commit `14d5eef97274e47f34f91dcaa833be994ba2a770`。使用官方 `@tencent-connect/qqbot-nodejs@1.0.5` 和 `@tencent-connect/qqbot-connector@1.2.0`。`src/channels/qqbot-official` 的二维码、Markdown 切分和回复窗口模块来自该源码；图片理解沿用其 `saveImage → image block → llm.stream → BlockAssembler` 流程。
 
