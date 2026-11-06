@@ -1,6 +1,6 @@
 # QQ Bot rebuild validation
 
-Prepared source version: `1.1.0`, targeting DSH `0.2.2-rc.1`. This naming update is unpublished and not deployed; the last installed local package remains `1.1.0-dsh.19`. The validation history below refers to the corresponding `.18` / `.19` builds.
+Source version: `1.1.0`, targeting DSH `0.2.2-rc.1`. The version naming update does not deploy the plugin; the last installed local package remains `1.1.0-dsh.19`. The validation history below refers to the corresponding `.18` / `.19` builds.
 Baseline: `4f7f603` (QQ-free, Discord/Feishu removal retained).
 Official reference: `tencent-connect/dsh-qqbot` `14d5eef97274e47f34f91dcaa833be994ba2a770`.
 
