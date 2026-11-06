@@ -182,3 +182,35 @@ it.each(['discord','feishu'])('rejects an external %s update while preserving ac
   expect(rows).toEqual(before);expect(open).toHaveBeenCalledOnce();expect(resolve).not.toHaveBeenCalled()
  }finally{for(const release of releases.reverse())await release()}
 })
+
+it.each(['pending-start','pending-cleanup'] as const)('bounds unload while activation has %s',async mode=>{
+  vi.useFakeTimers()
+  const started=deferred<{close():Promise<void>}>(),log=vi.fn(),manager=new ChannelManager(()=>started.promise,log)
+  const first=manager.update([binding()]).catch(()=>{})
+  await Promise.resolve();await Promise.resolve()
+  const closing=manager.close(),outcome=expect(closing).rejects.toThrow(/channel teardown/)
+  expect(manager.close()).toBe(closing)
+  if(mode==='pending-cleanup')started.resolve({close:()=>new Promise(()=>{})})
+  try {
+    await vi.advanceTimersByTimeAsync(15_000)
+    await outcome
+    expect(log).toHaveBeenCalled()
+  } finally {vi.useRealTimers()}
+  void first
+})
+
+it('retains ownership after a cancellation cleanup deadline and refuses a competing consumer',async()=>{
+  vi.useFakeTimers()
+  const started=deferred<{close():Promise<void>}>(),close=vi.fn(()=>new Promise<void>(()=>{})),start=vi.fn(()=>started.promise),manager=new ChannelManager(start)
+  const first=manager.update([binding()]),firstResult=expect(first).rejects.toThrow('teardown')
+  await Promise.resolve();await Promise.resolve()
+  const stop=manager.update([binding('a',false)]),stopResult=expect(stop).rejects.toThrow('teardown')
+  started.resolve({close})
+  try {
+    await vi.advanceTimersByTimeAsync(30_000)
+    await firstResult;await stopResult
+    const retry=manager.update([binding()]),retryResult=expect(retry).rejects.toThrow('teardown')
+    await vi.advanceTimersByTimeAsync(15_000);await retryResult
+    expect(start).toHaveBeenCalledOnce()
+  } finally {vi.useRealTimers()}
+})

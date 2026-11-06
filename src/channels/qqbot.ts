@@ -1,5 +1,6 @@
 import { QQBot, errorHandler, messageFilter, accessPolicy, historyBuffer, MemoryHistoryStore, contentSanitizer, quoteRef, envelopeFormatter, typingIndicator, rateLimiter, type MiddlewareContext, type InlineKeyboard, type StreamSession } from '@tencent-connect/qqbot-nodejs'
 import type { ChannelAdapter, ChannelMessage } from './types.js'
+import { silentLog, type ChannelLog } from '../shared/log.js'
 import type { RuntimeView } from '../types.js'
 import type { OutboundMediaPayload } from '../media.js'
 import { chunkMarkdownText } from './qqbot-official/chunker.js'
@@ -21,7 +22,7 @@ export class QQBotAdapter implements ChannelAdapter {
   private bot:QQBot|undefined
   private readonly limiter=new ReplyLimiter({limit:4})
   private readonly streams=new Set<StreamSession>()
-  constructor(private readonly credential:QQBotCredential,private readonly receive:(message:ChannelMessage)=>Promise<void>,private readonly changed:(state:RuntimeView)=>void,private readonly create:(options:ConstructorParameters<typeof QQBot>[0])=>QQBot=options=>new QQBot(options)){}
+  constructor(private readonly credential:QQBotCredential,private readonly receive:(message:ChannelMessage)=>Promise<void>,private readonly changed:(state:RuntimeView)=>void,private readonly create:(options:ConstructorParameters<typeof QQBot>[0])=>QQBot=options=>new QQBot(options),private readonly log:ChannelLog=silentLog){}
   private publish(state:RuntimeView){this.state=state;this.changed(state)}
   async start(){
     if(this.controller)return
@@ -76,7 +77,7 @@ export class QQBotAdapter implements ChannelAdapter {
       if(controller.signal.aborted)return
       this.publish(event.willReconnect?{phase:'retrying',attempt:1,retryAt:Date.now()}:{phase:'failed',error:{code:'runtime-failed',message:'QQ 连接已停止，请检查机器人授权后重试。'}})
     })
-    bot.on('error',()=>{/* SDK's run promise and disconnect events own lifecycle; never expose credential-bearing provider errors. */})
+    bot.on('error',error=>{/* SDK owns lifecycle; the sink must not serialize provider details. */this.log('qqbot-sdk-error',error)})
     this.run=bot.start(controller.signal).catch(()=>{if(!controller.signal.aborted)this.publish({phase:'failed',error:{code:'runtime-failed',message:'QQ 连接失败，请检查 AppID、凭据与平台权限。'}})})
   }
   async stop(){
