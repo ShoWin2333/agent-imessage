@@ -20,7 +20,7 @@ The npm package is `@showin2333/dsh-plugin-channels`. Installing it mounts two C
 
 This package replaces `@showin2333/dsh-channels`. Keep existing row IDs, channel bindings and session records when switching. Stop the old bundle before replacing dependency/module references; do not load both names together. See the migration guide.
 
-Direct installation uses `1.1.0`. The market index still points to `1.1.0-dsh.13` and requires a separate update before it installs this version.
+`1.1.0` is published on npm. Until the market index is updated, the market entry may still offer the older build; install directly with the command below.
 
 - **Direct install**: DSH → Plugins → Install, then enter `@showin2333/dsh-plugin-channels@1.1.0`.
 - **Market install**: enable `@deepseek-ai/dsh-experimental-plugin-market-bundle`, then Plugins → Discover → Add index source with the URL below.
@@ -58,4 +58,4 @@ npm run check
 Tests use synthetic messages and mocked provider requests; no live sending, login, model calls or service changes. The migration leaves existing installations and user histories untouched. Rollback uses Git and an installation backup, rather than keeping a second product entry point.
 
 
-QQ Bot was rebuilt from the QQ-free baseline using Tencent’s official SDK and DSH plugin reference. It includes QR binding, owner-only private chats, media, streaming, session commands and native shared approvals. See [the feature comparison and integration requirements](docs/qqbot.md) and [validation record](docs/qqbot-validation.md). These changes are included in `1.1.0`; the preceding local build was installed for user testing. Automated tests use synthetic credentials and mocked requests.
+QQ Bot was rebuilt from the QQ-free baseline using Tencent’s official SDK and DSH plugin reference. It includes QR binding, owner-only private chats, media, streaming, session commands and native shared approvals. See [the feature comparison and integration requirements](docs/qqbot.md). These changes are included in `1.1.0`. QR binding imports the optional `@tencent-connect/qqbot-connector` package; when an installation cannot obtain it, the panel keeps the manual AppSecret path. Automated tests use synthetic credentials and mocked requests.

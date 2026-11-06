@@ -51,6 +51,10 @@ Back up the profile and stop the old consumers before switching the selected bun
 
 Task ingress remains text. Channel-owned Agent scopes now register `channel_send_media` for approved workspace-local image/file/audio uploads to their fixed recipient. Media tool calls cannot select another binding or recipient. Per-call media receipts persist sending/sent/uncertain metadata only, never file bytes; recovery quarantines interrupted media sends and does not re-upload them. General native scheduled-task delivery is not integrated. Unsupported inbound attachments request a text task rather than executing a partial prompt. Scheduler fixed-session/catch-up semantics do not automatically reproduce an independent application's isolated scheduled tasks. No scheduler migration or automatic replacement is implied.
 
+Receipt deduplication is bounded. All unsettled receipts are retained; settled receipts older than the most recent 512 are pruned, and no fixed receipt count refuses admission. Rewinding a provider cursor — for example when restoring a backup — must restore the binding's receipts as well, otherwise provider messages older than that window can be admitted and executed a second time.
+
+QQ Bot QR binding imports the optional `@tencent-connect/qqbot-connector` package. Installations that cannot provide it keep the manual AppSecret path in the panel; a QR attempt fails instead of installing the package at runtime.
+
 The suite uses synthetic channels and denies unmocked network access. Run `npm run check` for both type checks, offline tests, browser artifact smoke rendering, build and package inspection. No real messages, paid model calls, production credentials or private rollout evidence are part of the test suite.
 
 ## Current SDK validation

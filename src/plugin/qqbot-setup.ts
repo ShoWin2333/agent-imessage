@@ -18,7 +18,7 @@ export class QQBotSetup {
     const entry:{state:QQSetupState;controller:AbortController;stop?:()=>void;task?:Promise<void>;expires:ReturnType<typeof setTimeout>}={state,controller,expires:setTimeout(()=>{void this.cancel(id)},5*60_000)}
     this.scans.set(id,entry)
     const current=()=>this.scans.get(id)===entry&&!controller.signal.aborted&&entry.state.phase==='waiting'
-    const connect=this.connect??(await import('@tencent-connect/qqbot-connector')).startQrConnect
+    const connect=this.connect??await import('@tencent-connect/qqbot-connector').then(module=>module.startQrConnect,()=>{throw new Error('QQ QR binding requires the optional @tencent-connect/qqbot-connector package')})
     if(!current())return {...entry.state}
     entry.stop=connect({
       onQrDisplayed:url=>{

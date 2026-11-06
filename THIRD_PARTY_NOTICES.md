@@ -85,4 +85,4 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 
-The independent npm dependency @tencent-connect/qqbot-connector 1.2.0 declares `license: UNLICENSED`. It is not represented as MIT and its implementation is not copied into this repository. Its usage/distribution terms must be verified before publication.
+The independent npm dependency @tencent-connect/qqbot-connector 1.2.0 declares `license: UNLICENSED`. It is declared as an **optional** dependency: it is imported only when a user starts QR binding, an installation that cannot provide it keeps the manual AppSecret path, and its implementation is not copied into this repository. Its usage/distribution terms must be verified before publishing a build that advertises QR binding.

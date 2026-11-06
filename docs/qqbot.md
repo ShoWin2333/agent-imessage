@@ -89,3 +89,5 @@ QQ 命令在 `qqbot-commands.ts` 中处理，通用桥接层只提供重置、�
 被动回复额度耗尽或 ID 过期时，在任何流式首帧发送前检查 SDK 所需的 msgId；没有可用 ID 时，仅在终态静态投递一次。已经尝试流式外发后出错仍为 uncertain，禁止补发。断线期间完成的桌面文字答复先保存为 pending；重连重新读取 outbox。获取发送对象失败而尚未外发时保留 pending；真正外发结果不明仍标记 uncertain，不自动重试。
 
 升级兼容仅接受 .17 私聊配置遗留的 `scope=c2c` 与布尔 `requireMention`，解析时移除，不改变私聊身份；`scope=group`、`groupId` 及群主动推送配置继续明确拒绝，不自动转换群目的地。
+
+扫码绑定通过可选依赖 `@tencent-connect/qqbot-connector` 完成：该包自带 `license: UNLICENSED`，因此只声明为 optional，且仅在用户点击扫码时才动态导入。安装环境取不到它时，扫码入口会失败并提示，面板中的「手动配置 AppSecret」保持可用。对外发布前须核实该包的使用与分发授权。
