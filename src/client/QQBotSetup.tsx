@@ -36,11 +36,12 @@ export function QQBotSetup({ctx,t,disabled,onBound}:{ctx:ClientContext;t:Transla
   const cancel=async()=>{generation.current++;if(active.current)await api?.cancel(active.current);active.current=undefined;setState(null);setBusy(false)}
   return <section aria-label={t('qq.setup')} className="dsh-channel-notice">
     <p>{t('qq.hint')}</p>
-    <div className="dsh-channel-actions"><button disabled={disabled||busy||!api||state?.phase==='saving'} onClick={()=>void start()}>{state?.phase==='waiting'?t('qq.refresh'):t('qq.connect')}</button>{state?.phase==='waiting'?<button onClick={()=>void cancel()}>{t('action.cancel')}</button>:null}</div>
-    {busy?<p role="status">{t('qq.waiting')}</p>:null}
-    {state?.phase==='waiting'?<div>{state.qrSvg?<img width="240" height="240" src={state.qrSvg} alt={t('qq.scan')}/>:<p>{t('qq.waiting')}</p>}{state.url?<p><a href={state.url} target="_blank" rel="noreferrer">{t('qq.open')}</a></p>:null}</div>:null}
-    {state?.phase==='saving'?<p role="status">{t('qq.saving')}</p>:null}
-    {state?.phase==='complete'?<p role="status">{t('qq.complete')}</p>:null}
-    {error||state?.phase==='failed'?<p role="alert">{t('qq.failed')}</p>:null}
+    <div className="dsh-channel-actions"><button disabled={disabled||busy||!api||state?.phase==='saving'} onClick={()=>void start()}>{state?.phase==='waiting'?t('qq.refresh'):t('qq.connect')}</button>{state?.phase==='waiting'?<button className="dsh-channel-ghost" onClick={()=>void cancel()}>{t('action.cancel')}</button>:null}</div>
+    {disabled&&!state?<p className="dsh-channel-muted">{t('qq.disabledHint')}</p>:null}
+    {busy?<p role="status" className="dsh-channel-muted">{t('qq.waiting')}</p>:null}
+    {state?.phase==='waiting'?<div>{state.qrSvg?<img width="240" height="240" src={state.qrSvg} alt={t('qq.scan')}/>:<p className="dsh-channel-muted">{t('qq.waiting')}</p>}{state.url?<p><a href={state.url} target="_blank" rel="noreferrer">{t('qq.open')}</a></p>:null}</div>:null}
+    {state?.phase==='saving'?<p role="status" className="dsh-channel-muted">{t('qq.saving')}</p>:null}
+    {state?.phase==='complete'?<p role="status" className="dsh-channel-muted">{t('qq.complete')}</p>:null}
+    {error||state?.phase==='failed'?<p role="alert" className="dsh-channel-error">{t('qq.failed')}</p>:null}
   </section>
 }

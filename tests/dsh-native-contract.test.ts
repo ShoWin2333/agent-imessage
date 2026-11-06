@@ -280,3 +280,34 @@ it('joins an already-started final flush before disposing its writer',async()=>{
   const closing=native.close();await Promise.resolve();expect(f.dispose).not.toHaveBeenCalled()
   release.resolve(true);await closing;expect((await operation.result).reason).toBe('completed');expect(f.dispose).toHaveBeenCalledOnce()
 })
+
+it('keeps a claimed turn alive beyond the unclaimed-input deadline', async () => {
+  vi.useFakeTimers()
+  const f=runtime(),session=await f.host.open()
+  try {
+    f.agent.followup.mockImplementation(message=>f.emit('agent/inbox/claimed',{agent:f.agent,message,turn:1}))
+    const operation=session.submit('long-task','synthetic',()=>{}),settled=vi.fn()
+    void operation.result.then(settled)
+    await operation.admitted
+    await vi.advanceTimersByTimeAsync(31*60_000)
+    expect(settled).not.toHaveBeenCalled()
+    f.emit('session/event',f.agent.session,{type:'assistant/message',data:{turn:1,message:{content:[{type:'text',text:'finished'}]}}})
+    f.emit('session/event',f.agent.session,{type:'turn/end',data:{turn:1,reason:{kind:'completed'}}})
+    expect(await operation.result).toEqual({text:'finished',reason:'completed'})
+  } finally {await session.close();vi.useRealTimers()}
+})
+
+it('revokes an unclaimed native admission before settling its timeout', async () => {
+  vi.useFakeTimers()
+  const f=runtime(),session=await f.host.open(),inbox=new Set<string>()
+  try {
+    f.agent.followup.mockImplementation(message=>{inbox.add(message.id)})
+    f.agent.inbox.remove.mockImplementation(id=>inbox.delete(id))
+    const operation=session.submit('unclaimed','synthetic',()=>{})
+    await operation.admitted
+    await vi.advanceTimersByTimeAsync(30*60_000)
+    expect(await operation.result).toMatchObject({reason:'interrupted'})
+    expect(f.agent.inbox.remove).toHaveBeenCalledWith('unclaimed')
+    expect(inbox.has('unclaimed')).toBe(false)
+  } finally {await session.close();vi.useRealTimers()}
+})

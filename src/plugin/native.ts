@@ -166,7 +166,12 @@ export class DshNativeHost implements NativeHost {
     const scoped = agent.ctx
     let closing=false
     const finishing=new Set<Promise<void>>()
-    const pending = new Map<string, { turn?: number; suppressed?: boolean; text: string; resolve: (value: NativeResult) => void; progress: () => void; controller:AbortController; interactions?:InteractionHandlers | undefined; media?:MediaHandler | undefined; stream?:((text:string)=>void)|undefined; notice?:((text:string)=>Promise<void>)|undefined; streamedText?:string; watchdog?:ReturnType<typeof setTimeout>|undefined }>()
+    type PendingInput = { turn?: number; suppressed?: boolean; text: string; resolve: (value: NativeResult) => void; progress: () => void; controller:AbortController; interactions?:InteractionHandlers | undefined; media?:MediaHandler | undefined; stream?:((text:string)=>void)|undefined; notice?:((text:string)=>Promise<void>)|undefined; streamedText?:string; watchdog?:ReturnType<typeof setTimeout>|undefined }
+    const pending = new Map<string, PendingInput>()
+    const stopWatchdog = (input: PendingInput) => {
+      if (input.watchdog !== undefined) clearTimeout(input.watchdog)
+      input.watchdog = undefined
+    }
     const leaders = new Map<number, string>()
     const claimed = scoped.on('agent/inbox/claimed', payload => {
       if (payload.agent !== agent) return
@@ -174,6 +179,7 @@ export class DshNativeHost implements NativeHost {
       if (!leaders.has(payload.turn)) leaders.set(payload.turn, payload.message.id)
       const input = pending.get(payload.message.id)
       if (input) {
+        stopWatchdog(input)
         input.suppressed = leaders.get(payload.turn) !== payload.message.id
         input.turn = payload.turn
       }
@@ -185,7 +191,7 @@ export class DshNativeHost implements NativeHost {
     const finish = (id: string, result: NativeResult) => {
       const input = pending.get(id)
       if (!input) return
-      if (input.watchdog !== undefined) clearTimeout(input.watchdog)
+      stopWatchdog(input)
       // During teardown the SDK owns the final drain. Calling live-session
       // flush concurrently with handle disposal races its writer removal.
       if(closing){input.controller.abort();return}
@@ -287,10 +293,16 @@ export class DshNativeHost implements NativeHost {
         let rejectResult!: (reason: unknown) => void
         const result = new Promise<NativeResult>((resolve, reject) => {
           rejectResult = reject
-          const entry={ text: '', resolve, progress, interactions, media, stream, notice, controller: new AbortController(), watchdog: undefined as ReturnType<typeof setTimeout>|undefined }
+          const entry: PendingInput={ text: '', resolve, progress, interactions, media, stream, notice, controller: new AbortController(), watchdog: undefined as ReturnType<typeof setTimeout>|undefined }
           pending.set(id, entry)
           // A Host that neither claims nor discards an admitted input must not pin the binding forever.
-          entry.watchdog = setTimeout(() => finish(id, { text: 'DSH 长时间未确认完成；请检查会话。未自动重跑。', reason: 'interrupted' }), 30 * 60_000)
+          entry.watchdog = setTimeout(() => {
+            entry.watchdog = undefined
+            if (pending.get(id) !== entry || entry.turn !== undefined || closing) return
+            // Revoke the native admission before settling: it must never execute later.
+            agent.inbox.remove(MessageId(id))
+            if (pending.get(id) === entry && entry.turn === undefined) finish(id, { text: 'DSH 长时间未接管此请求，已撤销排队；请检查会话。未自动重跑。', reason: 'interrupted' })
+          }, 30 * 60_000)
           entry.watchdog.unref?.()
         })
         try {
@@ -307,6 +319,8 @@ export class DshNativeHost implements NativeHost {
           })
           return { admitted, result }
         } catch (error) {
+          const input = pending.get(id)
+          if (input) stopWatchdog(input)
           pending.delete(id); rejectResult(error)
           return { admitted: Promise.reject(error), result }
         }
@@ -329,6 +343,7 @@ export class DshNativeHost implements NativeHost {
         }
         finally {
           for (const [id,input] of pending) {
+            stopWatchdog(input)
             input.controller.abort()
             let stored:NativeResult|undefined
             try{stored=await this.inspect(agent.id,id)}catch{}

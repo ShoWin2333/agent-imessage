@@ -90,4 +90,4 @@ QQ 命令在 `qqbot-commands.ts` 中处理，通用桥接层只提供重置、�
 
 升级兼容仅接受 .17 私聊配置遗留的 `scope=c2c` 与布尔 `requireMention`，解析时移除，不改变私聊身份；`scope=group`、`groupId` 及群主动推送配置继续明确拒绝，不自动转换群目的地。
 
-扫码绑定通过可选依赖 `@tencent-connect/qqbot-connector` 完成：该包自带 `license: UNLICENSED`，因此只声明为 optional，且仅在用户点击扫码时才动态导入。安装环境取不到它时，扫码入口会失败并提示，面板中的「手动配置 AppSecret」保持可用。对外发布前须核实该包的使用与分发授权。
+扫码绑定通过可选依赖 `@tencent-connect/qqbot-connector` 完成：该包自带 `license: UNLICENSED`，这里声明为 optional，仅表示安装失败可继续，包管理器默认仍会安装它；仅在用户点击扫码时才动态导入。optional 声明本身不解决使用或分发授权。安装环境取不到它时，扫码入口会失败并提示，面板中的「手动配置 AppSecret」保持可用。对外发布前须核实该包的使用与分发授权。

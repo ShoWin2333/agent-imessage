@@ -5,6 +5,11 @@
 export const NS = 'dsh-channels'
 
 const zh: Record<string, string> = {
+  'punct.fieldOpen':'（',
+  'punct.fieldClose':'）',
+  'punct.colon':'：',
+  'punct.question':'？',
+  'field.cwdPlaceholder':'绝对路径，例如 D:\\projects\\my-app',
   'channels.saved':'已保存',
   'channels.drafts':'个草稿',
   'field.qqVisionProvider':'视觉 Provider（可选）',
@@ -40,6 +45,7 @@ const zh: Record<string, string> = {
   'qq.option.sendPresentedFiles': '自动交付声明的文件（仍需逐份审批）',
   'qq.maxFiles': '每轮最多交付文件数',
   'qq.deliveryHint': '仅交付宿主 present 声明的工作区文件；沿用文件发送审批和大小限制。',
+  'qq.disabledHint': '运行中的渠道或只读配置下不可操作；请先停止渠道，并等待宿主配置就绪。',
 
   'action.addAgent': '＋ 新增 Agent',
   'action.createAgent': '创建 Agent',
@@ -70,9 +76,9 @@ const zh: Record<string, string> = {
   'issue.agents-cwd': '请选择 Agent 的绝对默认项目路径。',
   'issue.agents-membership': '每个渠道只能属于一个 Agent，且须引用已有渠道。',
 
-  'nav.title': 'Messaging Channels',
+  'nav.title': '消息渠道',
   'summary': '管理 iMessage、Telegram、微信和 QQ Bot，复用宿主模型与权限；新增渠道默认停用。',
-  'heading': 'Messaging Channels',
+  'heading': '消息渠道',
   'intro': '先选择 Agent，再配置它的消息渠道。运行中也可编辑草稿；保存只影响当前渠道。',
   'agentGroups': 'Agent 分组',
   'agentChannels': 'Agent 所属渠道',
@@ -119,6 +125,8 @@ const zh: Record<string, string> = {
   'field.cwd': '项目目录',
   'field.cwdHint': '修改目录只影响当前渠道的项目与会话分区；Agent 分组及其他渠道不变。',
   'field.permission': '宿主权限预设',
+  'permission.choose': '选择宿主权限预设',
+  'permission.unknown': '（宿主目录中未列出）',
   'field.weixinOwner': '微信允许的用户 ID',
   'field.weixinBase': '微信 API 地址',
   'confirm.title': '应用更改到',
@@ -152,7 +160,7 @@ const zh: Record<string, string> = {
   'issue.id-format': '渠道标识须为 1–64 个字母、数字、下划线或短横线。',
   'issue.id-duplicate': '渠道标识必须唯一。',
   'issue.channel-id': '渠道身份标识无效。',
-  'issue.channel-kind': '配置含不支持的渠道类型；当前仅支持 iMessage、Telegram 和微信。',
+  'issue.channel-kind': '配置含不支持的渠道类型；当前仅支持 iMessage、Telegram、微信和 QQ Bot。',
   'config.unsupported': '请先核对宿主配置。此页面不会自动删除绑定、Agent 分组、凭据或会话。',
   'issue.cwd-absolute': '请选择绝对项目路径。',
   'issue.credential-ref': '请填写宿主已配置的凭据引用名称。',
@@ -185,6 +193,11 @@ const zh: Record<string, string> = {
 }
 
 const en: Record<string, string> = {
+  'punct.fieldOpen':' (',
+  'punct.fieldClose':')',
+  'punct.colon':': ',
+  'punct.question':'?',
+  'field.cwdPlaceholder':'Absolute path, e.g. C:\\projects\\my-app',
   'channels.saved':'Saved',
   'channels.drafts':'drafts',
   'field.qqVisionProvider':'Vision provider (optional)',
@@ -220,6 +233,7 @@ const en: Record<string, string> = {
   'qq.option.sendPresentedFiles': 'Deliver presented files automatically (each requires approval)',
   'qq.maxFiles': 'Maximum files per turn',
   'qq.deliveryHint': 'Only workspace files declared by Host present are delivered, using existing upload approvals and size limits.',
+  'qq.disabledHint': 'Unavailable while the channel runs or the configuration is read-only. Stop the channel first and wait for the Host configuration to be ready.',
 
   'action.addAgent': '+ Add Agent',
   'action.createAgent': 'Create Agent',
@@ -299,6 +313,8 @@ const en: Record<string, string> = {
   'field.cwd': 'Project directory',
   'field.cwdHint': 'Changing the directory affects only this channel’s project and session scope; the Agent group and other channels stay unchanged.',
   'field.permission': 'Host permission preset',
+  'permission.choose': 'Choose a Host permission preset',
+  'permission.unknown': ' (not in Host catalog)',
   'field.weixinOwner': 'Allowed Weixin user id',
   'field.weixinBase': 'Weixin API origin',
   'confirm.title': 'Apply changes to',
@@ -332,7 +348,7 @@ const en: Record<string, string> = {
   'issue.id-format': 'Channel id must be 1–64 letters, digits, underscores or hyphens.',
   'issue.id-duplicate': 'Channel ids must be unique.',
   'issue.channel-id': 'Invalid channel identity id.',
-  'issue.channel-kind': 'Unsupported channel kind; only iMessage, Telegram and Weixin are supported.',
+  'issue.channel-kind': 'Unsupported channel kind; only iMessage, Telegram, Weixin and QQ Bot are supported.',
   'config.unsupported': 'Review the Host configuration first. This page does not automatically delete bindings, Agent groups, credentials or sessions.',
   'issue.cwd-absolute': 'Choose an absolute project path.',
   'issue.credential-ref': 'Enter a credential reference configured in the Host.',

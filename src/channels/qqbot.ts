@@ -77,7 +77,7 @@ export class QQBotAdapter implements ChannelAdapter {
       if(controller.signal.aborted)return
       this.publish(event.willReconnect?{phase:'retrying',attempt:1,retryAt:Date.now()}:{phase:'failed',error:{code:'runtime-failed',message:'QQ 连接已停止，请检查机器人授权后重试。'}})
     })
-    bot.on('error',error=>{/* SDK's run promise and disconnect events own lifecycle; credentials never reach this sink. */this.log('qqbot-sdk-error',error)})
+    bot.on('error',error=>{/* SDK owns lifecycle; the sink must not serialize provider details. */this.log('qqbot-sdk-error',error)})
     this.run=bot.start(controller.signal).catch(()=>{if(!controller.signal.aborted)this.publish({phase:'failed',error:{code:'runtime-failed',message:'QQ 连接失败，请检查 AppID、凭据与平台权限。'}})})
   }
   async stop(){
