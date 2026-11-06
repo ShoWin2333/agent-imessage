@@ -9,15 +9,21 @@ import type {ClientContext,PermissionCatalog} from './contracts.js'
 const PERMISSION_CATALOG_TIMEOUT_MS=1500
 type PermissionResult={dispose:()=>Promise<void>;presets?:PermissionCatalog}
 async function readPermissionCatalog(ctx:ClientContext):Promise<PermissionResult>{
-  let ready:ClientContext|undefined
-  let resolveReady:(value:undefined)=>void=()=>{}
-  const claimed=new Promise<undefined>(resolve=>{resolveReady=resolve})
-  const claim=ctx.inject(['remote.permissionPresets'],scoped=>{ready=scoped;resolveReady(undefined);return ()=>{}})
-  const timeout=new Promise<undefined>(resolve=>{setTimeout(()=>resolve(undefined),PERMISSION_CATALOG_TIMEOUT_MS)})
-  await Promise.race([claimed,timeout])
-  const api=ready?.remote.permissionPresets
-  const presets=api===undefined?undefined:await api.catalog().then(result=>result.ok?result.value:undefined).catch(()=>undefined)
-  return {dispose:async()=>{await claim?.dispose?.()},...(presets===undefined?{}:{presets})}
+  let settle:(value:PermissionCatalog|undefined)=>void=()=>{}
+  const catalog=new Promise<PermissionCatalog|undefined>(resolve=>{settle=resolve})
+  const claim=ctx.inject(['remote.permissionPresets'],scoped=>{
+    const api=scoped.remote.permissionPresets
+    if(api)void api.catalog().then(result=>settle(result.ok?result.value:undefined),()=>settle(undefined))
+    else settle(undefined)
+    return ()=>settle(undefined)
+  })
+  let timer:ReturnType<typeof setTimeout>|undefined
+  try {
+    const timeout=new Promise<undefined>(resolve=>{timer=setTimeout(()=>resolve(undefined),PERMISSION_CATALOG_TIMEOUT_MS)})
+    const presets=await Promise.race([catalog,timeout])
+    return {dispose:async()=>{await claim?.dispose?.()},...(presets===undefined?{}:{presets})}
+  } catch(error) {await claim?.dispose?.();throw error}
+  finally {if(timer!==undefined)clearTimeout(timer)}
 }
 
 /** Mount generated Host metadata before exposing a page that calls its namespace. */
