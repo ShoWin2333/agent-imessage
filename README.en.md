@@ -12,7 +12,7 @@ One read-only Agent tool, `channel_status`, reports each configured channel's en
 
 ## Install
 
-This version is **`1.1.0`**. The DSH plugin is now `main`, so versions use ordinary SemVer without the `-dsh.N` suffix previously used to distinguish the standalone macOS App. The package remains `@showin2333/dsh-plugin-channels`; the old App stays archived, and existing releases and Git tags are retained. Stable `1.1.0` sorts above the earlier `1.1.0-dsh.N` prereleases.
+This version is **`1.1.1`**. The DSH plugin is now `main`, so versions use ordinary SemVer without the `-dsh.N` suffix previously used to distinguish the standalone macOS App. The package remains `@showin2333/dsh-plugin-channels`; the old App stays archived, and existing releases and Git tags are retained. Stable `1.1.0` sorts above the earlier `1.1.0-dsh.N` prereleases.
 
 This version supports DSH `0.2.2-rc.1`. The iMessage channel additionally requires macOS with Messages; Telegram, Weixin iLink and QQ Bot are cross-platform.
 
@@ -20,9 +20,9 @@ The npm package is `@showin2333/dsh-plugin-channels`. Installing it mounts two C
 
 This package replaces `@showin2333/dsh-channels`. Keep existing row IDs, channel bindings and session records when switching. Stop the old bundle before replacing dependency/module references; do not load both names together. See the migration guide.
 
-`1.1.0` is published on npm. Until the market index is updated, the market entry may still offer the older build; install directly with the command below.
+Install `1.1.1` directly from npm with the command below. Until the market index is updated, the market entry may still offer the older build.
 
-- **Direct install**: DSH → Plugins → Install, then enter `@showin2333/dsh-plugin-channels@1.1.0`.
+- **Direct install**: DSH → Plugins → Install, then enter `@showin2333/dsh-plugin-channels@1.1.1`.
 - **Market install**: enable `@deepseek-ai/dsh-experimental-plugin-market-bundle`, then Plugins → Discover → Add index source with the URL below.
 - **Local development**: `pnpm install && npm run build`, then point the profile dependency at this checkout with `link:`.
 
@@ -59,3 +59,5 @@ Tests use synthetic messages and mocked provider requests; no live sending, logi
 
 
 QQ Bot was rebuilt from the QQ-free baseline using Tencent’s official SDK and DSH plugin reference. It includes QR binding, owner-only private chats, media, streaming, session commands and native shared approvals. See [the feature comparison and integration requirements](docs/qqbot.md). These changes are included in `1.1.0`. QR binding imports the optional `@tencent-connect/qqbot-connector` package, which is installed by default but may fail without blocking installation; when an installation cannot obtain it, the panel keeps the manual AppSecret path. Automated tests use synthetic credentials and mocked requests.
+
+Version `1.1.1` improves the settings panel, makes channel SDK installation optional, keeps provider details out of diagnostic logs, bounds complete teardown, and revokes only unclaimed timed-out inputs.

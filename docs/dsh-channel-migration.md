@@ -1,6 +1,6 @@
 # Native DSH channel plugin migration
 
-This version is `1.1.0`, targeting DSH `0.2.2-rc.1` / Cordis `4.1.0` only. Earlier `1.1.0-dsh.N` releases remain historical prereleases; removing the suffix does not rename the npm package, configuration rows or storage domains. The former `dsh-plugin` product line is now the default `main` branch; the independent macOS App history is preserved in `archive/standalone-macos-main-20261104`. Update raw/CDN index URLs to use `main`, since GitHub branch redirects do not cover every external CDN.
+This version is `1.1.1`, targeting DSH `0.2.2-rc.1` / Cordis `4.1.0` only. Earlier `1.1.0-dsh.N` releases remain historical prereleases; removing the suffix does not rename the npm package, configuration rows or storage domains. The former `dsh-plugin` product line is now the default `main` branch; the independent macOS App history is preserved in `archive/standalone-macos-main-20261104`. Update raw/CDN index URLs to use `main`, since GitHub branch redirects do not cover every external CDN.
 
 ## Ownership
 

@@ -10,7 +10,7 @@ DSH 负责 Agent、模型、工具、权限、执行队列、取消和会话日�
 
 ## 安装
 
-本版为 **`1.1.0`**。DSH 插件已成为 `main`，版本号改用普通 SemVer，不再添加用于区分旧 macOS App 的 `-dsh.N` 后缀。包名仍为 `@showin2333/dsh-plugin-channels`；旧 App 留在归档分支，既有发布版本与 Git 标签保留。`1.1.0` 高于此前的 `1.1.0-dsh.N` 预发布版本，不需要重置版本序列。
+本版为 **`1.1.1`**。DSH 插件已成为 `main`，版本号改用普通 SemVer，不再添加用于区分旧 macOS App 的 `-dsh.N` 后缀。包名仍为 `@showin2333/dsh-plugin-channels`；旧 App 留在归档分支，既有发布版本与 Git 标签保留。`1.1.0` 高于此前的 `1.1.0-dsh.N` 预发布版本，不需要重置版本序列。
 
 本版支持 DSH `0.2.2-rc.1`。iMessage 通道额外要求 macOS 与本机 Messages；Telegram、微信 iLink、QQ Bot 跨平台。
 
@@ -18,9 +18,9 @@ npm 包：`@showin2333/dsh-plugin-channels`。安装后以 bundle 形式挂载�
 
 原 npm 名称 `@showin2333/dsh-channels` 已迁至此名称。升级保留设置行 ID、渠道绑定与会话记录；先停止旧包，再切换依赖和模块引用，勿同时加载两个包。详见迁移指南。
 
-本版 `1.1.0` 已在 npm 发布；市场索引更新前，市场入口可能仍显示旧版，建议用下面的命令直接安装。
+本版 `1.1.1` 使用 npm 直接安装；市场索引更新前，市场入口可能仍显示旧版，建议用下面的命令直接安装。
 
-- **直接安装**：DSH → 插件 → 安装，输入 `@showin2333/dsh-plugin-channels@1.1.0`。
+- **直接安装**：DSH → 插件 → 安装，输入 `@showin2333/dsh-plugin-channels@1.1.1`。
 - **市场安装**：先启用 `@deepseek-ai/dsh-experimental-plugin-market-bundle`，在 插件 → 发现 → 添加索引源 填入下方地址，再从卡片安装。
 - **本地开发**：`pnpm install && npm run build`，在 profile 的 `dependencies` 中以 `link:` 指向本仓库。
 
@@ -29,6 +29,8 @@ npm 包：`@showin2333/dsh-plugin-channels`。安装后以 bundle 形式挂载�
 安装后不会自动连接任何渠道：先按「Desktop 管理面板」配置 workspace、权限预设和凭据引用，再显式启用绑定。升级需要先卸载再安装，DSH 目前没有原地更新动作。
 
 QQ Bot 在独立干净基线上按腾讯官方 DSH 插件重做，含扫码、所有者私聊、媒体、流式和原生会话命令，审批沿用现有机制。详见[官方功能对照、差异与联调事项](docs/qqbot.md)。该能力包含于 `1.1.0`。扫码绑定依赖可选包 `@tencent-connect/qqbot-connector`（默认仍会安装，允许安装失败）；安装时取不到它，面板里仍可手动填写 AppSecret。
+
+`1.1.1` 包含设置面板改进、可选 SDK 依赖、安全错误日志、完整关闭期限，以及只撤销未接管输入的超时处理。
 
 ## 当前闭环
 
