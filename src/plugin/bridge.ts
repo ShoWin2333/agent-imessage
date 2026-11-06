@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { BindingCommands } from './commands.js'
 import { ChannelInteractions } from './interactions.js'
 import { bounded } from './delivery.js'
+import { silentLog, withDeadline, type ChannelLog } from '../shared/log.js'
 import type { LegacySessionIdentity } from './identity.js'
 import type { ApprovalOutcome } from '@deepseek-ai/dsh-user-approval'
 import type { ApprovalInteraction, InteractionHandlers } from './interaction-types.js'
@@ -60,7 +61,7 @@ export class ChannelBridge {
   private generation = 0
   private connected = true
   private readonly interactions = new ChannelInteractions(() => this.connected && !this.closed)
-  constructor(private readonly host: NativeHost, private readonly store: BindingStore, private readonly commands?: BindingCommands) { }
+  constructor(private readonly host: NativeHost, private readonly store: BindingStore, private readonly commands?: BindingCommands, private readonly log: ChannelLog = silentLog) { }
   setConnected(healthy: boolean): void {this.connected=healthy;if(!healthy)this.interactions.cancel()}
   async approveShared(scope: ApprovalInteraction, destination: () => Promise<ChannelMessage>, settled: Promise<ApprovalOutcome>): Promise<ApprovalOutcome> {
     if (!this.connected || this.closed || this.store.read().sessionId !== scope.sessionId) return 'unavailable'
@@ -193,7 +194,7 @@ export class ChannelBridge {
             if(!streamed){await this.serial(async()=>{const current=this.store.read().receipts.find(r=>r.id===receipt.id);if(current?.delivery!=='pending')throw new Error('Delivery already claimed');await this.replace({...current,delivery:'sending'})});streamed=true}
             await message.progressText!(text)
           })
-          void streamChain.catch(()=>{})
+          void streamChain.catch(error => this.log('stream-failed', error))
         } : undefined
         const notice=message.commandChannel==='qqbot' ? async(text:string)=>{if(!this.closed&&generation===this.generation&&this.connected)await bounded(message.send(text),30000,this.bindingStop.signal)} : undefined
         const operation = generation !== this.generation || this.closed
@@ -213,14 +214,14 @@ export class ChannelBridge {
   }
   private async execute(resultPromise: Promise<NativeResult>, receipt: Receipt, message: ChannelMessage, streamed:()=>Promise<boolean> = async()=>false): Promise<void> {
     const result = await message.responding(() => resultPromise)
-      .catch(() => ({ text: 'DSH 执行未确认完成；请检查会话。未自动重跑。', reason: 'interrupted' }))
+       .catch(error => { this.log('execution-interrupted', error); return { text: 'DSH 执行未确认完成；请检查会话。未自动重跑。', reason: 'interrupted' } })
     let started=false,failed=false
-    try{started=await streamed()}catch{started=true;failed=true}
+    try{started=await streamed()}catch(error){this.log('stream-start-failed',error);started=true;failed=true}
     const ready = { ...receipt, result, delivery:started?'sending' as const:'pending' as const }
     await this.serial(() => this.replace(ready))
     if(started){
       let delivery:'sent'|'uncertain'='uncertain'
-      try{if(!failed&&!this.closed&&message.completeText){await bounded(message.completeText(result.text||`DSH 已结束：${result.reason}`),30000,this.bindingStop.signal);delivery='sent'}}catch{}
+      try{if(!failed&&!this.closed&&message.completeText){await bounded(message.completeText(result.text||`DSH 已结束：${result.reason}`),30000,this.bindingStop.signal);delivery='sent'}}catch(error){this.log('completion-failed',error)}
       await this.serial(()=>this.replace({...ready,delivery}))
     }else if (!this.closed) await this.deliver(ready, message)
   }
@@ -287,7 +288,7 @@ export class ChannelBridge {
       if (!claimed) return
       let delivery: Receipt['delivery'] = 'sent'
       try { await bounded(message.send(receipt.result.text || `DSH 已结束：${receipt.result.reason}`), 30000, this.bindingStop.signal) }
-      catch { delivery = 'uncertain' }
+      catch (error) { this.log('delivery-uncertain', error); delivery = 'uncertain' }
       // A crash or failed commit here leaves 'sending'; recovery quarantines it.
       await this.serial(() => this.replace({ ...receipt, delivery }))
     } finally { this.delivering.delete(receipt.id) }
@@ -299,6 +300,7 @@ export class ChannelBridge {
     await this.tail
     this.session?.cancel()
     await this.session?.close()
-    await this.drain()
+    // A hung provider send or agent turn must not block plugin teardown forever.
+    await withDeadline(this.drain(), 15_000, 'bridge drain').catch(error => this.log('drain-timeout', error))
   }
 }

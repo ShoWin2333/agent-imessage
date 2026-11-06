@@ -2,6 +2,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import type { Binding } from './index.js'
 import type { TelegramRetryReason } from '../types.js'
+import { withDeadline } from '../shared/log.js'
 
 declare module '@deepseek-ai/cordis' { interface Context { channelsController: ChannelsController } }
 
@@ -63,7 +64,7 @@ export class ChannelManager {
     if (this.closed) return
     for (const [id, item] of this.live) if (item.abort.signal.aborted) {
       this.setState({ id, phase: 'stopping' })
-      try { await item.resource?.close() } catch (error) {
+      try { if (item.resource) await withDeadline(item.resource.close(), 15_000, 'channel close') } catch (error) {
         this.log(`binding ${id} teardown failed; refusing to reconnect`, error)
         this.setState({ id, phase: 'error', error: 'teardown-incomplete' })
         // Never start a competing consumer after an uncertain teardown.
@@ -106,7 +107,7 @@ export class ChannelManager {
     this.closed = true
     for (const item of this.live.values()) item.abort.abort()
     await this.queue.catch(() => {})
-    const results = await Promise.allSettled([...this.live.values()].map(item => item.resource?.close()))
+    const results = await Promise.allSettled([...this.live.values()].map(item => item.resource ? withDeadline(item.resource.close(), 15_000, 'channel close') : undefined))
     this.live.clear()
     this.changed()
     if (results.some(r => r.status === 'rejected')) throw new Error('Channel teardown incomplete')

@@ -23,6 +23,7 @@ import {QQBotSetupController} from './qqbot-setup.js'
 import {registerQQPresented} from './qqbot-presented.js'
 import {QQCommands} from './qqbot-commands.js'
 import type {AgentGroup} from '../shared/agents.js'
+import { sanitizeDetail, type ChannelLog } from '../shared/log.js'
 
 export const name = 'dsh-channels'
 export const inject = ['agents', 'llm', 'sessions', 'sessionPersistence', 'agentPresets', 'agentDefaultModel', 'permissionPresets', 'credentials', 'storageDomain', 'tools']
@@ -44,7 +45,9 @@ export const channelDomain = defineDomain({
 /** Loading or saving disabled bindings never resolves credentials or starts consumers. */
 export async function apply(ctx: Context, config: Config | { bindings: Volatile<Binding[]>; agents?:Volatile<AgentGroup[]> } = {}): Promise<void> {
   const log = ctx.logger('dsh-channels')
-  const report = (message: string, details?: unknown) => { log.warn(message); if (details !== undefined) log.warn(details) }
+  // Provider errors can embed request URLs or credentials; only a scrubbed one-line detail is logged.
+  const report = (message: string, details?: unknown) => { log.warn(message); if (details !== undefined) log.warn(sanitizeDetail(details)) }
+  const channelLog: ChannelLog = (event, detail) => report(event, detail)
   const read = () => pluginConfigSchema.parse({ bindings: config.bindings && 'get' in config.bindings ? config.bindings.get() : config.bindings ?? [], agents:config.agents && 'get' in config.agents ? config.agents.get() : config.agents ?? [] }).bindings
   const initial = read()
   const domain = await ctx.storageDomain.open(channelDomain)
@@ -99,7 +102,7 @@ export async function apply(ctx: Context, config: Config | { bindings: Volatile<
     const lifetime = ctx.root.extend({ [Context.isolate]: ctx[Context.isolate] })
     const bridge = new ChannelBridge(new DshNativeHost(ctx, binding.cwd, binding.permissionPreset, scopeKey, binding.model, table.get(key)?.legacyIdentity, binding.channel.kind, lifetime, binding.channel.kind==='qqbot'&&binding.channel.visionProvider&&binding.channel.visionModel?{provider:binding.channel.visionProvider,model:binding.channel.visionModel}:undefined,binding.channel.kind==='qqbot'?binding.channel:{}), {
       read: () => table.get(key)!, write: value => table.put(key, value),
-    }, binding.channel.kind==='qqbot'?new QQCommands(ctx,{binding:scopeKey,legacyIdentity:table.get(key)?.legacyIdentity,model:binding.model,options:binding.channel,lifetime}):undefined)
+    }, binding.channel.kind==='qqbot'?new QQCommands(ctx,{binding:scopeKey,legacyIdentity:table.get(key)?.legacyIdentity,model:binding.model,options:binding.channel,lifetime}):undefined, channelLog)
     bridge.setConnected(false)
     let unregisterExternal:(()=>void)|undefined
     let unregisterApprovals: (() => void) | undefined
@@ -156,7 +159,7 @@ export async function apply(ctx: Context, config: Config | { bindings: Volatile<
       } else if(c.kind==='qqbot') {
         const {QQBotAdapter}=await wait(import('../channels/qqbot.js'))
         ensureActive()
-        adapter=new QQBotAdapter({...c,appSecret:secret.value,cwd:binding.cwd},receive,onState)
+        adapter=new QQBotAdapter({...c,appSecret:secret.value,cwd:binding.cwd},receive,onState,undefined,channelLog)
         const releaseText=registerQQExternalTurns(ctx,{state:()=>table.get(key)!,bridge,adapter,policy:c.externalTurns,signal})
         const releaseFiles=registerQQPresented(ctx,{state:()=>table.get(key)!,bridge,adapter,cwd:binding.cwd,policy:c.externalTurns,signal,options:c})
         unregisterExternal=()=>{releaseFiles();releaseText()}
