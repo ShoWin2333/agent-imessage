@@ -266,14 +266,15 @@ describe('native channel settings panel',()=>{
       {id:'project-b',title:'Channel B',cwd:'/canonical/channel-b',bindingIds:[b.id]},
     ],pending:[],errors:[]}})}
     f.show()
-    await screen.findByText('DSH 项目：Channel A · project-a · /canonical/channel-a')
+    await screen.findByText('DSH 项目：Channel A · project-a')
+    expect(screen.getByTitle('project-a · /canonical/channel-a')).toBeTruthy()
     expect(screen.getByText('默认项目目录：/tmp/default')).toBeTruthy()
     expect(screen.getByText('仅供新增渠道预填；已有渠道保留各自目录。')).toBeTruthy()
     fireEvent.change(screen.getByLabelText('项目目录'),{target:{value:'/tmp/unsaved'}})
-    expect(screen.getByText('DSH 项目：Channel A · project-a · /canonical/channel-a')).toBeTruthy()
+    expect(screen.getByText('DSH 项目：Channel A · project-a')).toBeTruthy()
     fireEvent.click(within(screen.getByRole('navigation',{name:'Agent 所属渠道'})).getByRole('button',{name:'iMessage'}))
-    expect(screen.getByText('DSH 项目：Channel B · project-b · /canonical/channel-b')).toBeTruthy()
-    expect(screen.queryByText('DSH 项目：Channel A · project-a · /canonical/channel-a')).toBeNull()
+    expect(screen.getByText('DSH 项目：Channel B · project-b')).toBeTruthy()
+    expect(screen.queryByText('DSH 项目：Channel A · project-a')).toBeNull()
     expect(f.mutate).not.toHaveBeenCalled()
   })
   it('merges unrelated updates during removal and preserves unrelated draft values',async()=>{
@@ -301,7 +302,7 @@ describe('native channel settings panel',()=>{
   it.each(['discord','feishu'])('shows a read-only error for retired %s configuration without deleting or rewriting it',kind=>{
     const retired={...binding(),id:'retired',channel:{id:'retired',kind}} as Binding
     const f=fixture([binding(),retired]);f.show()
-    expect(screen.getByRole('alert').textContent).toContain('仅支持 iMessage、Telegram 和微信')
+    expect(screen.getByRole('alert').textContent).toContain('仅支持 iMessage、Telegram、微信和 QQ Bot')
     expect(screen.getByText('请先核对宿主配置。此页面不会自动删除绑定、Agent 分组、凭据或会话。')).toBeTruthy()
     expect(screen.queryByRole('button')).toBeNull();expect(f.mutate).not.toHaveBeenCalled()
     expect(f.snapshot().value?.bindings).toEqual([binding(),retired])
@@ -325,7 +326,7 @@ describe('native channel settings panel',()=>{
     const dispose=await installPanel(ctx,{})
     expect(slots).toEqual(['settings.section']);expect(registrations).toHaveLength(1)
     expect(registrations[0]).toMatchObject({name:'settings.section',id:'dsh-channels'})
-    expect((registrations[0]!.label as ()=>string)()).toBe('Messaging Channels')
+    expect((registrations[0]!.label as ()=>string)()).toBe('消息渠道')
     await dispose()
   })
   it('awaits generated remote mount before registering the page and releases in order once',async()=>{
