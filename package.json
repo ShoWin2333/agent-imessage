@@ -89,14 +89,14 @@
     "prepublishOnly": "npm run check"
   },
   "dependencies": {
-    "@spectrum-ts/core": "12.7.0",
-    "@spectrum-ts/imessage": "12.7.0",
-    "zod": "4.6.6",
-    "@tencent-connect/qqbot-nodejs": "1.0.5",
-    "qrcode": "1.5.4"
+    "zod": "4.6.6"
   },
   "optionalDependencies": {
-    "@tencent-connect/qqbot-connector": "1.2.0"
+    "@tencent-connect/qqbot-connector": "1.2.0",
+    "@spectrum-ts/core": "12.7.0",
+    "@spectrum-ts/imessage": "12.7.0",
+    "@tencent-connect/qqbot-nodejs": "1.0.5",
+    "qrcode": "1.5.4"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.1.0",
