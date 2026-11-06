@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { BindingCommands } from './commands.js'
 import { ChannelInteractions } from './interactions.js'
 import { bounded } from './delivery.js'
-import { silentLog, withDeadline, type ChannelLog } from '../shared/log.js'
+import { silentLog, type ChannelLog } from '../shared/log.js'
 import type { LegacySessionIdentity } from './identity.js'
 import type { ApprovalOutcome } from '@deepseek-ai/dsh-user-approval'
 import type { ApprovalInteraction, InteractionHandlers } from './interaction-types.js'
@@ -300,7 +300,7 @@ export class ChannelBridge {
     await this.tail
     this.session?.cancel()
     await this.session?.close()
-    // A hung provider send or agent turn must not block plugin teardown forever.
-    await withDeadline(this.drain(), 15_000, 'bridge drain').catch(error => this.log('drain-timeout', error))
+    // The manager bounds the complete teardown and retains ownership on failure.
+    await this.drain()
   }
 }

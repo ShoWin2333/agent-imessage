@@ -28,6 +28,7 @@ export class ChannelManager {
   private listeners = new Set<() => void>()
   private queue = Promise.resolve()
   private closed = false
+  private closing: Promise<void> | undefined
   private generation = 0
   private configError: string | undefined
   constructor(private readonly start: Factory, private readonly log: Logger = () => {}) {}
@@ -85,7 +86,7 @@ export class ChannelManager {
           if (!this.closed && !item.abort.signal.aborted && this.live.get(binding.id) === item) this.setState({ id: binding.id, phase, ...(retryReason ? { error: retryReason } : {}) })
         })
         item.resource = resource
-        if (item.abort.signal.aborted || this.closed) await resource.close()
+        if (item.abort.signal.aborted || this.closed) await withDeadline(resource.close(), 15_000, 'channel activation cleanup')
       } catch (error) {
         if (item.resource || error instanceof ActivationCleanupError) {
           if (error instanceof ActivationCleanupError) item.resource = error.resource
@@ -103,14 +104,22 @@ export class ChannelManager {
       }
     }
   }
-  async close(): Promise<void> {
+  close(): Promise<void> {
+    if (this.closing) return this.closing
     this.closed = true
     for (const item of this.live.values()) item.abort.abort()
-    await this.queue.catch(() => {})
-    const results = await Promise.allSettled([...this.live.values()].map(item => item.resource ? withDeadline(item.resource.close(), 15_000, 'channel close') : undefined))
-    this.live.clear()
-    this.changed()
-    if (results.some(r => r.status === 'rejected')) throw new Error('Channel teardown incomplete')
+    // Include activation and its cleanup in the same unload deadline.
+    this.closing = withDeadline((async () => {
+      await this.queue.catch(() => {})
+      const results = await Promise.allSettled([...this.live.values()].map(item => item.resource?.close()))
+      if (results.some(r => r.status === 'rejected')) throw new Error('Channel teardown incomplete')
+      this.live.clear()
+      this.changed()
+    })(), 15_000, 'channel teardown').catch(error => {
+      this.log('channel teardown incomplete', error)
+      throw error
+    })
+    return this.closing
   }
 }
 

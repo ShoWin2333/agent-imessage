@@ -23,7 +23,7 @@ import {QQBotSetupController} from './qqbot-setup.js'
 import {registerQQPresented} from './qqbot-presented.js'
 import {QQCommands} from './qqbot-commands.js'
 import type {AgentGroup} from '../shared/agents.js'
-import { sanitizeDetail, type ChannelLog } from '../shared/log.js'
+import { sanitizeDetail, withDeadline, type ChannelLog } from '../shared/log.js'
 
 export const name = 'dsh-channels'
 export const inject = ['agents', 'llm', 'sessions', 'sessionPersistence', 'agentPresets', 'agentDefaultModel', 'permissionPresets', 'credentials', 'storageDomain', 'tools']
@@ -45,7 +45,7 @@ export const channelDomain = defineDomain({
 /** Loading or saving disabled bindings never resolves credentials or starts consumers. */
 export async function apply(ctx: Context, config: Config | { bindings: Volatile<Binding[]>; agents?:Volatile<AgentGroup[]> } = {}): Promise<void> {
   const log = ctx.logger('dsh-channels')
-  // Provider errors can embed request URLs or credentials; only a scrubbed one-line detail is logged.
+  // Provider errors can embed content or credentials; log only identity and safe system codes.
   const report = (message: string, details?: unknown) => { log.warn(message); if (details !== undefined) log.warn(sanitizeDetail(details)) }
   const channelLog: ChannelLog = (event, detail) => report(event, detail)
   const read = () => pluginConfigSchema.parse({ bindings: config.bindings && 'get' in config.bindings ? config.bindings.get() : config.bindings ?? [], agents:config.agents && 'get' in config.agents ? config.agents.get() : config.agents ?? [] }).bindings
@@ -182,7 +182,7 @@ export async function apply(ctx: Context, config: Config | { bindings: Volatile<
       return { close: async () => { signal.removeEventListener('abort', abort); await close() } }
     } catch (error) {
       signal.removeEventListener('abort', abort)
-      try { await close() } catch { throw new ActivationCleanupError({ close }) }
+      try { await withDeadline(close(), 15_000, 'channel activation cleanup') } catch { throw new ActivationCleanupError({ close }) }
       if (signal.aborted) throw error
       throw error instanceof BindingActivationError ? error : new BindingActivationError('activation-failed', 'Binding could not activate', { cause: error })
     }
