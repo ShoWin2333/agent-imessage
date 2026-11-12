@@ -153,7 +153,11 @@ export class DshNativeHost implements NativeHost {
     if (!await this.lifetime.sessions.flush(agent.session)) throw new Error('DSH session durability unavailable')
   }
   private attach(agent: Agent): NativeSession {
-    if (agent.session.id !== agent.id || agent.session.header.cwd !== this.cwd || !this.ctx.agents.roots().includes(agent)) {
+    // DSH 0.2.2-rc.2 removed `AgentRegistry.roots()`; classify the live entry from
+    // its durable Session header and require the exact registry instance instead.
+    const header = agent.session.header
+    const topLevel = header.origin !== 'subagent' && (header.delegationDepth ?? 0) === 0
+    if (agent.session.id !== agent.id || header.cwd !== this.cwd || !topLevel || this.ctx.agents.get(agent.id) !== agent) {
       throw new Error('Session binding mismatch')
     }
     // The desktop retains its Agent handle, inbox, model and policy.

@@ -15,7 +15,7 @@ function runtime() {
   const flush = vi.fn(async () => true)
   const ctx = {
 on: (event: string, fn: (...args: any[]) => void) => { if (!handlers.has(event)) handlers.set(event, new Set()); handlers.get(event)!.add(fn); return () => handlers.get(event)!.delete(fn) },
-    agents: { get: vi.fn(() => undefined), roots: vi.fn(() => [agent]), create: vi.fn(async () => ({ agent, dispose })), resume: vi.fn(async () => ({ agent, dispose })) },
+    agents: { get: vi.fn(() => undefined), create: vi.fn(async () => ({ agent, dispose })), resume: vi.fn(async () => ({ agent, dispose })) },
     agentDefaultModel: { currentSelection: () => ({ provider: 'synthetic', model: 'no-paid-model' }) }, agentPresets: { defaultId: 'synthetic-preset', mount: vi.fn() },
     permissionPresets: { resolve: vi.fn(), set: vi.fn() }, sessions: { flush },
     sessionPersistence: { stat: vi.fn(async () => ({ header: { cwd: '/tmp', agentPreset: 'synthetic-preset' } })), open: vi.fn(async () => ({ read: async () => ({ events: [] }), close: vi.fn(async () => { }) })) },
@@ -147,12 +147,13 @@ it('cancels a channel-owned turn with keepInbox even when the channel created th
   await session.close();await operation.result
 })
 
-it('does not attach to a desktop Agent outside the binding workspace or root scope', async () => {
+it('does not attach to a desktop Agent outside the binding workspace or top-level scope', async () => {
   const f = runtime()
   vi.mocked(f.ctx.agents.get).mockReturnValue(f.agent as never)
   const otherWorkspace = new DshNativeHost(f.ctx, '/different', 'workspace-write', 'binding')
   await expect(otherWorkspace.open(f.agent.id)).rejects.toThrow('Session binding mismatch')
-  vi.mocked(f.ctx.agents.roots).mockReturnValue([])
+  const child = { ...f.agent, session: Session.create(f.agent.session.id, [], { ...f.agent.session.header, origin: 'subagent', delegationDepth: 1 }) }
+  vi.mocked(f.ctx.agents.get).mockReturnValue(child as never)
   await expect(f.host.open(f.agent.id)).rejects.toThrow('Session binding mismatch')
   expect(f.ctx.agents.resume).not.toHaveBeenCalled()
 })
