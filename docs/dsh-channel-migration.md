@@ -1,6 +1,6 @@
 # Native DSH channel plugin migration
 
-This version is `1.1.1`, targeting DSH `0.2.2-rc.1` / Cordis `4.1.0` only. Earlier `1.1.0-dsh.N` releases remain historical prereleases; removing the suffix does not rename the npm package, configuration rows or storage domains. The former `dsh-plugin` product line is now the default `main` branch; the independent macOS App history is preserved in `archive/standalone-macos-main-20261104`. Update raw/CDN index URLs to use `main`, since GitHub branch redirects do not cover every external CDN.
+This version is `1.1.2`, targeting DSH `>=0.2.2-rc.1 <0.2.3` / Cordis `4.1.0`. `1.1.2` widens the host requirement from the fixed `0.2.2-rc.1` so DSH `0.2.2-rc.2` mounts the bundle instead of rejecting it as `incompatible-version`; it also replaces the removed `AgentRegistry.roots()` check with the durable Session-header classification (`origin` / `delegationDepth`) plus an exact live-registry lookup. The previous release `1.1.1` remains the published build. Earlier `1.1.0-dsh.N` releases remain historical prereleases; removing the suffix does not rename the npm package, configuration rows or storage domains. The former `dsh-plugin` product line is now the default `main` branch; the independent macOS App history is preserved in `archive/standalone-macos-main-20261104`. Update raw/CDN index URLs to use `main`, since GitHub branch redirects do not cover every external CDN.
 
 ## Ownership
 
@@ -59,6 +59,6 @@ The suite uses synthetic channels and denies unmocked network access. Run `npm r
 
 ## Current SDK validation
 
-Development dependencies, runtime peers and the lockfile target DSH `0.2.2-rc.1` / Cordis `4.1.0`. The old 0.2.1 compatibility branches and isolated SDK preparation script have been removed. Current model changes use the Agent-owned public `agent.model.select()` API; saved request models remain the resume fallback.
+Development dependencies and the lockfile target DSH `0.2.2-rc.2` / Cordis `4.1.0`; runtime peers accept `^0.2.2-rc.1` and `engines.dsh` declares `>=0.2.2-rc.1 <0.2.3`. The old 0.2.1 compatibility branches and isolated SDK preparation script have been removed. Current model changes use the Agent-owned public `agent.model.select()` API; saved request models remain the resume fallback.
 
 Run `pnpm install --frozen-lockfile --ignore-scripts` and `npm run check` in the checkout. CI covers Node 22.19/24 on Linux and Windows and Node 24 on macOS. Host installation, live activation and npm publication are separate operations. The version-naming change does not perform them.
