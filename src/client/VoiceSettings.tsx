@@ -5,9 +5,11 @@ import type {Translate} from './Panel.js'
 /** Defaults mirror the Host schema so a fresh profile opens with a usable form. */
 export const VOICE_DEFAULTS: VoiceConfig = {
   enabled:false,
+  replyMode:'text',
   credentialRef:'CHANNELS_OPENAI_API_KEY',
   baseURL:'https://api.openai.com/v1',
   model:'gpt-audio',
+  speechModel:'gpt-4o-mini-tts',
   voice:'alloy',
   instructions:'',
 }
@@ -19,7 +21,7 @@ const same=(a:VoiceConfig,b:VoiceConfig)=>JSON.stringify(a)===JSON.stringify(b)
  * Host credential store and only its presence is ever read back.
  */
 export function VoiceSettings({ctx,t,form,snapshot}:{ctx:ClientContext;t:Translate;form:ConfigForm;snapshot:FormSnapshot}){
-  const persisted=snapshot.value?.voice??VOICE_DEFAULTS
+  const persisted={...VOICE_DEFAULTS,...snapshot.value?.voice}
   const [draft,setDraft]=useState<VoiceConfig>(persisted)
   const [baseline,setBaseline]=useState<VoiceConfig>(persisted)
   const [secret,setSecret]=useState(''),[status,setStatus]=useState(''),[busy,setBusy]=useState(false),[failure,setFailure]=useState(false)
@@ -57,7 +59,7 @@ export function VoiceSettings({ctx,t,form,snapshot}:{ctx:ClientContext;t:Transla
     finally{setBusy(false)}
   }
   const dirty=!same(draft,baseline)
-  const field=(label:string,key:'baseURL'|'credentialRef'|'model'|'voice',placeholder:string)=>(
+  const field=(label:string,key:'baseURL'|'credentialRef'|'model'|'speechModel'|'voice',placeholder:string)=>(
     <label className="dsh-channel-field">{t(label)}
       <input value={draft[key]} placeholder={placeholder} autoComplete="off" spellCheck={false}
         onChange={event=>{const value=event.target.value;update(previous=>({...previous,[key]:value}))}}/>
@@ -70,8 +72,14 @@ export function VoiceSettings({ctx,t,form,snapshot}:{ctx:ClientContext;t:Transla
       <div className="dsh-channel-options">
         <label className="dsh-channel-option"><input type="checkbox" checked={draft.enabled} onChange={event=>{const value=event.target.checked;update(previous=>({...previous,enabled:value}))}}/><span>{t('voice.enabled')}</span></label>
       </div>
+      <label className="dsh-channel-field">{t('voice.replyMode')}
+        <select value={draft.replyMode??'text'} onChange={event=>{const replyMode=event.target.value as 'text'|'voice';update(previous=>({...previous,replyMode}))}}>
+          <option value="text">{t('voice.replyText')}</option><option value="voice">{t('voice.replyVoice')}</option>
+        </select>
+      </label>
       <div className="dsh-channel-grid">
         {field('voice.model','model','gpt-audio')}
+        {field('voice.speechModel','speechModel','gpt-4o-mini-tts')}
         {field('voice.voice','voice','alloy')}
         {field('voice.baseURL','baseURL','https://api.openai.com/v1')}
         {field('voice.credentialRef','credentialRef','CHANNELS_OPENAI_API_KEY')}

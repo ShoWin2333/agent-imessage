@@ -7,10 +7,10 @@ import { DshNativeHost } from '../src/plugin/native.js'
 
 const cleanup: Array<() => Promise<void>> = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close() })
-async function fixture({ presetFs = true, agentFs = false, channelKind = 'imessage', voice = undefined as import('../src/plugin/voice/tool.js').VoiceHandler | undefined } = {}) {
+async function fixture({ presetFs = true, agentFs = false, channelKind = 'imessage', voice = undefined as import('../src/plugin/voice/tool.js').VoiceHandler | undefined, replyMode = undefined as import('../src/plugin/voice/output-tool.js').ReplyModeHandler | undefined } = {}) {
   const ctx = new Context(), agentCtx = new Context(), session = Session.create(SessionId('channels-binding-test'),[],{...Session.create(SessionId('channels-binding-test')).header,cwd:'/workspace'})
   let live: any, decision = 'allowed-once'
-  const agent = { id: session.id, session, ctx: agentCtx, inbox: { clear: vi.fn(), remove: vi.fn(() => false) }, cancel: vi.fn(), followup: vi.fn((input: any) => {
+  const agent = { id: session.id, session, ctx: agentCtx, inbox: { clear: vi.fn(), remove: vi.fn(() => false) }, cancel: vi.fn(), inject: vi.fn(), followup: vi.fn((input: any) => {
     session.append('turn/start', { turn: 1 }); session.append('user/message',input,{surfaceOp:'append'}); agentCtx.emit('agent/inbox/claimed', { agent, message: input, turn: 1 } as never)
   }) }
   live = agent
@@ -37,12 +37,12 @@ async function fixture({ presetFs = true, agentFs = false, channelKind = 'imessa
     const release=registerQQPresented(agentCtx,{state:()=>({sessionId:session.id,receipts:[]}),bridge:{deliverExternalMedia:async(_message:any,request:any)=>send(request)} as any,adapter:{scheduledMessage:async()=>({send:notice})} as any,cwd:'/workspace',policy:'c2c',signal:new AbortController().signal,options:{}})
     cleanup.push(async()=>release())
   }
-  const operation = native.submit('input', 'send image', () => {}, undefined, send,undefined,notice,voice); await operation.admitted
+  const operation = native.submit('input', 'send image', () => {}, undefined, send,undefined,notice,voice,replyMode); await operation.admitted
   const definition = agentCtx.tools.get('channel_send_media')!
   const exec = { agent, callId: 'call', signal: new AbortController().signal } as any
   const call = (overrides = {}, args = { path: 'test.png', kind: 'image' }) => definition.execute(args, { ...exec, ...overrides })
   cleanup.push(async () => { await native.close(); await operation.result; await tools.dispose(); await agentServices.dispose(); await services.dispose() })
-  return { ctx, agentCtx, agent, session, native, call, send, read, reader, agentRead, agentReader, request, flush, notice, setDecision: (next: string) => { decision = next } }
+  return { ctx, agentCtx, agent, session, native, operation, call, send, read, reader, agentRead, agentReader, request, flush, notice, setDecision: (next: string) => { decision = next } }
 }
 it('registers the capability through real Tools, approves before composed reads, flushes before sending, unregisters on close', async () => {
   const f = await fixture()
@@ -138,4 +138,42 @@ it('scopes listening to the exact active Agent and input and revokes it on cance
   expect(f.read).not.toHaveBeenCalled()
   await f.native.close()
   expect(f.agentCtx.tools.get('channel_listen_audio')).toBeUndefined()
+})
+
+
+it('selects output independently for the exact active input and rejects foreign or cancelled calls',async()=>{
+  const select=vi.fn((mode:string)=>JSON.stringify({mode}))
+  const f=await fixture({channelKind:'qqbot',replyMode:select})
+  const tool=f.agentCtx.tools.get('channel_set_reply_mode')!,exec={agent:f.agent,callId:'mode',signal:new AbortController().signal} as any
+  expect(await tool.execute({inputId:'input',mode:'voice'},exec)).toBe('{"mode":"voice"}')
+  await expect(tool.execute({inputId:'other',mode:'text'},exec)).rejects.toThrow('active channel')
+  await expect(tool.execute({inputId:'input',mode:'text'},{...exec,agent:{...f.agent}})).rejects.toThrow('active channel')
+  f.native.cancel()
+  await expect(tool.execute({inputId:'input',mode:'text'},exec)).rejects.toThrow('active channel')
+  expect(select).toHaveBeenCalledOnce()
+})
+
+it('records the completed speech script/status through inject without starting a second Agent reply',async()=>{
+  const f=await fixture()
+  const reply={text:'The synthetic note was saved.',delivery:{delivery:'sent' as const,name:'reply.mp3',bytes:100,mode:'voice' as const}}
+  await expect(f.native.recordVoiceReply!('input',reply)).rejects.toThrow('mismatch')
+  f.session.append('turn/end',{turn:1,reason:{kind:'completed'}})
+  f.agentCtx.emit('session/event',f.session,f.session.snapshotEvents().at(-1)! as never)
+  await f.native.recordVoiceReply!('input',reply)
+  await f.native.recordVoiceReply!('input',reply)
+  expect(f.agent.inject).toHaveBeenCalledOnce()
+  const notice=f.agent.inject.mock.calls[0]![0] as any
+  expect(notice.id).toBe('channels-voice-delivery:input');expect(notice.content[0].text).toContain('The synthetic note was saved.');expect(notice.content[0].text).toContain('"delivery":"sent"')
+  expect(f.agent.followup).toHaveBeenCalledOnce()
+  await expect(f.native.recordVoiceReply!('foreign-input',reply)).rejects.toThrow('mismatch')
+})
+
+
+it('separates the final assistant answer from earlier tool-step preambles',async()=>{
+  const f=await fixture({channelKind:'qqbot',replyMode:()=>'{"mode":"voice"}'})
+  f.agentCtx.emit('session/event',f.session,{type:'assistant/message',data:{turn:1,message:{content:[{type:'text',text:'I will write the note.'},{type:'tool-call',id:'write',name:'write_file',arguments:'{}'}]}}} as never)
+  f.agentCtx.emit('session/event',f.session,{type:'assistant/message',data:{turn:1,message:{content:[{type:'text',text:'Write failed; no note was saved.'}]}}} as never)
+  f.session.append('turn/end',{turn:1,reason:{kind:'completed'}})
+  f.agentCtx.emit('session/event',f.session,f.session.snapshotEvents().at(-1)! as never)
+  expect(await f.operation.result).toMatchObject({text:expect.stringContaining('I will write'),finalText:'Write failed; no note was saved.'})
 })

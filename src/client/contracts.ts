@@ -12,10 +12,12 @@ export interface Binding {
 export type {AgentGroup} from '../shared/agents.js'
 /** Deployment-wide speech settings; one provider account serves every binding. */
 export interface VoiceConfig {
+  replyMode: 'text' | 'voice'
   enabled: boolean
   credentialRef: string
   baseURL: string
   model: string
+  speechModel: string
   voice: string
   instructions: string
 }

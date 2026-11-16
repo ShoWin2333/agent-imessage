@@ -22,8 +22,11 @@ function omitTranscript(text: string, transcript: string): string {
 }
 
 /** Presentation only: the original assistant and tool results stay in DSH history. */
-export function voiceAwareResult(result: NativeResult, receipt: Receipt | undefined): NativeResult {
+export function voiceAwareResult(result: NativeResult, receipt: Receipt | undefined, recovering = false): NativeResult {
   if (result.suppressed || !receipt?.voice || !['completed', 'ended'].includes(result.reason)) return result
+  // New coordinated replies represent the terminal Agent script, not earlier
+  // step preambles collected by legacy native result inspection.
+  if (recovering && receipt.voice.final) result = { ...result, text: receipt.voice.text }
   const media = receipt.media?.find(item => item.callId === receipt.voice!.callId)
   if (media?.delivery !== 'sent') {
     // An ambiguous upload is not proof that the user heard anything. Keep the

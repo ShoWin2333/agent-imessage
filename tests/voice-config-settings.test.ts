@@ -55,6 +55,8 @@ it('applies defaults for a config written before the voice section existed', () 
   expect(parsed.voice).toEqual(DEFAULT_VOICE_CONFIG)
   expect(parsed.voice.enabled).toBe(false)
   expect(parsed.voice.model).toBe('gpt-audio')
+  expect(parsed.voice.speechModel).toBe('gpt-4o-mini-tts')
+  expect(parsed.voice.replyMode).toBe('text')
 })
 
 it('accepts a volatile voice handle and restarts consumers when speech settings change', async () => {

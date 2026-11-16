@@ -8,7 +8,7 @@ const audioArgs = z.object({ inputId: z.string().min(1), context: z.string().tri
 export function channelAudioTool(listen: (args: z.infer<typeof audioArgs>, exec: ToolRunContext) => Promise<string>) {
   return defineTool({
     name: 'channel_listen_audio',
-    description: 'Send the current channel input recording to the configured audio model. The DSH model itself cannot hear audio. Provide only the minimal relevant project instructions, current conversation history and accompanying user text as context; never include secrets or unrelated content. The audio model response is stored in this session and its voice is sent to this channel. The result includes the exact transcript and delivery status. On sent delivery, do not repeat the transcript: finish without text unless you have genuinely new follow-up or a necessary clarification. On failed or uncertain delivery, explain the status; never assume the user heard it or automatically retry.',
+    description: 'Understand the current real recording with the minimal relevant project/conversation context (never secrets or unrelated files). Returns internal user intent and audible observations, not an executed action or a user reply. It never sends messages. The original Agent must execute required tools and compose a concise final reply script from actual results (at most 4096 characters); the channel then synthesizes and delivers that final script once. No paths, recipients or other-session selectors.',
     parameters: {
       inputId: { type: 'string', required: true, description: 'Exact inputId from the current audio message.' },
       context: { type: 'string', required: true, description: 'Minimal relevant context and user request, at most 16000 characters.' },

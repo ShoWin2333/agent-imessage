@@ -16,16 +16,15 @@ export interface VoiceTurnInput {
   signal: AbortSignal
 }
 
-/**
- * The whole voice feature: hand the recording to the model and send back what
- * it says. No transcription, no scoring — the model does the listening.
- */
+/** Understand original sound, then speak the Agent's completed final answer. */
 export interface VoiceCoach {
   readonly enabled: boolean
+  readonly defaultReplyMode: 'text' | 'voice'
   /** Why the coach is disabled; safe to log and show, never contains the key. */
   readonly note?: string
   readonly engine?: string
-  turn(input: VoiceTurnInput): Promise<VoiceReply>
+  turn(input: VoiceTurnInput): Promise<{ text: string }>
+  speak(text: string, signal: AbortSignal): Promise<VoiceReply>
 }
 
 export function createVoiceCoach(settings: VoiceSettings, apiKey: string | undefined): VoiceCoach {
@@ -36,6 +35,7 @@ export function createVoiceCoach(settings: VoiceSettings, apiKey: string | undef
   const api = note === undefined && apiKey !== undefined ? new SpeechApi({ apiKey, baseURL: settings.baseURL }) : undefined
   return {
     enabled: settings.enabled,
+    defaultReplyMode: settings.replyMode ?? 'text',
     ...(note === undefined ? {} : { note }),
     ...(api === undefined ? {} : { engine: `OpenAI · ${settings.model}` }),
     async turn(input) {
@@ -45,13 +45,12 @@ export function createVoiceCoach(settings: VoiceSettings, apiKey: string | undef
       const clip = await normalise(input)
       input.signal.throwIfAborted()
       if (clip.bytes.length > 20 * 1024 * 1024) throw new Error('转换后录音超过 20 MiB。')
-      const reply = await api.turn(clip, { model: settings.model, voice: settings.voice, instructions: settings.instructions, context: input.context }, input.signal)
-      return {
-        audio: reply.audio,
-        name: `voice-${randomUUID().slice(0, 8)}.mp3`,
-        mimeType: 'audio/mpeg',
-        text: reply.text,
-      }
+      return api.turn(clip, { model: settings.model, instructions: settings.instructions, context: input.context }, input.signal)
+    },
+    async speak(text, signal) {
+      if (!api) throw new Error(note ?? '语音能力不可用')
+      const audio = await api.speak(text, { model: settings.speechModel ?? 'gpt-4o-mini-tts', voice: settings.voice }, signal)
+      return { audio, text, name: `voice-${randomUUID().slice(0, 8)}.mp3`, mimeType: 'audio/mpeg' }
     },
   }
 }

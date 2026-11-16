@@ -8,13 +8,16 @@ export interface AudioClip {
 
 /** Deployment-level speech settings, shared by every channel binding. */
 export interface VoiceSettings {
+  replyMode?: 'text' | 'voice' | undefined
   enabled: boolean
   /** Credentials reference holding the provider API key. */
   credentialRef: string
   /** API prefix such as `https://api.openai.com/v1`, without a trailing slash. */
   baseURL: string
-  /** Audio-in / audio-out model. */
+  /** Audio understanding model. */
   model: string
+  /** Speech model on the same configured provider; defaults for older saved configs. */
+  speechModel?: string | undefined
   /** Reply voice name. */
   voice: string
   /** Optional system instruction; empty sends none. */

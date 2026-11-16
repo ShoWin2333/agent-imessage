@@ -18,6 +18,7 @@ import type { InteractionHandlers, InteractionScope } from './interaction-types.
 import type { NativeHost, NativeSession, NativeResult, NativePreferences } from './bridge.js'
 import { ownsSession, type LegacySessionIdentity } from './identity.js'
 import {installQQAgent} from './qqbot-agent.js'
+import { channelReplyModeTool, type ReplyModeHandler } from './voice/output-tool.js'
 import { channelAudioTool, type VoiceHandler } from './voice/tool.js'
 import type {ToolDispatchExecution} from '@deepseek-ai/dsh-tools'
 import type {QQPresentationOptions} from './qqbot-presentation.js'
@@ -171,8 +172,9 @@ export class DshNativeHost implements NativeHost {
     const scoped = agent.ctx
     let closing=false
     const finishing=new Set<Promise<void>>()
-    type PendingInput = { voice?: VoiceHandler | undefined; turn?: number; suppressed?: boolean; text: string; resolve: (value: NativeResult) => void; progress: () => void; controller:AbortController; interactions?:InteractionHandlers | undefined; media?:MediaHandler | undefined; stream?:((text:string)=>void)|undefined; notice?:((text:string)=>Promise<void>)|undefined; streamedText?:string; watchdog?:ReturnType<typeof setTimeout>|undefined }
+    type PendingInput = { finalText?: string | undefined; replyMode?: ReplyModeHandler | undefined; voice?: VoiceHandler | undefined; turn?: number; suppressed?: boolean; text: string; resolve: (value: NativeResult) => void; progress: () => void; controller:AbortController; interactions?:InteractionHandlers | undefined; media?:MediaHandler | undefined; stream?:((text:string)=>void)|undefined; notice?:((text:string)=>Promise<void>)|undefined; streamedText?:string; watchdog?:ReturnType<typeof setTimeout>|undefined }
     const pending = new Map<string, PendingInput>()
+    const recordedVoice = new Set<string>()
     const stopWatchdog = (input: PendingInput) => {
       if (input.watchdog !== undefined) clearTimeout(input.watchdog)
       input.watchdog = undefined
@@ -212,9 +214,13 @@ export class DshNativeHost implements NativeHost {
       if (session !== agent.session) return
       for (const [id, input] of pending) {
         if (input.turn === undefined) continue
-        if (event.type === 'assistant/message' && event.data.turn === input.turn) input.text += textOf(event.data.message.content)
+        if (event.type === 'assistant/message' && event.data.turn === input.turn) {
+          input.text += textOf(event.data.message.content)
+          // Only a terminal assistant message can be the final reply script.
+          input.finalText = event.data.message.content.some(block => block.type === 'tool-call') ? '' : textOf(event.data.message.content)
+        }
         if (event.type === 'step/start' && event.data.turn === input.turn) input.progress()
-        if (event.type === 'turn/end' && event.data.turn === input.turn) finish(id, input.suppressed ? { text: '', reason: reasonText(event.data.reason), suppressed: true } : { text: input.text, reason: reasonText(event.data.reason) })
+        if (event.type === 'turn/end' && event.data.turn === input.turn) finish(id, input.suppressed ? { text: '', reason: reasonText(event.data.reason), suppressed: true } : { text: input.text, ...(input.replyMode ? { finalText: input.finalText ?? '' } : {}), reason: reasonText(event.data.reason) })
       }
       if (event.type === 'turn/end') leaders.delete(event.data.turn)
     })
@@ -271,7 +277,15 @@ export class DshNativeHost implements NativeHost {
       }
       if (!scope.current() || scope.signal.aborted) throw new Error('Audio turn cancelled.')
       return input.voice({ ...scope, callId: exec.callId, context: args.context })
-    }))]:[]
+    })), ...(this.channelKind === 'qqbot' ? [mediaTool.register(channelReplyModeTool((args, exec) => {
+      const leader = owner(exec.agent), input = pending.get(args.inputId)
+      if (!leader || !input?.replyMode || input.turn !== leader.turn || input.controller.signal.aborted || exec.signal.aborted) throw new Error('No reply-mode capability for this active channel input.')
+      const selected = input.replyMode(args.mode)
+      // A native turn can combine steering inputs; its one final reply follows
+      // the selected mode even when the leader was a different channel input.
+      for (const other of pending.values()) if (other !== input && other.turn === leader.turn && !other.controller.signal.aborted) other.replyMode?.(args.mode)
+      return selected
+    }))] : [])]:[]
     const qqAgent=this.channelKind==='qqbot'?installQQAgent(this.ctx,agent,{
       cwd:this.cwd,options:this.qqOptions,sendMedia:sendChannelMedia,
       selection:()=>this.qqVision??this.preferences.model??this.model??this.ctx.agentDefaultModel.currentSelection(),
@@ -321,11 +335,11 @@ export class DshNativeHost implements NativeHost {
           ...(policy ? { policy } : {}),
         }
       },
-      submit: (id, text, progress, interactions, media, stream, notice, voice) => {
+      submit: (id, text, progress, interactions, media, stream, notice, voice, replyMode) => {
         let rejectResult!: (reason: unknown) => void
         const result = new Promise<NativeResult>((resolve, reject) => {
           rejectResult = reject
-          const entry: PendingInput={ text: '', voice, resolve, progress, interactions, media, stream, notice, controller: new AbortController(), watchdog: undefined as ReturnType<typeof setTimeout>|undefined }
+          const entry: PendingInput={ text: '', voice, replyMode, resolve, progress, interactions, media, stream, notice, controller: new AbortController(), watchdog: undefined as ReturnType<typeof setTimeout>|undefined }
           pending.set(id, entry)
           // A Host that neither claims nor discards an admitted input must not pin the binding forever.
           entry.watchdog = setTimeout(() => {
@@ -356,6 +370,16 @@ export class DshNativeHost implements NativeHost {
           pending.delete(id); rejectResult(error)
           return { admitted: Promise.reject(error), result }
         }
+      },
+      recordVoiceReply: async (id, reply) => {
+        const owned = agent.session.snapshotEvents().some(event => event.type === 'user/message' && event.data.id === id && event.data.source.kind === 'dsh-channels')
+        if (!isLive() || !owned || pending.has(id)) throw new Error('Voice receipt session/input mismatch')
+        if (recordedVoice.has(id)) return
+        recordedVoice.add(id)
+        if (recordedVoice.size > 512) recordedVoice.delete(recordedVoice.values().next().value!)
+        agent.inject(freezeMessage({ id: MessageId(`channels-voice-delivery:${id}`), role: 'user',
+          content: [{ type: 'text', text: `[渠道最终语音投递回执，非用户新请求]\n${JSON.stringify({ inputId: id, ...reply })}` }], source: { kind: 'dsh-channels' } }))
+        await this.flush(agent)
       },
       cancel: () => cancel(),
       close: async () => {

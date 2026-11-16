@@ -53,3 +53,9 @@ it('round-trips transcript and delivery status through the production storage sc
   const {voice:_,...oldReceipt}=receipt()
   expect(schema.parse({receipts:[oldReceipt]}).receipts[0]!.voice).toBeUndefined()
 })
+
+
+it('recovers the terminal final script without sending earlier assistant preambles',()=>{
+  const state=receipt();state.voice!.final=true
+  expect(voiceAwareResult(result(`Earlier tool-step preamble.\n\n${transcript}`),state,true)).toMatchObject({text:'',suppressed:true})
+})

@@ -31,9 +31,11 @@ const agents=Schema.array(Schema.object({id:id(),name:Schema.string().min(1).max
 // One provider account serves every binding, so speech settings are deployment-wide.
 const voice = Schema.object({
   enabled: Schema.boolean().default(false),
+  replyMode: Schema.union(['text', 'voice']).default('text'),
   credentialRef: Schema.string().pattern(/^$|^[A-Za-z_][A-Za-z0-9_]*$/).default(''),
   baseURL: Schema.string().pattern(ORIGIN_RE).default('https://api.openai.com/v1'),
   model: Schema.string().pattern(/^[A-Za-z0-9._:-]{1,80}$/).default('gpt-audio'),
+  speechModel: Schema.string().pattern(/^[A-Za-z0-9._:-]{1,80}$/).default('gpt-4o-mini-tts'),
   voice: Schema.string().pattern(/^[A-Za-z0-9._-]{1,32}$/).default('alloy'),
   instructions: Schema.string().max(4000).default(''),
 }).default(DEFAULT_VOICE_CONFIG).volatile()

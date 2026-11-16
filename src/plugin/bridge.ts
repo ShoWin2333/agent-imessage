@@ -10,16 +10,19 @@ import type { ChannelMessage } from '../channels/types.js'
 import type { MediaHandler, MediaInteraction, MediaDeliveryResult, StoredMediaReceipt } from './media-delivery.js'
 import { voiceAwareResult } from './voice/reply.js'
 import type { VoiceCoach } from './voice/index.js'
+import type { ReplyModeHandler, ReplyMode } from './voice/output-tool.js'
 import type { VoiceHandler } from './voice/tool.js'
+import type { MediaDeliveryResult as VoiceDelivery } from './media-delivery.js'
 import type { AudioConversionServices } from './voice/audio.js'
 
-export interface NativeResult { text: string; reason: string; suppressed?: boolean | undefined }
+export interface NativeResult { finalText?: string | undefined; text: string; reason: string; suppressed?: boolean | undefined }
 export interface NativeSession {
   readonly id: string
   isLive?(): boolean
   /** Composer capabilities needed to decode speech; absent before the Agent exists. */
   capabilities?(): AudioConversionServices | undefined
-  submit(id: string, text: string, progress: () => void, interactions?: InteractionHandlers, media?: MediaHandler, stream?: (text:string)=>void, notice?: (text:string)=>Promise<void>, voice?: VoiceHandler): { admitted: Promise<void>; result: Promise<NativeResult> }
+  submit(id: string, text: string, progress: () => void, interactions?: InteractionHandlers, media?: MediaHandler, stream?: (text:string)=>void, notice?: (text:string)=>Promise<void>, voice?: VoiceHandler, replyMode?: ReplyModeHandler): { admitted: Promise<void>; result: Promise<NativeResult> }
+  recordVoiceReply?(inputId: string, reply: { text: string; delivery: VoiceDelivery }): Promise<void>
   cancel(): void
   close(): Promise<void>
 }
@@ -37,7 +40,7 @@ export interface Receipt {
   sessionId: string
   delivery: 'pending' | 'sending' | 'sent' | 'uncertain'
   result?: NativeResult | undefined
-  voice?: { text: string; callId: string } | undefined
+  voice?: { text: string; callId: string; final?: boolean | undefined } | undefined
   media?: StoredMediaReceipt[] | undefined
 }
 export interface BindingState {scopeKey?:string|undefined; preferences?:NativePreferences|undefined; sessionId?: string | undefined; receipts: Receipt[]; legacyIdentity?: LegacySessionIdentity | undefined }
@@ -126,7 +129,7 @@ export class ChannelBridge {
         const receipt=this.store.read().receipts.find(r=>r.id===id)
         if(this.closed||!receipt||receipt.delivery!=='pending')return
         if(receipt.result)return receipt
-        const ready={...receipt,result:voiceAwareResult(result,receipt)};await this.replace(ready);return ready
+        const ready={...receipt,result:voiceAwareResult(result,receipt,true)};await this.replace(ready);return ready
       })
       if(ready&&this.connected&&!this.closed)await this.deliver(ready,await delivery(id))
     }
@@ -137,7 +140,7 @@ export class ChannelBridge {
     this.receiving.add(message.id)
     try {
       const command = message.text.trim()
-      if (command === '/cancel' || command === '/stop') { this.generation++; this.interactions.cancel(); this.session?.cancel() }
+      if (command === '/cancel' || command === '/stop') { for(const stop of this.voiceStops)stop.abort(); this.generation++; this.interactions.cancel(); this.session?.cancel() }
       const generation = this.generation
       let reply: Receipt | undefined
       await this.serial(async () => {
@@ -159,7 +162,7 @@ export class ChannelBridge {
           const outcome = await this.commands.run(text, {
             sessionId:this.store.read().sessionId, preferences:this.store.read().preferences??{},
             reset:async()=>{
-              this.generation++;this.interactions.cancel();this.session?.cancel();await this.session?.close();this.session=undefined
+              for(const stop of this.voiceStops)stop.abort();this.generation++;this.interactions.cancel();this.session?.cancel();await this.session?.close();this.session=undefined
               const {sessionId:_,...state}=this.store.read();await this.store.write(state)
             },
             resume:async()=>{
@@ -195,46 +198,34 @@ export class ChannelBridge {
         const receipt: Receipt = { id: message.id, inputId: randomUUID(), sessionId: this.session.id, delivery: 'pending' }
         await this.replace(receipt)
         const session = this.session
-        const voiceRequested = this.voice?.enabled && (message.audio?.length || message.audioIssue)
+        const coordinated = this.voice?.enabled === true && message.commandChannel === 'qqbot'
+        let replyMode: ReplyMode = this.voice?.defaultReplyMode ?? 'text'
+        const voiceRequested = coordinated && (message.audio?.length || message.audioIssue)
         const inbound = voiceRequested
-          ? `${message.text}\n\n[真实音频] 当前 DSH 主模型尚未听到录音。必须调用 channel_listen_audio，inputId=${receipt.inputId}，以本项目指令、当前会话历史及本条文字中必要的最少上下文形成 context。不要读取额外文件或传送凭据、秘密、无关项目内容。工具将直接发送音频模型的语音，并返回同一回复的文字稿及投递状态。已送达时不要重复该文字稿；只有真正新增内容或必要澄清才另行回复，没有则直接结束且不再输出文字。失败或投递未确认必须说明，不能用转写冒充已听到。`
-          : message.text
-        let voiceResult: Promise<string> | undefined
+          ? `${message.text}\n\n[真实音频] 当前主模型尚未听到录音。必须调用 channel_listen_audio，inputId=${receipt.inputId}，仅携带必要项目指令及本会话上下文，不读取额外文件或传送秘密。工具返回原声理解及必要声音特征，不执行用户操作，也不发送回复。你必须按实际请求完成所需工具操作；成功与否以真实执行结果为准。最后输出一份简洁完整的最终答复；输出方式与输入方式独立，按当前用户明确要求优先，必要时调用 channel_set_reply_mode 选择文字或语音。选择语音时，完成工具后仅输出最终语音脚本（不超过4096字符）。不要提前声称工具已完成，不用ASR冒充听取原音。`
+          : coordinated ? `${message.text}\n\n[渠道输出协调] inputId=${receipt.inputId}，默认输出=${replyMode}。输入与输出方式独立；用户明确要求文字或语音时优先遵守，调用 channel_set_reply_mode 选择。先完成实际工具操作，再输出最终答复；选择语音时不超过4096字符，将由渠道合成一次。` : message.text
+        let voiceResult: Promise<string> | undefined, heard = !voiceRequested, heardTurn = 0
+        const stop = coordinated ? new AbortController() : undefined
+        if (stop) this.voiceStops.add(stop)
         const voice: VoiceHandler | undefined = voiceRequested ? request => {
-          const current = () => !this.closed && this.connected && generation === this.generation && this.session === session && !request.signal.aborted && request.current()
+          const current = () => !this.closed && this.connected && generation === this.generation && this.session === session && !request.signal.aborted && request.current() && !stop!.signal.aborted
           if (!current()) return Promise.reject(new Error('Audio turn is no longer active.'))
-          // A repeated tool call shares its result and never repeats the external send.
           return voiceResult ??= (async () => {
             if (message.audioIssue) throw new Error(message.audioIssue)
             if (message.audio?.length !== 1) throw new Error('请每条消息发送一段真实录音；当前音频缺失或不止一段。')
-            const stop = new AbortController()
-            this.voiceStops.add(stop)
-            const signal = AbortSignal.any([request.signal, this.bindingStop.signal, stop.signal, AbortSignal.timeout(240_000)])
-            try {
-              const reply = await bounded(this.voice!.turn({ clip: message.audio[0]!, context: request.context,
-                audio: session.capabilities?.(), signal }), 240_000, signal)
-              signal.throwIfAborted()
-              if (!current()) throw new Error('Audio turn is no longer active.')
-              await this.serial(async () => {
-                if (!current()) throw new Error('Audio turn is no longer active.')
-                const owner = this.store.read().receipts.find(item => item.id === receipt.id)
-                if (!owner) throw new Error('Audio receipt missing.')
-                await this.replace({ ...owner, voice: { text: reply.text, callId: request.callId } })
-              })
-              const delivery = await this.sendMedia(receipt.id, session, generation, message, {
-                ...request, signal, sessionId: session.id, inputId: receipt.inputId, kind: 'voice',
-                current, media: { bytes: reply.audio, name: reply.name, mimeType: reply.mimeType },
-              })
-              return JSON.stringify({ heardBy: 'audio-model', text: reply.text, ...delivery,
-                replyPolicy: delivery.delivery === 'sent'
-                  ? 'Audio reply delivered. Do not repeat this transcript. Send only genuinely new follow-up or clarification; if none, finish without more text.'
-                  : 'Audio delivery is uncertain. Explain the status; do not assume the user heard it and do not automatically retry.',
-              })
-            } finally { this.voiceStops.delete(stop) }
+            const signal = AbortSignal.any([request.signal, this.bindingStop.signal, stop!.signal, AbortSignal.timeout(240_000)])
+            const understanding = await bounded(this.voice!.turn({ clip: message.audio[0]!, context: request.context,
+              audio: session.capabilities?.(), signal }), 240_000, signal)
+            signal.throwIfAborted()
+            if (!current()) throw new Error('Audio turn is no longer active.')
+            heard = true; heardTurn = request.turn
+            return JSON.stringify({ heardBy: 'audio-model', text: understanding.text, actionsExecuted: false,
+              replyPolicy: 'Internal listening result only. Execute the requested tools using actual results, then write your final reply. No audio has been sent yet.',
+            })
           })()
         } : undefined
         let streamed=false, streamChain=Promise.resolve()
-        const stream=!voiceRequested && message.progressText ? (text:string)=>{
+        const stream=!coordinated && message.progressText ? (text:string)=>{
           streamChain=streamChain.then(async()=>{
             if(this.closed||generation!==this.generation)return
             if(!streamed){await this.serial(async()=>{const current=this.store.read().receipts.find(r=>r.id===receipt.id);if(current?.delivery!=='pending')throw new Error('Delivery already claimed');await this.replace({...current,delivery:'sending'})});streamed=true}
@@ -247,21 +238,56 @@ export class ChannelBridge {
           ? { admitted: Promise.resolve(), result: Promise.resolve({ text: '已取消。', reason: 'interrupted' }) }
           : session.submit(receipt.inputId, inbound, () => {}, {
             question:request => this.interactions.question({...request,current:()=>request.current() && generation===this.generation && this.session===session && !this.closed},message),
-          }, request => this.sendMedia(receipt.id, session, generation, message, request), stream, notice, voice)
+          }, request => this.sendMedia(receipt.id, session, generation, message, request), stream, notice, voice, coordinated ? mode => { replyMode = mode; return JSON.stringify({ mode, finalReplyPending: true }) } : undefined)
         this.executing.add(receipt.id)
-        const job = this.execute(operation.result, receipt, message, async()=>{await streamChain;return streamed})
+        const job = this.execute(operation.result, receipt, message, async()=>{await streamChain;return streamed}, stop ? result => this.finalizeReply(result, receipt, message, session, generation, stop, heard, heardTurn, replyMode) : undefined)
         this.work.add(job)
-        void job.finally(() => {this.executing.delete(receipt.id);this.work.delete(job)}).catch(() => { })
+        void job.finally(() => {if(stop){stop.abort();this.voiceStops.delete(stop)}this.executing.delete(receipt.id);this.work.delete(job)}).catch(() => { })
         await operation.admitted
         if (generation !== this.generation || this.closed) session.cancel()
       })
       if (reply) await this.deliver(reply, message)
     } finally { this.receiving.delete(message.id) }
   }
-  private async execute(resultPromise: Promise<NativeResult>, receipt: Receipt, message: ChannelMessage, streamed:()=>Promise<boolean> = async()=>false): Promise<void> {
+  /** Called only after the native Agent turn and its durable flush have completed. */
+  private async finalizeReply(result: NativeResult, receipt: Receipt, message: ChannelMessage, session: NativeSession, generation: number, stop: AbortController, heard: boolean, turn: number, mode: ReplyMode): Promise<NativeResult> {
+    if (result.suppressed || !['completed', 'ended'].includes(result.reason)) return result
+    if (result.finalText !== undefined) result = { ...result, text: result.finalText }
+    if (!result.text.trim()) return { ...result, text: 'DSH 未提供最终答复，未生成语音；请检查原会话。' }
+    const current = () => !this.closed && this.connected && generation === this.generation && this.session === session && !stop.signal.aborted
+    if (this.closed || generation !== this.generation) return { ...result, text: '', suppressed: true }
+    if (!heard) return { ...result, text: `${result.text}\n\n原声未成功听取，未生成最终语音。`.trim() }
+    if (mode === 'text') return result
+    const callId = `final-voice:${receipt.inputId}`
+    try {
+      if (!current()) throw new Error('Channel disconnected or cancelled')
+      if (!session.recordVoiceReply) throw new Error('宿主缺少会话语音回执能力')
+      const signal = AbortSignal.any([stop.signal, this.bindingStop.signal, AbortSignal.timeout(180_000)])
+      const reply = await bounded(this.voice!.speak(result.text, signal), 180_000, signal)
+      signal.throwIfAborted()
+      await this.serial(async () => {
+        if (!current()) throw new Error('Audio reply is no longer active')
+        const owner = this.store.read().receipts.find(item => item.id === receipt.id)
+        if (!owner) throw new Error('Audio receipt missing')
+        await this.replace({ ...owner, voice: { text: reply.text, callId, final: true } })
+      })
+      const delivery = await this.sendMedia(receipt.id, session, generation, message, {
+        inputId: receipt.inputId, sessionId: session.id, turn, callId, signal, current,
+        kind: 'voice', media: { bytes: reply.audio, name: reply.name, mimeType: reply.mimeType },
+      })
+      // inject() queues context without waking a second Agent turn.
+      await session.recordVoiceReply(receipt.inputId, { text: reply.text, delivery })
+      return delivery.delivery === 'sent' ? { ...result, text: '', suppressed: true } : result
+    } catch (error) {
+      if (this.closed || generation !== this.generation) return { ...result, text: '', suppressed: true }
+      const detail = (error instanceof Error ? error.message : String(error)).slice(0, 240)
+      return { ...result, text: `${result.text}\n\n最终语音未确认完成：${detail}。未自动重试。`.trim() }
+    }
+  }
+  private async execute(resultPromise: Promise<NativeResult>, receipt: Receipt, message: ChannelMessage, streamed:()=>Promise<boolean> = async()=>false, finalize?: (result:NativeResult)=>Promise<NativeResult>): Promise<void> {
     const completed = await message.responding(() => resultPromise)
        .catch(error => { this.log('execution-interrupted', error); return { text: 'DSH 执行未确认完成；请检查会话。未自动重跑。', reason: 'interrupted' } })
-    const result = voiceAwareResult(completed, this.store.read().receipts.find(item => item.id === receipt.id))
+    const result = voiceAwareResult(finalize ? await finalize(completed) : completed, this.store.read().receipts.find(item => item.id === receipt.id))
     let started=false,failed=false
     try{started=await streamed()}catch(error){this.log('stream-start-failed',error);started=true;failed=true}
     const ready = { ...receipt, result, delivery:started?'sending' as const:'pending' as const }

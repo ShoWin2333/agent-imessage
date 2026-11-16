@@ -20,12 +20,7 @@ export interface SpeechApiOptions {
 const DEFAULT_TIMEOUT_MS = 180_000
 const MAX_ERROR_BODY = 300
 
-/**
- * One audio-in / audio-out turn. The recording is handed to the model
- * unchanged (only the container is normalised when the channel produced
- * something the API cannot read), so the model hears the learner itself and
- * decides what to say — nothing here interprets or scores the speech.
- */
+/** Native audio understanding first; speech synthesis only after Agent work. */
 export class SpeechApi {
   private readonly base: string
   private readonly key: string
@@ -37,12 +32,12 @@ export class SpeechApi {
   }
 
   /** `clip` must already be wav or mp3; callers normalise other containers. */
-  async turn(clip: AudioClip, options: { model: string; voice: string; instructions?: string; context?: string | undefined }, signal: AbortSignal): Promise<{ audio: Buffer; text: string }> {
+  async turn(clip: AudioClip, options: { model: string; instructions?: string; context?: string | undefined }, signal: AbortSignal): Promise<{ text: string }> {
     signal.throwIfAborted()
     const format = sniffAudio(clip.bytes)
     if (format !== 'wav' && format !== 'mp3') throw new Error('Expected actual WAV or MP3 audio bytes')
     const content: unknown[] = [{ type: 'input_audio', input_audio: { data: clip.bytes.toString('base64'), format } }]
-    const messages: unknown[] = []
+    const messages: unknown[] = [{ role: 'system', content: 'Understand the real recording and provide the original Agent with the user intent and relevant audible details needed for their request. This is an internal listening result, not a user reply. You cannot execute tools; never claim that notes, files or other actions have been completed. Preserve relevant acoustic observations rather than only producing a transcript.' }]
     const instructions = options.instructions?.trim()
     if (instructions) messages.push({ role: 'system', content: instructions })
     if (options.context?.trim()) content.unshift({ type: 'text', text: options.context.trim() })
@@ -52,8 +47,8 @@ export class SpeechApi {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         model: options.model,
-        modalities: ['text', 'audio'],
-        audio: { voice: options.voice, format: 'mp3' },
+        modalities: ['text'],
+        store: false,
         messages,
       }),
     }, signal)
@@ -62,15 +57,36 @@ export class SpeechApi {
     const choices = Array.isArray(data.choices) ? data.choices : []
     const first: unknown = choices[0]
     const message = first && typeof first === 'object' ? (first as { message?: Record<string, unknown> }).message : undefined
-    const audio = message && typeof message.audio === 'object' && message.audio !== null ? message.audio as { data?: unknown; transcript?: unknown } : undefined
-    const encoded = typeof audio?.data === 'string' ? audio.data : ''
-    if (encoded.length > 28 * 1024 * 1024) throw new SpeechApiError(502, '返回音频超过大小限制')
-    if (!encoded) throw new SpeechApiError(502, '响应里没有音频数据，请确认模型支持音频输出')
-    // Only the transcript attached to this generated audio is reliable for
-    // conversation continuity and duplicate suppression; content may differ.
-    const text = typeof audio?.transcript === 'string' ? audio.transcript.trim() : ''
-    if (!text) throw new SpeechApiError(502, '响应里没有同一语音回复的文字稿，无法保留到原会话')
-    return { audio: Buffer.from(encoded, 'base64'), text }
+    const text = typeof message?.content === 'string' ? message.content.trim() : ''
+    if (!text) throw new SpeechApiError(502, '响应里没有原声听取结果，未生成最终语音')
+    return { text }
+  }
+
+  /** Synthesize the exact final Agent script, never the unexecuted user request. */
+  async speak(text: string, options: { model: string; voice: string }, signal: AbortSignal): Promise<Buffer> {
+    signal.throwIfAborted()
+    if (!text.trim() || text.length > 4096) throw new Error('最终答复为空或超过语音合成 4096 字符限制；未截断内容')
+    const response = await this.request('/audio/speech', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: options.model, voice: options.voice, input: text, response_format: 'mp3' }),
+    }, signal)
+    const reader = response.body?.getReader()
+    if (!reader) throw new Error('语音合成没有返回音频')
+    const chunks: Uint8Array[] = []; let size = 0
+    try {
+      while (true) {
+        signal.throwIfAborted()
+        const next = await reader.read()
+        if (next.done) break
+        size += next.value.byteLength
+        if (size > 20 * 1024 * 1024) throw new Error('生成语音超过 20 MiB')
+        chunks.push(next.value)
+      }
+    } finally { await reader.cancel() }
+    signal.throwIfAborted()
+    const audio = Buffer.concat(chunks)
+    if (sniffAudio(audio) !== 'mp3') throw new Error('语音合成未返回有效 MP3 音频')
+    return audio
   }
 
   private async request(path: string, init: RequestInit, signal: AbortSignal): Promise<Response> {
