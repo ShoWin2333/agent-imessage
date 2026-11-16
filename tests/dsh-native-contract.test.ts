@@ -312,3 +312,25 @@ it('revokes an unclaimed native admission before settling its timeout', async ()
     expect(inbox.has('unclaimed')).toBe(false)
   } finally {await session.close();vi.useRealTimers()}
 })
+
+it('keeps injected voice-delivery context from suppressing the next real request, live and on recovery',async()=>{
+  const f=runtime(),native=await f.host.open(),s=f.agent.session
+  const notice={...createUserMessage({content:[{type:'text',text:'prior speech delivery status'}],source:{kind:'dsh-channels'}}),id:'channels-voice-delivery:prior'} as any
+  s.append('agent/inbox/spliced',{target:'next-step',start:0,inserted:[notice]})
+  f.agent.followup.mockImplementation(input=>{
+    s.append('turn/start',{turn:1})
+    s.append('agent/inbox/spliced',{target:'next-step',start:0,removedCount:1,inserted:[]})
+    s.append('user/message',notice,{surfaceOp:'append'})
+    f.emit('agent/inbox/claimed',{agent:f.agent,message:notice,turn:1})
+    s.append('user/message',input,{surfaceOp:'append'})
+    f.emit('agent/inbox/claimed',{agent:f.agent,message:input,turn:1})
+  })
+  const op=native.submit('next-real-input','Continue the conversation',()=>{});await op.admitted
+  const assistant={turn:1,message:{id:'response',role:'assistant',source:{kind:'model',provider:'synthetic',model:'none'},content:[{type:'text',text:'The next real answer.'}]}} as any
+  s.append('assistant/message',assistant,{surfaceOp:'append'});f.emit('session/event',s,{type:'assistant/message',data:assistant})
+  s.append('turn/end',{turn:1,reason:{kind:'completed'}});f.emit('session/event',s,s.snapshotEvents().at(-1))
+  expect(await op.result).toEqual({text:'The next real answer.',reason:'completed'})
+  expect(resultFromEvents(s.snapshotEvents(),'next-real-input')).toEqual({text:'The next real answer.',reason:'completed'})
+  Object.assign(f.agent.inbox,{nextStep:[notice]})
+  await native.close();expect(f.dispose).toHaveBeenCalledOnce()
+})

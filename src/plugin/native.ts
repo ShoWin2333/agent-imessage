@@ -35,24 +35,31 @@ declare module '@deepseek-ai/dsh-llm' {
 export function textOf(content: readonly unknown[]): string {
   return content.flatMap(block => block && typeof block === 'object' && 'type' in block && block.type === 'text' && 'text' in block && typeof block.text === 'string' ? [block.text] : []).join('')
 }
+/** Our injected delivery context is not a new request or a reply leader. */
+function isVoiceDeliveryNotice(message: { id: string; source?: { kind: string } | undefined }): boolean {
+  return message.source?.kind === 'dsh-channels' && message.id.startsWith('channels-voice-delivery:')
+}
 /** Fold native log boundaries, including claimed input rejected before user/message. */
 export function resultFromEvents(events: readonly SessionEvent[], inputId: string): NativeResult | undefined {
   let currentTurn: number | undefined, ownedTurn: number | undefined
   let leader: string | undefined, suppressed = false
+  const notices = new Set<string>()
   const inbox: Record<string, string[]> = { 'next-turn': [], 'next-step': [] }
   let text = ''
   for (const event of events) {
     if (event.type === 'turn/start') { currentTurn = event.data.turn; leader = undefined }
     if (event.type === 'agent/inbox/spliced') {
+      for (const message of event.data.inserted) if (isVoiceDeliveryNotice(message)) notices.add(message.id)
       const pending = inbox[event.data.target]!
       const removed = pending.splice(event.data.start, event.data.removedCount ?? 0, ...event.data.inserted.map(m => m.id))
-      if (event.data.outcome !== 'canceled' && removed.length) leader ??= removed[0]
+      if (event.data.outcome !== 'canceled') leader ??= removed.find(id => !notices.has(id))
       if (removed.includes(inputId)) {
         if (event.data.outcome === 'canceled') return { text: '已取消。', reason: 'interrupted' }
         ownedTurn = currentTurn; suppressed = leader !== inputId
       }
     }
     if (event.type === 'user/message') {
+      if (isVoiceDeliveryNotice(event.data)) continue
       leader ??= event.data.id
       if (event.data.id === inputId) { ownedTurn = currentTurn; suppressed = leader !== inputId }
     }
@@ -181,7 +188,7 @@ export class DshNativeHost implements NativeHost {
     }
     const leaders = new Map<number, string>()
     const claimed = scoped.on('agent/inbox/claimed', payload => {
-      if (payload.agent !== agent) return
+      if (payload.agent !== agent || isVoiceDeliveryNotice(payload.message)) return
       // Every native claimant counts, including input from the host UI or scheduler.
       if (!leaders.has(payload.turn)) leaders.set(payload.turn, payload.message.id)
       const input = pending.get(payload.message.id)
@@ -386,7 +393,7 @@ export class DshNativeHost implements NativeHost {
         // A lifecycle handle is not exclusive input ownership. If desktop work
         // still uses this Agent, leave the handle with its native host context.
         const foreignQueued = [...(agent.inbox.nextTurn ?? []), ...(agent.inbox.nextStep ?? [])]
-          .some(message => !pending.has(message.id))
+          .some(message => !pending.has(message.id) && !isVoiceDeliveryNotice(message))
         const retainForDesktop = foreignQueued || agent.status === 'running' && !owner(agent, true)
         closing=true
         cancel()
