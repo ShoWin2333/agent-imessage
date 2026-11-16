@@ -36,7 +36,7 @@ export type Config = z.input<typeof pluginConfigSchema>
 // Native Settings owns revisions, persistence and volatile config publication.
 export const Config: typeof NativeConfig = NativeConfig
 const mediaReceiptSchema = z.object({ callId: z.string(), name: z.string(), bytes: z.number().int().nonnegative(), mode: z.enum(['image', 'file', 'voice']), delivery: z.enum(['sending', 'sent', 'uncertain']) })
-const receiptSchema = z.object({ media: z.array(mediaReceiptSchema).max(32).optional(), id: z.string(), inputId: z.string(), sessionId: z.string(), delivery: z.enum(['pending', 'sending', 'sent', 'uncertain']), result: z.object({ text: z.string(), reason: z.string(), suppressed: z.boolean().optional() }).optional() })
+const receiptSchema = z.object({ voice: z.object({ text: z.string(), callId: z.string() }).optional(), media: z.array(mediaReceiptSchema).max(32).optional(), id: z.string(), inputId: z.string(), sessionId: z.string(), delivery: z.enum(['pending', 'sending', 'sent', 'uncertain']), result: z.object({ text: z.string(), reason: z.string(), suppressed: z.boolean().optional() }).optional() })
 export const channelDomain = defineDomain({
   name: 'dsh_channels_v1', version: 1, tables: {
     bindings: domainTable(z.object({ scopeKey:z.string().regex(/^[a-f0-9]{64}$/).optional(),sessionId: z.string().optional(), receipts: z.array(receiptSchema), preferences:z.object({model:z.object({provider:z.string(),model:z.string()}).optional(),preset:z.string().optional()}).optional(), legacyIdentity: z.object({ key: z.string().regex(/^[a-f0-9]{64}$/), sessionIds: z.array(z.string()) }).optional() })),

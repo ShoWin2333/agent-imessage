@@ -28,15 +28,19 @@ const settings = (patch: Partial<VoiceSettings> = {}): VoiceSettings => ({
 
 const wav = Buffer.concat([Buffer.from('RIFF'), Buffer.alloc(4), Buffer.from('WAVEfmt '), Buffer.alloc(64)])
 
-const harness = (coach: VoiceCoach | undefined, channel: {nativeVoice?: boolean; supportsNativeVoice?: (media: {name: string}) => boolean} = {}) => {
+const harness = (coach: VoiceCoach | undefined, channel: {nativeVoice?: boolean; supportsNativeVoice?: (media: {name: string}) => boolean} = {}, options: { repeat?: boolean; finalText?: string } = {}) => {
+  const toolResults: Array<Record<string, unknown>> = []
   const state: {receipts: Array<{id: string}>; sessionId?: string} = { receipts: [] }
   const store = { read: () => state as never, write: async (value: unknown) => { Object.assign(state, value) } }
   const controller = new AbortController()
   const submit = vi.fn((id: string, _text: string, _progress: unknown, _interactions: unknown, _media: unknown, _stream: unknown, _notice: unknown, voice?: VoiceHandler) => ({ admitted: Promise.resolve(), result: Promise.resolve().then(async () => {
     if (!voice) return { text: 'agent reply', reason: 'ended' }
     try {
-      const value = JSON.parse(await voice({ inputId: id, sessionId: 'channels-voice-1', turn: 1, callId: 'listen-1', signal: controller.signal, current: () => !controller.signal.aborted, context: 'Project: English practice. Previous user: read this sentence. Current accompanying text.' }))
-      return { text: value.text, reason: 'ended' }
+      const request = { inputId: id, sessionId: 'channels-voice-1', turn: 1, callId: 'listen-1', signal: controller.signal, current: () => !controller.signal.aborted, context: 'Project: English practice. Previous user: read this sentence. Current accompanying text.' }
+      const replies = await Promise.all(options.repeat ? [voice(request), voice({ ...request, callId: 'listen-2' })] : [voice(request)])
+      const value = JSON.parse(replies[0]!)
+      toolResults.push(...replies.map(reply => JSON.parse(reply)))
+      return { text: options.finalText ?? value.text, reason: 'ended' }
     } catch (error) { return { text: `语音没能送出去：${String(error)}`, reason: 'ended' } }
   }) }))
   const host = {
@@ -54,13 +58,13 @@ const harness = (coach: VoiceCoach | undefined, channel: {nativeVoice?: boolean;
     async sendVoice(media: {name: string}) { sent.push(['voice', media.name]) },
     ...channel,
   }
-  return { bridge, message, sent, submit, state }
+  return { bridge, message, sent, submit, state, toolResults }
 }
 
-it('sends the recording to the audio model and plays its answer back', async () => {
+it('delivers speech and records its transcript/status without repeating it as a second reply', async () => {
   const fetch = speechFetch()
   vi.stubGlobal('fetch', fetch)
-  const { bridge, message, sent, submit } = harness(createVoiceCoach(settings(), 'sk-test'))
+  const { bridge, message, sent, submit, toolResults, state } = harness(createVoiceCoach(settings(), 'sk-test'))
   try {
     await bridge.receive({ ...message } as never)
     await bridge.drain()
@@ -74,7 +78,10 @@ it('sends the recording to the audio model and plays its answer back', async () 
   expect(body.messages.at(-1).content.at(-1).type).toBe('input_audio')
   // The answer goes out as voice, and the transcript is the text reply.
   expect(sent.filter(([kind]) => kind === 'voice')).toHaveLength(1)
-  expect(sent.find(([kind]) => kind === 'text')?.[1]).toContain('think')
+  expect(sent.filter(([kind]) => kind === 'text')).toHaveLength(0)
+  expect(toolResults[0]).toMatchObject({ heardBy: 'audio-model', text: expect.stringContaining('think'), delivery: 'sent', mode: 'voice' })
+  expect(state.receipts[0]).toMatchObject({ voice: { text: toolResults[0]!.text, callId: 'listen-1' }, result: { suppressed: true } })
+  expect(Buffer.from(body.messages.at(-1).content.at(-1).input_audio.data, 'base64')).toEqual(wav)
   // The same Agent handles the turn and provides relevant prior context.
   expect(submit).toHaveBeenCalledOnce()
   expect(body.messages.at(-1).content[0].text).toContain('Previous user')
@@ -95,12 +102,14 @@ it('reports the real reason when the model cannot answer', async () => {
 
 it('falls back to an audio file when the channel has no native voice', async () => {
   vi.stubGlobal('fetch', speechFetch())
-  const { bridge, message, sent } = harness(createVoiceCoach(settings(), 'sk-test'), { nativeVoice: false })
+  const { bridge, message, sent, toolResults } = harness(createVoiceCoach(settings(), 'sk-test'), { nativeVoice: false })
   try {
     await bridge.receive({ ...message } as never)
     await bridge.drain()
   } finally { await bridge.close() }
   expect(sent.some(([kind]) => kind === 'file')).toBe(true)
+  expect(sent.filter(([kind]) => kind === 'text')).toHaveLength(0)
+  expect(toolResults[0]).toMatchObject({ delivery: 'sent', mode: 'file', reason: expect.any(String) })
 })
 
 it('leaves voice to the Agent when speech is disabled', async () => {
@@ -200,13 +209,15 @@ it('does not accept a late provider reply after disconnect',async()=>{
 
 it('keeps a durable uncertain receipt and never retries an ambiguous voice upload',async()=>{
   vi.stubGlobal('fetch',speechFetch())
-  const {bridge,message,state}=harness(createVoiceCoach(settings(),'test'))
+  const {bridge,message,state,sent,toolResults}=harness(createVoiceCoach(settings(),'test'))
   const upload=vi.fn(async()=>{throw new Error('connection lost after upload')})
   try{
     await bridge.receive({...message,sendVoice:upload} as never);await bridge.drain()
     await bridge.receive({...message,sendVoice:upload} as never);await bridge.drain()
     expect(upload).toHaveBeenCalledOnce()
     expect(state.receipts[0]).toMatchObject({media:[{delivery:'uncertain',mode:'voice'}]})
+    expect(toolResults[0]).toMatchObject({ delivery: 'uncertain', text: expect.stringContaining('think') })
+    expect(sent.find(([kind])=>kind==='text')?.[1]).toContain('语音投递未确认')
   }finally{await bridge.close()}
 })
 
@@ -216,4 +227,41 @@ it('reports text-only provider responses as failure instead of pretending audio 
   try{await bridge.receive(message as never);await bridge.drain()}finally{await bridge.close()}
   expect(sent.some(([kind])=>kind==='voice'||kind==='file')).toBe(false)
   expect(sent.at(-1)?.[1]).toContain('没有音频数据')
+})
+
+
+it('shares repeated listening calls without another provider request or delivery',async()=>{
+  const fetch=speechFetch();vi.stubGlobal('fetch',fetch)
+  const {bridge,message,sent,toolResults}=harness(createVoiceCoach(settings(),'test'),{},{repeat:true})
+  try{await bridge.receive(message as never);await bridge.drain()}finally{await bridge.close()}
+  expect(fetch).toHaveBeenCalledOnce()
+  expect(sent).toHaveLength(1);expect(sent[0]![0]).toBe('voice')
+  expect(toolResults).toHaveLength(2);expect(toolResults[0]).toEqual(toolResults[1])
+})
+
+it('preserves the main Agent follow-up after successful speech delivery',async()=>{
+  vi.stubGlobal('fetch',speechFetch())
+  const {bridge,message,sent}=harness(createVoiceCoach(settings(),'test'),{},{finalText:'Would you like to try another example?'})
+  try{await bridge.receive(message as never);await bridge.drain()}finally{await bridge.close()}
+  expect(sent.map(([kind])=>kind)).toEqual(['voice','text'])
+  expect(sent[1]![1]).toBe('Would you like to try another example?')
+})
+
+it('waits for the final voice-turn answer instead of streaming a duplicate transcript',async()=>{
+  vi.stubGlobal('fetch',speechFetch())
+  const {bridge,message,sent,submit}=harness(createVoiceCoach(settings(),'test'))
+  const progressText=vi.fn(),completeText=vi.fn()
+  try{await bridge.receive({...message,progressText,completeText} as never);await bridge.drain()}finally{await bridge.close()}
+  expect(submit.mock.calls[0]![5]).toBeUndefined()
+  expect(progressText).not.toHaveBeenCalled();expect(completeText).not.toHaveBeenCalled()
+  expect(sent.map(([kind])=>kind)).toEqual(['voice'])
+})
+
+
+it('does not retry a failed audio request on duplicate concurrent tool calls',async()=>{
+  const fetch=speechFetch({status:400});vi.stubGlobal('fetch',fetch)
+  const {bridge,message,sent}=harness(createVoiceCoach(settings(),'test'),{},{repeat:true})
+  try{await bridge.receive(message as never);await bridge.drain()}finally{await bridge.close()}
+  expect(fetch).toHaveBeenCalledOnce()
+  expect(sent).toHaveLength(1);expect(sent[0]![0]).toBe('text');expect(sent[0]![1]).toContain('400')
 })

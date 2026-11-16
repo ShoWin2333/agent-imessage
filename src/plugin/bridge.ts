@@ -8,6 +8,7 @@ import type { ApprovalOutcome } from '@deepseek-ai/dsh-user-approval'
 import type { ApprovalInteraction, InteractionHandlers } from './interaction-types.js'
 import type { ChannelMessage } from '../channels/types.js'
 import type { MediaHandler, MediaInteraction, MediaDeliveryResult, StoredMediaReceipt } from './media-delivery.js'
+import { voiceAwareResult } from './voice/reply.js'
 import type { VoiceCoach } from './voice/index.js'
 import type { VoiceHandler } from './voice/tool.js'
 import type { AudioConversionServices } from './voice/audio.js'
@@ -36,6 +37,7 @@ export interface Receipt {
   sessionId: string
   delivery: 'pending' | 'sending' | 'sent' | 'uncertain'
   result?: NativeResult | undefined
+  voice?: { text: string; callId: string } | undefined
   media?: StoredMediaReceipt[] | undefined
 }
 export interface BindingState {scopeKey?:string|undefined; preferences?:NativePreferences|undefined; sessionId?: string | undefined; receipts: Receipt[]; legacyIdentity?: LegacySessionIdentity | undefined }
@@ -124,7 +126,7 @@ export class ChannelBridge {
         const receipt=this.store.read().receipts.find(r=>r.id===id)
         if(this.closed||!receipt||receipt.delivery!=='pending')return
         if(receipt.result)return receipt
-        const ready={...receipt,result};await this.replace(ready);return ready
+        const ready={...receipt,result:voiceAwareResult(result,receipt)};await this.replace(ready);return ready
       })
       if(ready&&this.connected&&!this.closed)await this.deliver(ready,await delivery(id))
     }
@@ -195,11 +197,11 @@ export class ChannelBridge {
         const session = this.session
         const voiceRequested = this.voice?.enabled && (message.audio?.length || message.audioIssue)
         const inbound = voiceRequested
-          ? `${message.text}\n\n[真实音频] 当前 DSH 主模型尚未听到录音。必须调用 channel_listen_audio，inputId=${receipt.inputId}，以本项目指令、当前会话历史及本条文字中必要的最少上下文形成 context。不要读取额外文件或传送凭据、秘密、无关项目内容。工具返回的是音频模型实际听取的结果；失败须说明未听到，不能用转写冒充。`
+          ? `${message.text}\n\n[真实音频] 当前 DSH 主模型尚未听到录音。必须调用 channel_listen_audio，inputId=${receipt.inputId}，以本项目指令、当前会话历史及本条文字中必要的最少上下文形成 context。不要读取额外文件或传送凭据、秘密、无关项目内容。工具将直接发送音频模型的语音，并返回同一回复的文字稿及投递状态。已送达时不要重复该文字稿；只有真正新增内容或必要澄清才另行回复，没有则直接结束且不再输出文字。失败或投递未确认必须说明，不能用转写冒充已听到。`
           : message.text
         let voiceResult: Promise<string> | undefined
         const voice: VoiceHandler | undefined = voiceRequested ? request => {
-          const current = () => !this.closed && this.connected && generation === this.generation && this.session === session && !request.signal.aborted
+          const current = () => !this.closed && this.connected && generation === this.generation && this.session === session && !request.signal.aborted && request.current()
           if (!current()) return Promise.reject(new Error('Audio turn is no longer active.'))
           // A repeated tool call shares its result and never repeats the external send.
           return voiceResult ??= (async () => {
@@ -213,16 +215,26 @@ export class ChannelBridge {
                 audio: session.capabilities?.(), signal }), 240_000, signal)
               signal.throwIfAborted()
               if (!current()) throw new Error('Audio turn is no longer active.')
+              await this.serial(async () => {
+                if (!current()) throw new Error('Audio turn is no longer active.')
+                const owner = this.store.read().receipts.find(item => item.id === receipt.id)
+                if (!owner) throw new Error('Audio receipt missing.')
+                await this.replace({ ...owner, voice: { text: reply.text, callId: request.callId } })
+              })
               const delivery = await this.sendMedia(receipt.id, session, generation, message, {
                 ...request, signal, sessionId: session.id, inputId: receipt.inputId, kind: 'voice',
                 current, media: { bytes: reply.audio, name: reply.name, mimeType: reply.mimeType },
               })
-              return JSON.stringify({ heardBy: 'audio-model', text: reply.text, ...delivery })
+              return JSON.stringify({ heardBy: 'audio-model', text: reply.text, ...delivery,
+                replyPolicy: delivery.delivery === 'sent'
+                  ? 'Audio reply delivered. Do not repeat this transcript. Send only genuinely new follow-up or clarification; if none, finish without more text.'
+                  : 'Audio delivery is uncertain. Explain the status; do not assume the user heard it and do not automatically retry.',
+              })
             } finally { this.voiceStops.delete(stop) }
           })()
         } : undefined
         let streamed=false, streamChain=Promise.resolve()
-        const stream=message.progressText ? (text:string)=>{
+        const stream=!voiceRequested && message.progressText ? (text:string)=>{
           streamChain=streamChain.then(async()=>{
             if(this.closed||generation!==this.generation)return
             if(!streamed){await this.serial(async()=>{const current=this.store.read().receipts.find(r=>r.id===receipt.id);if(current?.delivery!=='pending')throw new Error('Delivery already claimed');await this.replace({...current,delivery:'sending'})});streamed=true}
@@ -247,8 +259,9 @@ export class ChannelBridge {
     } finally { this.receiving.delete(message.id) }
   }
   private async execute(resultPromise: Promise<NativeResult>, receipt: Receipt, message: ChannelMessage, streamed:()=>Promise<boolean> = async()=>false): Promise<void> {
-    const result = await message.responding(() => resultPromise)
+    const completed = await message.responding(() => resultPromise)
        .catch(error => { this.log('execution-interrupted', error); return { text: 'DSH 执行未确认完成；请检查会话。未自动重跑。', reason: 'interrupted' } })
+    const result = voiceAwareResult(completed, this.store.read().receipts.find(item => item.id === receipt.id))
     let started=false,failed=false
     try{started=await streamed()}catch(error){this.log('stream-start-failed',error);started=true;failed=true}
     const ready = { ...receipt, result, delivery:started?'sending' as const:'pending' as const }
@@ -303,7 +316,7 @@ export class ChannelBridge {
   private async replace(receipt: Receipt): Promise<void> {
     const state = this.store.read()
     const previous = state.receipts.find(r => r.id === receipt.id)
-    const merged = { ...receipt, ...(receipt.media === undefined && previous?.media !== undefined ? { media: previous.media } : {}) }
+    const merged = { ...receipt, ...(receipt.voice === undefined && previous?.voice !== undefined ? { voice: previous.voice } : {}), ...(receipt.media === undefined && previous?.media !== undefined ? { media: previous.media } : {}) }
     await this.store.write({ ...state, receipts: prune([...state.receipts.filter(r => r.id !== receipt.id), merged]) })
   }
   private async deliver(receipt: Receipt, message: ChannelMessage): Promise<void> {
