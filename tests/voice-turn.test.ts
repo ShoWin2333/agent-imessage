@@ -265,3 +265,11 @@ it('does not retry a failed audio request on duplicate concurrent tool calls',as
   expect(fetch).toHaveBeenCalledOnce()
   expect(sent).toHaveLength(1);expect(sent[0]![0]).toBe('text');expect(sent[0]![1]).toContain('400')
 })
+
+it('requires the transcript of the actual speech rather than unrelated message text',async()=>{
+  vi.stubGlobal('fetch',vi.fn(async()=>new Response(JSON.stringify({choices:[{message:{audio:{data:replyAudio.toString('base64')},content:'Unrelated text is not the speech transcript.'}}]}))))
+  const {bridge,message,sent,toolResults}=harness(createVoiceCoach(settings(),'test'))
+  try{await bridge.receive(message as never);await bridge.drain()}finally{await bridge.close()}
+  expect(toolResults).toHaveLength(0)
+  expect(sent).toHaveLength(1);expect(sent[0]![0]).toBe('text');expect(sent[0]![1]).toContain('没有同一语音回复的文字稿')
+})

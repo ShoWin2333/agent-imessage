@@ -66,8 +66,10 @@ export class SpeechApi {
     const encoded = typeof audio?.data === 'string' ? audio.data : ''
     if (encoded.length > 28 * 1024 * 1024) throw new SpeechApiError(502, '返回音频超过大小限制')
     if (!encoded) throw new SpeechApiError(502, '响应里没有音频数据，请确认模型支持音频输出')
-    const text = typeof audio?.transcript === 'string' ? audio.transcript.trim()
-      : typeof message?.content === 'string' ? message.content.trim() : ''
+    // Only the transcript attached to this generated audio is reliable for
+    // conversation continuity and duplicate suppression; content may differ.
+    const text = typeof audio?.transcript === 'string' ? audio.transcript.trim() : ''
+    if (!text) throw new SpeechApiError(502, '响应里没有同一语音回复的文字稿，无法保留到原会话')
     return { audio: Buffer.from(encoded, 'base64'), text }
   }
 
