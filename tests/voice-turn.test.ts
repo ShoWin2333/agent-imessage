@@ -105,3 +105,14 @@ it('synthesizes only the terminal Agent answer, excluding pre-tool claims',async
   vi.stubGlobal('fetch',api({onSpeech:async text=>{expect(text).toBe('The write failed. No note was saved.')}}))
   const f=harness({mode:'voice',finalText:'I saved your note before checking. The write failed. No note was saved.',terminalText:'The write failed. No note was saved.'});await run(f);expect(f.sent.map(([kind])=>kind)).toEqual(['voice'])
 })
+
+it('can cancel while the post-delivery session receipt flush is stalled',async()=>{
+  vi.stubGlobal('fetch',api());const f=harness({mode:'voice'});let release!:()=>void
+  f.recordVoiceReply.mockImplementation(async()=>new Promise<void>(resolve=>{release=resolve}))
+  try{
+    await f.bridge.receive(f.message as never);await vi.waitFor(()=>expect(f.recordVoiceReply).toHaveBeenCalledOnce())
+    await f.bridge.receive({...f.message,id:'cancel-flush',text:'/cancel'} as never);await f.bridge.drain()
+    expect(f.sent.filter(([kind])=>kind==='voice')).toHaveLength(1)
+    release();await Promise.resolve();expect(f.sent.filter(([kind])=>kind==='voice')).toHaveLength(1)
+  }finally{await f.bridge.close()}
+})

@@ -276,7 +276,7 @@ export class ChannelBridge {
         kind: 'voice', media: { bytes: reply.audio, name: reply.name, mimeType: reply.mimeType },
       })
       // inject() queues context without waking a second Agent turn.
-      await session.recordVoiceReply(receipt.inputId, { text: reply.text, delivery })
+      await bounded(session.recordVoiceReply(receipt.inputId, { text: reply.text, delivery }), 30_000, signal)
       return delivery.delivery === 'sent' ? { ...result, text: '', suppressed: true } : result
     } catch (error) {
       if (this.closed || generation !== this.generation) return { ...result, text: '', suppressed: true }
