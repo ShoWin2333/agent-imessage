@@ -1,11 +1,14 @@
 import type { ApprovalPromptOutcome } from './approval.js'
 import type { OutboundMediaPayload } from '../media.js'
 import type { RuntimeView } from '../types.js'
+import type { AudioClip } from '../plugin/voice/types.js'
 
 /** Text-only inbound message accepted by the security filter. */
 export interface ChannelMessage {
   /** False when the provider cannot deliver native voice messages. */
   nativeVoice?: boolean
+  /** Inbound audio kept in memory for speech analysis; never a second disk read. */
+  audio?: readonly AudioClip[]
   /** Check the actual payload before native delivery; incompatible audio must use file delivery. */
   supportsNativeVoice?(media: OutboundMediaPayload): boolean
   /** QQ-only native command and incremental presentation capabilities. */

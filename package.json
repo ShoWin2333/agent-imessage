@@ -1,6 +1,6 @@
 {
   "name": "@showin2333/dsh-plugin-channels",
-  "version": "1.1.2",
+  "version": "1.2.0",
   "description": "DeepSeek Harness Messaging Channels for iMessage, Telegram, Weixin and QQ Bot",
   "type": "module",
   "license": "MIT",
@@ -93,6 +93,7 @@
     "zod": "4.6.6"
   },
   "optionalDependencies": {
+    "silk-wasm": "3.7.1",
     "@tencent-connect/qqbot-connector": "1.2.0",
     "@spectrum-ts/core": "12.7.0",
     "@spectrum-ts/imessage": "12.7.0",

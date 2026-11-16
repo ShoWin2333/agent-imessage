@@ -24,6 +24,8 @@ import {registerQQPresented} from './qqbot-presented.js'
 import {QQCommands} from './qqbot-commands.js'
 import type {AgentGroup} from '../shared/agents.js'
 import { sanitizeDetail, withDeadline, type ChannelLog } from '../shared/log.js'
+import { createVoiceCoach, type VoiceCoach } from './voice/index.js'
+import { DEFAULT_VOICE_CONFIG, type VoiceConfig } from './voice/settings.js'
 
 export const name = 'dsh-channels'
 export const inject = ['agents', 'llm', 'sessions', 'sessionPersistence', 'agentPresets', 'agentDefaultModel', 'permissionPresets', 'credentials', 'storageDomain', 'tools']
@@ -43,13 +45,38 @@ export const channelDomain = defineDomain({
 })
 
 /** Loading or saving disabled bindings never resolves credentials or starts consumers. */
-export async function apply(ctx: Context, config: Config | { bindings: Volatile<Binding[]>; agents?:Volatile<AgentGroup[]> } = {}): Promise<void> {
+export async function apply(ctx: Context, config: Config | { bindings: Volatile<Binding[]>; agents?:Volatile<AgentGroup[]>; voice?:Volatile<VoiceConfig> } = {}): Promise<void> {
   const log = ctx.logger('dsh-channels')
   // Provider errors can embed content or credentials; log only identity and safe system codes.
   const report = (message: string, details?: unknown) => { log.warn(message); if (details !== undefined) log.warn(sanitizeDetail(details)) }
   const channelLog: ChannelLog = (event, detail) => report(event, detail)
-  const read = () => pluginConfigSchema.parse({ bindings: config.bindings && 'get' in config.bindings ? config.bindings.get() : config.bindings ?? [], agents:config.agents && 'get' in config.agents ? config.agents.get() : config.agents ?? [] }).bindings
+  // Native Settings publishes either a plain value or a volatile handle.
+  const unwrap = <T>(value: unknown): T | undefined => {
+    if (value === undefined || value === null) return undefined
+    if (typeof value === 'object' && 'get' in (value as object)) return (value as { get(): T }).get()
+    return value as T
+  }
+  const read = () => pluginConfigSchema.parse({
+    bindings: unwrap<Binding[]>(config.bindings) ?? [],
+    agents: unwrap<AgentGroup[]>(config.agents) ?? [],
+    voice: unwrap<VoiceConfig>((config as { voice?: unknown }).voice) ?? DEFAULT_VOICE_CONFIG,
+  })
   const initial = read()
+  // Deployment-wide speech settings; replaced on every accepted configuration.
+  let voiceSettings: VoiceConfig = initial.voice
+  /** Resolve the API key on demand so a rotated credential needs no code change. */
+  const activateVoice = async (): Promise<VoiceCoach> => {
+    const settings = voiceSettings
+    if (!settings.enabled || !settings.credentialRef) return createVoiceCoach(settings, undefined)
+    try {
+      const secret = await ctx.credentials.resolve(credentialRef(settings.credentialRef))
+      return createVoiceCoach(settings, secret?.value)
+    } catch {
+      // A missing key disables speech; the channel itself must keep working.
+      return createVoiceCoach(settings, undefined)
+    }
+  }
+  const initialBindings = initial.bindings
   const domain = await ctx.storageDomain.open(channelDomain)
   let stopped = false
   const manager = new ChannelManager(async (raw, signal, stateChanged) => {
@@ -95,6 +122,8 @@ export async function apply(ctx: Context, config: Config | { bindings: Volatile<
     if (!table.get(key)) await wait(table.put(key, { receipts: [] }))
     const scopeKey=table.get(key)?.scopeKey??key
     ensureActive()
+    // One coach per activation: it holds the resolved key and current model names.
+    const coach = await wait(activateVoice())
     let adapter: ChannelAdapter | undefined
     // Shared conversations belong to the application, not this reloadable
     // transport plugin. Preserve the caller's service isolation labels while
@@ -102,7 +131,7 @@ export async function apply(ctx: Context, config: Config | { bindings: Volatile<
     const lifetime = ctx.root.extend({ [Context.isolate]: ctx[Context.isolate] })
     const bridge = new ChannelBridge(new DshNativeHost(ctx, binding.cwd, binding.permissionPreset, scopeKey, binding.model, table.get(key)?.legacyIdentity, binding.channel.kind, lifetime, binding.channel.kind==='qqbot'&&binding.channel.visionProvider&&binding.channel.visionModel?{provider:binding.channel.visionProvider,model:binding.channel.visionModel}:undefined,binding.channel.kind==='qqbot'?binding.channel:{}), {
       read: () => table.get(key)!, write: value => table.put(key, value),
-    }, binding.channel.kind==='qqbot'?new QQCommands(ctx,{binding:scopeKey,legacyIdentity:table.get(key)?.legacyIdentity,model:binding.model,options:binding.channel,lifetime}):undefined, channelLog)
+    }, binding.channel.kind==='qqbot'?new QQCommands(ctx,{binding:scopeKey,legacyIdentity:table.get(key)?.legacyIdentity,model:binding.model,options:binding.channel,lifetime}):undefined, channelLog, coach)
     bridge.setConnected(false)
     let unregisterExternal:(()=>void)|undefined
     let unregisterApprovals: (() => void) | undefined
@@ -201,10 +230,17 @@ export async function apply(ctx: Context, config: Config | { bindings: Volatile<
   // The loader event is an optional accelerator; the value is always re-read from
   // the volatile config, so a Host that stops emitting it only loses immediacy.
   const reload = (event: string) => {
-    try { const next = read(); void manager.update(next).catch(error => channelLog(`${event}-failed`, error)) }
+    try {
+      const next = read()
+      // Speech settings are not part of a binding fingerprint; restart every
+      // consumer so a new key or model takes effect without a host restart.
+      const speechChanged = JSON.stringify(next.voice) !== JSON.stringify(voiceSettings)
+      voiceSettings = next.voice
+      void manager.update(next.bindings, speechChanged).catch(error => channelLog(`${event}-failed`, error))
+    }
     catch { manager.rejectConfiguration() }
   }
   ctx.on('loader/volatile-update', () => reload('config-update'))
   ctx.on('app-boot/config-reload' as never, () => reload('config-reload'))
-  await manager.update(initial)
+  await manager.update(initialBindings)
 }

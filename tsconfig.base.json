@@ -16,6 +16,9 @@
     "rootDir": "src",
     "outDir": "lib/types",
     "jsx": "react-jsx",
-    "lib": ["ES2024", "DOM", "DOM.Iterable"]
+    "lib": ["ES2024", "DOM", "DOM.Iterable"],
+    // TypeScript 6 does not include @types packages implicitly; the host half
+    // relies on Node globals (Buffer, NodeJS, node: builtins) throughout.
+    "types": ["node"]
   }
 }

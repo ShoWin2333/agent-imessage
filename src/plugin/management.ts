@@ -1,5 +1,6 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
+import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import type { Binding } from './index.js'
 import type { TelegramRetryReason } from '../types.js'
 import { withDeadline } from '../shared/log.js'
@@ -48,12 +49,15 @@ export class ChannelManager {
   status(): { bindings: BindingStatus[]; configError?: string } {
     return { ...(this.configError ? { configError: this.configError } : {}), bindings: this.desired.map(b => ({ ...(this.states.get(b.id) ?? { id: b.id, phase: 'stopped' }) })) }
   }
-  update(bindings: Binding[]): Promise<void> {
+  update(bindings: Binding[], restartAll = false): Promise<void> {
     if (this.closed) return Promise.reject(new Error('Channel manager is closed'))
     this.configError = undefined
     this.desired = structuredClone(bindings)
     this.generation += 1
     for (const [id, item] of this.live) {
+      // Deployment-wide settings (speech) are not part of a binding fingerprint,
+      // so a change to them restarts every live consumer explicitly.
+      if (restartAll) { item.abort.abort(); continue }
       const next = bindings.find(b => b.id === id && b.enabled)
       if (!next || fingerprint(next) !== item.fingerprint) item.abort.abort()
     }
@@ -125,11 +129,30 @@ export class ChannelManager {
 
 /** Read-only status exported through the host's native Remote gateway. */
 export class ChannelsController extends TypertRemoteService {
-  constructor(ctx: Context, private readonly manager: ChannelManager) { super(ctx, 'channelsController', { namespace: 'channels' }) }
+  constructor(private readonly host: Context, private readonly manager: ChannelManager) { super(host, 'channelsController', { namespace: 'channels' }) }
   @Remote('status')
   status(): { bindings: BindingStatus[]; configError?: string } { return this.manager.status() }
   @Remote('bindings')
   bindings(): Binding[] { return this.manager.bindings() }
+  /**
+   * Speech keys are write-only over the wire: the panel stores one and only ever
+   * reads back whether it exists, so a key never travels back to the browser.
+   */
+  @Remote('voiceKey')
+  async voiceKey(reference: string, value: string): Promise<void> {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(reference)) throw new Error('Invalid credential reference')
+    if (!value.trim()) throw new Error('The API key is empty')
+    await this.host.credentials.set(credentialRef(reference), value.trim())
+    // A coach captures the key at activation, so a freshly saved or rotated key
+    // must restart every live consumer instead of silently staying inert.
+    await this.manager.update(this.manager.bindings(), true)
+  }
+  @Remote('voiceKeyStatus')
+  async voiceKeyStatus(reference: string): Promise<{ configured: boolean }> {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(reference)) return { configured: false }
+    const info = await this.host.credentials.describe(credentialRef(reference))
+    return { configured: info.configured }
+  }
   /** Local extension point for same-process consumers; not part of the remote wire. */
   subscribe(listener: () => void): () => void { return this.manager.subscribe(listener) }
   /** Push lifecycle transitions instead of making the panel poll. */

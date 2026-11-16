@@ -4,3 +4,5 @@ coverage/
 *.tgz
 .DS_Store
 .research/
+# Local type-only stand-in for @deepseek-ai/dsh-fs (ships inside the desktop app archive).
+.shim/

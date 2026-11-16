@@ -52,7 +52,10 @@ export class QQBotAdapter implements ChannelAdapter {
       if(m.content.trim()==='/bot-version'){await message.send(`Messaging Channels ${QQBOT_VERSION} · Tencent qqbot-nodejs 1.0.5 · reference dsh-qqbot 0.5.5`);return}
       if(m.content.trim()==='/bot-me'){await message.send(`User OpenID: ${m.senderId}`);return}
       // Preserve exact slash commands and approval credentials; envelopes are task content only.
-      if(!/^\/(approve|deny|answer|new|reset|clear|compact|model|preset|stop|cancel|status|help|bot-status|bot-help|bot-settings)(?:\s|$)/.test(m.content.trim()))message.text=await this.body(ctx,controller.signal)
+      if(!/^\/(approve|deny|answer|new|reset|clear|compact|model|preset|stop|cancel|status|help|bot-status|bot-help|bot-settings)(?:\s|$)/.test(m.content.trim())){
+        const body=await this.body(ctx,controller.signal);message.text=body.text
+        if(body.audio.length)message.audio=body.audio
+      }
       if(message.text.trim())await this.receive(message)
     })
     bot.on('interaction',async(_ctx,event)=>{
@@ -91,8 +94,9 @@ export class QQBotAdapter implements ChannelAdapter {
     const attachments=ctx.message.attachments??[]
     const quoted=ctx.state.quote?.attachments??[]
     const raw=[...attachments,...quoted.map(a=>({content_type:a.contentType??'',filename:a.filename??'attachment',url:a.url??'',size:0,asr_refer_text:a.asrText}))]
-    parts.push(...await receiveAttachments(raw,this.credential.cwd,signal))
-    return parts.filter(Boolean).join('\n\n')
+    const received=await receiveAttachments(raw,this.credential.cwd,signal)
+    parts.push(...received.parts)
+    return {text:parts.filter(Boolean).join('\n\n'),audio:received.audio}
   }
   async approvalMessage(){
     if(this.state.phase!=='listening')throw new Error('QQ is not connected')

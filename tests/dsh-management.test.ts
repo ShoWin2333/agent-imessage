@@ -4,6 +4,7 @@ import {volatileForm,plainConfig,projectForm} from '../node_modules/@deepseek-ai
 import { Config } from '../src/plugin/schema.js'
 import { ChannelManager, ChannelsController, ActivationCleanupError } from '../src/plugin/management.js'
 import { bindingKey, pluginConfigSchema, apply } from '../src/plugin/index.js'
+import { DEFAULT_VOICE_CONFIG } from '../src/plugin/voice/settings.js'
 import { legacyCheckpoint, wasLegacyMessage } from '../src/plugin/legacy-checkpoint.js'
 import type { Context } from '@deepseek-ai/cordis'
 const binding = (id = 'a', enabled = true) => pluginConfigSchema.parse({ bindings: [{ id, enabled, cwd:'/tmp', channel:{id,kind:'telegram',botId:id === 'a' ? '123' : '789',ownerUserId:'456'}, credentialRef:'SYNTHETIC_TOKEN',permissionPreset:'workspace-write' }] }).bindings[0]!
@@ -52,7 +53,7 @@ it('native schema and browser JSON rehydration accept omitted optional objects a
 it('survives the actual native Settings schema projection and second wire serialization',()=>{
   const form=volatileForm(Config)!
   const browser=new Schema(JSON.parse(JSON.stringify(form)))
-  expect(browser(projectForm(form,plainConfig(Config({}))))).toEqual({bindings:[],agents:[]})
+  expect(browser(projectForm(form,plainConfig(Config({}))))).toEqual({bindings:[],agents:[],voice:DEFAULT_VOICE_CONFIG})
   const b=binding('a',false)
   expect(browser({bindings:[b]}).bindings).toEqual([b])
 })

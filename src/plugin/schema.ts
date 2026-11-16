@@ -3,6 +3,7 @@ import { absoluteWorkspacePattern } from './workspace-path.js'
 import { CREDENTIAL_RE, IDENTIFIER_RE, ORIGIN_RE, PHONE_RE, TELEGRAM_ID_RE } from '../shared/rules.js'
 import {MAX_AGENTS} from '../shared/agents.js'
 import {MAX_BINDINGS} from '../shared/rules.js'
+import { DEFAULT_VOICE_CONFIG } from './voice/settings.js'
 
 const id = () => Schema.string().pattern(IDENTIFIER_RE).required()
 const text = () => Schema.string().min(1).required()
@@ -27,4 +28,13 @@ const binding = Schema.object({
 // Keep it declarative: executable transform callbacks do not survive that round trip.
 const bindings = Schema.array(binding).max(MAX_BINDINGS).default([]).volatile()
 const agents=Schema.array(Schema.object({id:id(),name:Schema.string().min(1).max(80).required(),cwd:Schema.string().pattern(absoluteWorkspacePattern).required(),bindingIds:Schema.array(id()).max(32).default([])})).max(MAX_AGENTS).default([]).volatile()
-export const Config: Schema = Schema.object({ bindings, agents })
+// One provider account serves every binding, so speech settings are deployment-wide.
+const voice = Schema.object({
+  enabled: Schema.boolean().default(false),
+  credentialRef: Schema.string().pattern(/^$|^[A-Za-z_][A-Za-z0-9_]*$/).default(''),
+  baseURL: Schema.string().pattern(ORIGIN_RE).default('https://api.openai.com/v1'),
+  model: Schema.string().pattern(/^[A-Za-z0-9._:-]{1,80}$/).default('gpt-audio'),
+  voice: Schema.string().pattern(/^[A-Za-z0-9._-]{1,32}$/).default('alloy'),
+  instructions: Schema.string().max(4000).default(''),
+}).default(DEFAULT_VOICE_CONFIG).volatile()
+export const Config: Schema = Schema.object({ bindings, agents, voice })

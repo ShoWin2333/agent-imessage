@@ -10,9 +10,18 @@ export interface Binding {
   model?: {provider:string;model:string;reasoningEffort?:string}
 }
 export type {AgentGroup} from '../shared/agents.js'
-export interface ChannelConfig {bindings?:Binding[];agents?:AgentGroup[]}
+/** Deployment-wide speech settings; one provider account serves every binding. */
+export interface VoiceConfig {
+  enabled: boolean
+  credentialRef: string
+  baseURL: string
+  model: string
+  voice: string
+  instructions: string
+}
+export interface ChannelConfig {bindings?:Binding[];agents?:AgentGroup[];voice?:VoiceConfig}
 export interface FormSnapshot {status:string;value?:ChannelConfig;revision?:number;writable:boolean}
-export type ConfigMutation={op:'set';path:['bindings'];value:Binding[]}|{op:'set';path:['agents'];value:AgentGroup[]}
+export type ConfigMutation={op:'set';path:['bindings'];value:Binding[]}|{op:'set';path:['agents'];value:AgentGroup[]}|{op:'set';path:['voice'];value:VoiceConfig}
 export interface ConfigForm {
   getSnapshot():FormSnapshot
   subscribe(listener:()=>void):()=>void
@@ -32,7 +41,13 @@ export interface PermissionOption {value:string;name:string;description?:string}
 export interface PermissionCatalog {options:PermissionOption[];defaultOptions:PermissionOption[];defaultPreset:string}
 /** Read-only Host catalog used by the official permission pickers. */
 export interface PermissionApi {catalog():Promise<Result<PermissionCatalog>>}
-export interface ChannelsApi {status():Promise<Result<StatusFrame>>;statusStream(signal?:AbortSignal):AsyncIterable<StatusFrame>}
+export interface ChannelsApi {
+  status():Promise<Result<StatusFrame>>
+  statusStream(signal?:AbortSignal):AsyncIterable<StatusFrame>
+  /** Store the speech API key in the Host credential store; the value never returns. */
+  voiceKey?(reference:string,value:string):Promise<Result<void>>
+  voiceKeyStatus?(reference:string):Promise<Result<{configured:boolean}>>
+}
 export interface ClientLocale {
   bind(ns:string):(key:string)=>string
   register(ns:string,locale:'en'|'zh',dict:Record<string,string>):()=>void

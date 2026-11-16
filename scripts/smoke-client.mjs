@@ -24,5 +24,7 @@ assert.equal(registration.options.id,'dsh-channels')
 const markup=renderToStaticMarkup(React.createElement(registration.component,{...registration.options.inject(),view:'page',form:undefined}))
 for(const word of ['iMessage','Telegram','微信','新增 Agent','先新增 Agent'])assert.ok(markup.includes(word),`Missing rendered control ${word}`)
 for(const word of ['Discord','Feishu','飞书'])assert.ok(!markup.includes(word),`Retired channel in browser artifact: ${word}`)
+// The speech settings section is part of the shipped bundle, not just the sources.
+for(const word of ['语音对答','音频模型','API Key（只写不读）','保存密钥'])assert.ok(markup.includes(word),`Missing rendered speech control ${word}`)
 await dispose()
 console.log('Built browser module renders the real management controls without globals, network or writes.')

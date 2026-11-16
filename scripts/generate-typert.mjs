@@ -65,6 +65,9 @@ export declare function Remote(options: RemoteOptions): RemoteDecorator
     skipLibCheck: true,
     experimentalDecorators: false,
     lib: ['ES2024', 'DOM', 'DOM.Iterable'],
+    // TypeScript 6 stopped including @types packages implicitly; the host half
+    // uses Node globals in every module that touches media or subprocesses.
+    types: ['node'],
   }
   writeFileSync(join(packageRoot, 'tsconfig.json'), `${JSON.stringify({
     compilerOptions: { ...compilerOptions, composite: true, noEmit: true },

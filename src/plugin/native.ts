@@ -293,6 +293,21 @@ export class DshNativeHost implements NativeHost {
     return {
       id: agent.id,
       isLive,
+      // Speech decoding must use the same composed capabilities as every other
+      // subprocess in this plugin; the plugin host has none of its own.
+      capabilities: () => {
+        const presets = this.ctx.agentPresets
+        const subprocess = presets.serviceFor(agent, 'subprocess')
+        const sandbox = presets.serviceFor(agent, 'sandbox')
+        const policy = presets.serviceFor(agent, 'sandboxPolicy')?.resolve({ session: agent.session })
+        if (!subprocess && !policy) return undefined
+        return {
+          cwd: this.cwd,
+          ...(subprocess ? { subprocess } : {}),
+          ...(sandbox ? { sandbox } : {}),
+          ...(policy ? { policy } : {}),
+        }
+      },
       submit: (id, text, progress, interactions, media, stream, notice) => {
         let rejectResult!: (reason: unknown) => void
         const result = new Promise<NativeResult>((resolve, reject) => {

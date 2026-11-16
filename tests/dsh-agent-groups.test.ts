@@ -2,6 +2,7 @@ import {expect,it,vi} from 'vitest'
 import Schema from '@deepseek-ai/schemastery'
 import {Config} from '../src/plugin/schema.js'
 import {pluginConfigSchema} from '../src/plugin/config.js'
+import {DEFAULT_VOICE_CONFIG} from '../src/plugin/voice/settings.js'
 import {bindingKey,legacyBindingKey} from '../src/plugin/identity.js'
 import {resolveAgentGroups,agentGroupIssue,type AgentGroup} from '../src/shared/agents.js'
 import {ChannelManager} from '../src/plugin/management.js'
@@ -50,7 +51,7 @@ it('enforces the group limit including unassigned legacy bindings',()=>{
  expect(pluginConfigSchema.safeParse({agents:[...agents,{...agents[0],id:'extra'}]}).success).toBe(false)
 })
 it('survives native schema projection and wire rehydration with empty groups',()=>{
- const value={bindings:[binding()],agents:resolveAgentGroups([binding()]).concat({id:'empty',name:'Empty',cwd:'/tmp',bindingIds:[]})}
+ const value={bindings:[binding()],agents:resolveAgentGroups([binding()]).concat({id:'empty',name:'Empty',cwd:'/tmp',bindingIds:[]}),voice:DEFAULT_VOICE_CONFIG}
  for(const schema of [Config,new Schema(JSON.parse(JSON.stringify(Config)))]){
   const form=volatileForm(schema)!,browser=new Schema(JSON.parse(JSON.stringify(form)))
   expect(browser(projectForm(form,plainConfig(schema(value))))).toEqual(value)
@@ -83,7 +84,11 @@ it('commits groups and channel removal together through native Settings mutate, 
  const native=Object.create(SettingsForms.prototype)
  Object.assign(native,{ownerContext:{configEditor:{entries:()=>[entry],edit}},describe:()=>[{ns:'dsh-channels',revision:7}]})
  await native.mutate('dsh-channels',[{op:'set',path:['bindings'],value:[]},{op:'set',path:['agents'],value:agents.map(g=>({...g,bindingIds:[]}))}],7)
- expect(edit).toHaveBeenCalledOnce();expect(raw).toEqual({bindings:[],agents:agents.map(g=>({...g,bindingIds:[]}))})
+ expect(edit).toHaveBeenCalledOnce()
+ // Compare only the sections this mutation owns; deployment-wide speech settings
+ // are a separate path and must not be rewritten here.
+ expect({bindings:raw.bindings,agents:raw.agents}).toEqual({bindings:[],agents:agents.map(g=>({...g,bindingIds:[]}))})
+ expect(raw.voice).toBeDefined()
  await expect(native.mutate('dsh-channels',[{op:'set',path:['agents'],value:[]}],6)).rejects.toThrow(/changed since it was read/)
  expect(raw.agents).toHaveLength(1)
 })
