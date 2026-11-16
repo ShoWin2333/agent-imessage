@@ -10,11 +10,11 @@ interface Attachment {content_type:string;filename?:string|undefined;url?:string
 const MAX_AUDIO_BYTES = 10 * 1024 * 1024
 const isAudio = (attachment:Attachment) => attachment.content_type.startsWith('audio/')
   || /\.(silk|amr|mp3|wav|ogg|m4a|aac|flac|webm)$/i.test(attachment.filename ?? '')
-export interface ReceivedAttachments { parts: string[]; audio: AudioClip[] }
+export interface ReceivedAttachments { parts: string[]; audio: AudioClip[]; audioIssue?: string | undefined }
 /** Official attachment pipeline, scoped to the existing session workspace instead of a global home. */
 export async function receiveAttachments(attachments:readonly Attachment[],cwd:string,signal:AbortSignal):Promise<ReceivedAttachments>{
   if(!attachments.length)return { parts: [], audio: [] }
-  const root=join(cwd,'.messaging-channels','qqbot-media'),parts:string[]=[],audio:AudioClip[]=[]
+  const root=join(cwd,'.messaging-channels','qqbot-media'),parts:string[]=[],audio:AudioClip[]=[];let audioIssue:string|undefined
   await mkdir(root,{recursive:true})
   const actual=await realpath(root),workspace=await realpath(cwd),rel=relative(workspace,actual)
   if(isAbsolute(rel)||rel==='..'||rel.startsWith('../'))throw new Error('Media directory is outside the workspace')
@@ -27,7 +27,7 @@ export async function receiveAttachments(attachments:readonly Attachment[],cwd:s
   for(const a of attachments){
     signal.throwIfAborted()
     if(a.asr_refer_text)parts.push(`[语音转写]\n${a.asr_refer_text}`)
-    if(!a.url)continue
+    if(!a.url){if(isAudio(a)||a.asr_refer_text)audioIssue='仅有转写、没有可下载的真实录音。';continue}
     try{
       const url=new URL(a.url.startsWith('//')?`https:${a.url}`:a.url)
       if(url.protocol!=='https:'||url.username||url.password||isIP(url.hostname))throw new Error('Invalid attachment URL')
@@ -43,12 +43,13 @@ export async function receiveAttachments(attachments:readonly Attachment[],cwd:s
       const data=Buffer.concat(chunks),destination=join(root,`${randomUUID()}-${name}`)
       const path=a.content_type.startsWith('image/')?correctImageExt(destination,data):destination
       await writeFile(path,data,{flag:'wx',mode:0o600})
-      // Only the newest two clips are analyzed; the disk copy stays the system of record.
+      if(isAudio(a)&&data.length>MAX_AUDIO_BYTES)audioIssue='录音超过 10 MiB，未发送到音频模型。'
+      // Keep current-message clips only; quoted audio is never re-listened automatically.
       if(audio.length<2&&data.length<=MAX_AUDIO_BYTES&&isAudio(a))audio.push({name,mimeType:a.content_type||'application/octet-stream',bytes:data})
       parts.push(`[QQ 附件 · ${a.content_type} · ${name}]\n本地路径：${path}`)
-    }catch(error){signal.throwIfAborted();parts.push(`[QQ 附件 ${a.filename} 未下载成功，请用户重新发送。]`)}
+    }catch(error){signal.throwIfAborted();if(isAudio(a))audioIssue='真实录音下载失败，音频模型未听到。';parts.push(`[QQ 附件 ${a.filename} 未下载成功，请用户重新发送。]`)}
   }
-  return { parts, audio }
+  return { parts, audio, audioIssue }
 }
 function publicAddress(address:string){
   if(address.includes(':'))return /^(?:2|3)[0-9a-f]{3}:/i.test(address)&&!address.toLowerCase().startsWith('2001:db8:')

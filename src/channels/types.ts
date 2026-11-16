@@ -8,6 +8,7 @@ export interface ChannelMessage {
   /** False when the provider cannot deliver native voice messages. */
   nativeVoice?: boolean
   /** Inbound audio kept in memory for speech analysis; never a second disk read. */
+  audioIssue?: string | undefined
   audio?: readonly AudioClip[]
   /** Check the actual payload before native delivery; incompatible audio must use file delivery. */
   supportsNativeVoice?(media: OutboundMediaPayload): boolean

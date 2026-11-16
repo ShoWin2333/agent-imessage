@@ -1,6 +1,6 @@
 import { sniffAudio, wrapWav } from './audio.js'
 
-/** silk-wasm decodes to 16 kHz mono pcm_s16le, which is what wrapWav and whisper expect. */
+/** silk-wasm decodes to 16 kHz mono pcm_s16le, which is what wrapWav expects. */
 const SILK_RATE = 16_000
 /** Optional dependency: resolved at runtime so a profile without it still answers. */
 const SPECIFIER = 'silk-wasm'
@@ -14,7 +14,7 @@ export type SilkDecodeResult = { ok: true; wav: Buffer } | { ok: false; reason: 
 /**
  * Tencent QQ voice messages use SILK v3, which ffmpeg cannot decode. The decoder
  * is optional: when it is absent the caller reports the missing capability
- * instead of sending undecodable bytes to the recognizer.
+ * instead of sending undecodable bytes to the audio model.
  */
 export async function decodeSilkToWav(bytes: Buffer, signal: AbortSignal): Promise<SilkDecodeResult> {
   if (sniffAudio(bytes) !== 'silk') return { ok: false, reason: '不是 SILK 音频' }
@@ -27,6 +27,7 @@ export async function decodeSilkToWav(bytes: Buffer, signal: AbortSignal): Promi
   signal.throwIfAborted()
   try {
     const decoded = await module.decode(new Uint8Array(bytes), SILK_RATE)
+    signal.throwIfAborted()
     if (!decoded?.data?.length) return { ok: false, reason: 'SILK 解码结果为空' }
     return { ok: true, wav: wrapWav(Buffer.from(decoded.data)) }
   } catch (error) {

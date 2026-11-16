@@ -18,6 +18,7 @@ import type { InteractionHandlers, InteractionScope } from './interaction-types.
 import type { NativeHost, NativeSession, NativeResult, NativePreferences } from './bridge.js'
 import { ownsSession, type LegacySessionIdentity } from './identity.js'
 import {installQQAgent} from './qqbot-agent.js'
+import { channelAudioTool, type VoiceHandler } from './voice/tool.js'
 import type {ToolDispatchExecution} from '@deepseek-ai/dsh-tools'
 import type {QQPresentationOptions} from './qqbot-presentation.js'
 import { channelMediaTool, type ChannelMediaArgs } from './media-tool.js'
@@ -170,7 +171,7 @@ export class DshNativeHost implements NativeHost {
     const scoped = agent.ctx
     let closing=false
     const finishing=new Set<Promise<void>>()
-    type PendingInput = { turn?: number; suppressed?: boolean; text: string; resolve: (value: NativeResult) => void; progress: () => void; controller:AbortController; interactions?:InteractionHandlers | undefined; media?:MediaHandler | undefined; stream?:((text:string)=>void)|undefined; notice?:((text:string)=>Promise<void>)|undefined; streamedText?:string; watchdog?:ReturnType<typeof setTimeout>|undefined }
+    type PendingInput = { voice?: VoiceHandler | undefined; turn?: number; suppressed?: boolean; text: string; resolve: (value: NativeResult) => void; progress: () => void; controller:AbortController; interactions?:InteractionHandlers | undefined; media?:MediaHandler | undefined; stream?:((text:string)=>void)|undefined; notice?:((text:string)=>Promise<void>)|undefined; streamedText?:string; watchdog?:ReturnType<typeof setTimeout>|undefined }
     const pending = new Map<string, PendingInput>()
     const stopWatchdog = (input: PendingInput) => {
       if (input.watchdog !== undefined) clearTimeout(input.watchdog)
@@ -258,7 +259,19 @@ export class DshNativeHost implements NativeHost {
         scope:scopeFor(owned, exec.signal), deliver:owned.input.media, flush:()=>this.flush(agent), channelKind:this.channelKind })
     }
     let noticeTail=Promise.resolve()
-    const mediaDisposers=mediaTool?[mediaTool.register(channelMediaTool(sendChannelMedia))]:[]
+    const mediaDisposers=mediaTool?[mediaTool.register(channelMediaTool(sendChannelMedia)), mediaTool.register(channelAudioTool(async (args, exec) => {
+      const leader = owner(exec.agent), input = pending.get(args.inputId)
+      if (!leader || !input?.voice || input.turn !== leader.turn || input.controller.signal.aborted) throw new Error('No audio for this active channel input.')
+      // DSH can claim multiple channel inputs in one turn. Each clip retains its
+      // own input receipt while sharing that turn's conversation and leader.
+      const scope: InteractionScope = {
+        sessionId: agent.id, inputId: args.inputId, turn: leader.turn,
+        signal: AbortSignal.any([exec.signal, input.controller.signal]),
+        current: () => owner(exec.agent)?.turn === leader.turn && pending.get(args.inputId) === input && !input.controller.signal.aborted,
+      }
+      if (!scope.current() || scope.signal.aborted) throw new Error('Audio turn cancelled.')
+      return input.voice({ ...scope, callId: exec.callId, context: args.context })
+    }))]:[]
     const qqAgent=this.channelKind==='qqbot'?installQQAgent(this.ctx,agent,{
       cwd:this.cwd,options:this.qqOptions,sendMedia:sendChannelMedia,
       selection:()=>this.qqVision??this.preferences.model??this.model??this.ctx.agentDefaultModel.currentSelection(),
@@ -308,11 +321,11 @@ export class DshNativeHost implements NativeHost {
           ...(policy ? { policy } : {}),
         }
       },
-      submit: (id, text, progress, interactions, media, stream, notice) => {
+      submit: (id, text, progress, interactions, media, stream, notice, voice) => {
         let rejectResult!: (reason: unknown) => void
         const result = new Promise<NativeResult>((resolve, reject) => {
           rejectResult = reject
-          const entry: PendingInput={ text: '', resolve, progress, interactions, media, stream, notice, controller: new AbortController(), watchdog: undefined as ReturnType<typeof setTimeout>|undefined }
+          const entry: PendingInput={ text: '', voice, resolve, progress, interactions, media, stream, notice, controller: new AbortController(), watchdog: undefined as ReturnType<typeof setTimeout>|undefined }
           pending.set(id, entry)
           // A Host that neither claims nor discards an admitted input must not pin the binding forever.
           entry.watchdog = setTimeout(() => {

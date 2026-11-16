@@ -7,7 +7,7 @@ import { DshNativeHost } from '../src/plugin/native.js'
 
 const cleanup: Array<() => Promise<void>> = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close() })
-async function fixture({ presetFs = true, agentFs = false, channelKind = 'imessage' } = {}) {
+async function fixture({ presetFs = true, agentFs = false, channelKind = 'imessage', voice = undefined as import('../src/plugin/voice/tool.js').VoiceHandler | undefined } = {}) {
   const ctx = new Context(), agentCtx = new Context(), session = Session.create(SessionId('channels-binding-test'),[],{...Session.create(SessionId('channels-binding-test')).header,cwd:'/workspace'})
   let live: any, decision = 'allowed-once'
   const agent = { id: session.id, session, ctx: agentCtx, inbox: { clear: vi.fn(), remove: vi.fn(() => false) }, cancel: vi.fn(), followup: vi.fn((input: any) => {
@@ -37,7 +37,7 @@ async function fixture({ presetFs = true, agentFs = false, channelKind = 'imessa
     const release=registerQQPresented(agentCtx,{state:()=>({sessionId:session.id,receipts:[]}),bridge:{deliverExternalMedia:async(_message:any,request:any)=>send(request)} as any,adapter:{scheduledMessage:async()=>({send:notice})} as any,cwd:'/workspace',policy:'c2c',signal:new AbortController().signal,options:{}})
     cleanup.push(async()=>release())
   }
-  const operation = native.submit('input', 'send image', () => {}, undefined, send,undefined,notice); await operation.admitted
+  const operation = native.submit('input', 'send image', () => {}, undefined, send,undefined,notice,voice); await operation.admitted
   const definition = agentCtx.tools.get('channel_send_media')!
   const exec = { agent, callId: 'call', signal: new AbortController().signal } as any
   const call = (overrides = {}, args = { path: 'test.png', kind: 'image' }) => definition.execute(args, { ...exec, ...overrides })
@@ -118,4 +118,24 @@ it('automatically offers native present files through the existing approval, fil
   await f.agentCtx.waterfall('tools/post-execute',{...exec,callId:'denied-present'},result,next)
   expect(f.read).toHaveBeenCalledOnce();expect(f.send).toHaveBeenCalledOnce()
   await vi.waitFor(()=>expect(f.notice).toHaveBeenCalledWith(expect.stringContaining('未获批准')))
+})
+
+
+it('scopes listening to the exact active Agent and input and revokes it on cancellation', async () => {
+  const listen = vi.fn(async () => 'heard')
+  const f = await fixture({ voice: listen })
+  const tool = f.agentCtx.tools.get('channel_listen_audio')!
+  const exec = { agent: f.agent, callId: 'audio-call', signal: new AbortController().signal } as any
+  const args = { inputId: 'input', context: 'Relevant project instruction and previous user sentence.' }
+  expect(await tool.execute(args, exec)).toBe('heard')
+  expect(listen.mock.calls[0]![0]).toMatchObject({ inputId: 'input', sessionId: f.agent.id, context: args.context })
+  await expect(tool.execute({ ...args, inputId: 'another-input' }, exec)).rejects.toThrow('No audio')
+  await expect(tool.execute(args, { ...exec, agent: { ...f.agent } })).rejects.toThrow('No audio')
+  await expect(tool.execute(args, { ...exec, signal: AbortSignal.abort() })).rejects.toThrow('cancelled')
+  f.native.cancel()
+  await expect(tool.execute(args, exec)).rejects.toThrow('No audio')
+  expect(listen).toHaveBeenCalledOnce()
+  expect(f.read).not.toHaveBeenCalled()
+  await f.native.close()
+  expect(f.agentCtx.tools.get('channel_listen_audio')).toBeUndefined()
 })

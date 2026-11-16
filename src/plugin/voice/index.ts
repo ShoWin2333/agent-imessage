@@ -9,6 +9,7 @@ export type { AudioClip, VoiceReply, VoiceSettings } from './types.js'
 export type { AudioConversionServices } from './audio.js'
 
 export interface VoiceTurnInput {
+  context?: string | undefined
   clip: AudioClip
   /** Composer capabilities of the channel Agent, used only to normalise a container. */
   audio?: AudioConversionServices | undefined
@@ -34,13 +35,17 @@ export function createVoiceCoach(settings: VoiceSettings, apiKey: string | undef
         : undefined
   const api = note === undefined && apiKey !== undefined ? new SpeechApi({ apiKey, baseURL: settings.baseURL }) : undefined
   return {
-    enabled: api !== undefined,
+    enabled: settings.enabled,
     ...(note === undefined ? {} : { note }),
     ...(api === undefined ? {} : { engine: `OpenAI · ${settings.model}` }),
     async turn(input) {
       if (!api) throw new Error(note ?? '语音能力不可用')
+      input.signal.throwIfAborted()
+      if (input.clip.bytes.length > 10 * 1024 * 1024) throw new Error('录音超过 10 MiB，未发送到音频模型。')
       const clip = await normalise(input)
-      const reply = await api.turn(clip, { model: settings.model, voice: settings.voice, instructions: settings.instructions }, input.signal)
+      input.signal.throwIfAborted()
+      if (clip.bytes.length > 20 * 1024 * 1024) throw new Error('转换后录音超过 20 MiB。')
+      const reply = await api.turn(clip, { model: settings.model, voice: settings.voice, instructions: settings.instructions, context: input.context }, input.signal)
       return {
         audio: reply.audio,
         name: `voice-${randomUUID().slice(0, 8)}.mp3`,
@@ -59,7 +64,7 @@ export function createVoiceCoach(settings: VoiceSettings, apiKey: string | undef
 async function normalise(input: VoiceTurnInput): Promise<AudioClip> {
   const sniffed = sniffAudio(input.clip.bytes)
   const format = sniffed === 'unknown' ? formatFromName(input.clip.name) : sniffed
-  if (AUDIO_CHAT_SAFE.has(format)) return input.clip
+  if (sniffed !== 'unknown' && AUDIO_CHAT_SAFE.has(format)) return { ...input.clip, name: `voice.${format}`, mimeType: format === 'wav' ? 'audio/wav' : 'audio/mpeg' }
   if (format === 'silk' || sniffed === 'silk') {
     const silk = await decodeSilkToWav(input.clip.bytes, input.signal)
     if (silk.ok) return { name: 'voice.wav', mimeType: 'audio/wav', bytes: silk.wav }

@@ -1,3 +1,4 @@
+import { sniffAudio } from './audio.js'
 import type { AudioClip } from './types.js'
 
 /** Provider failures are surfaced without request headers, payloads, or keys. */
@@ -36,11 +37,15 @@ export class SpeechApi {
   }
 
   /** `clip` must already be wav or mp3; callers normalise other containers. */
-  async turn(clip: AudioClip, options: { model: string; voice: string; instructions?: string }, signal: AbortSignal): Promise<{ audio: Buffer; text: string }> {
-    const content: unknown[] = [{ type: 'input_audio', input_audio: { data: clip.bytes.toString('base64'), format: clip.mimeType.includes('wav') ? 'wav' : 'mp3' } }]
+  async turn(clip: AudioClip, options: { model: string; voice: string; instructions?: string; context?: string | undefined }, signal: AbortSignal): Promise<{ audio: Buffer; text: string }> {
+    signal.throwIfAborted()
+    const format = sniffAudio(clip.bytes)
+    if (format !== 'wav' && format !== 'mp3') throw new Error('Expected actual WAV or MP3 audio bytes')
+    const content: unknown[] = [{ type: 'input_audio', input_audio: { data: clip.bytes.toString('base64'), format } }]
     const messages: unknown[] = []
     const instructions = options.instructions?.trim()
     if (instructions) messages.push({ role: 'system', content: instructions })
+    if (options.context?.trim()) content.unshift({ type: 'text', text: options.context.trim() })
     messages.push({ role: 'user', content })
     const response = await this.request('/chat/completions', {
       method: 'POST',
@@ -53,11 +58,13 @@ export class SpeechApi {
       }),
     }, signal)
     const data = await readJson(response)
+    signal.throwIfAborted()
     const choices = Array.isArray(data.choices) ? data.choices : []
     const first: unknown = choices[0]
     const message = first && typeof first === 'object' ? (first as { message?: Record<string, unknown> }).message : undefined
     const audio = message && typeof message.audio === 'object' && message.audio !== null ? message.audio as { data?: unknown; transcript?: unknown } : undefined
     const encoded = typeof audio?.data === 'string' ? audio.data : ''
+    if (encoded.length > 28 * 1024 * 1024) throw new SpeechApiError(502, '返回音频超过大小限制')
     if (!encoded) throw new SpeechApiError(502, '响应里没有音频数据，请确认模型支持音频输出')
     const text = typeof audio?.transcript === 'string' ? audio.transcript.trim()
       : typeof message?.content === 'string' ? message.content.trim() : ''

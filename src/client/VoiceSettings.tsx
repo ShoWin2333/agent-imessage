@@ -92,8 +92,8 @@ export function VoiceSettings({ctx,t,form,snapshot}:{ctx:ClientContext;t:Transla
     </fieldset>
     {status?<p role={failure?'alert':'status'} className={`dsh-channel-notice ${failure?'dsh-channel-error':''}`}>{status}</p>:null}
     <div className="dsh-channel-actions">
-      <button className="dsh-channel-ghost" disabled={busy||!dirty} onClick={()=>setDraft(baseline)}>{t('action.discard')}</button>
-      <button className="dsh-channel-primary" disabled={busy||!dirty||!writable} onClick={()=>void save()}>{busy?t('action.saving'):t('action.save')}</button>
+      <button className="dsh-channel-ghost" disabled={busy||!dirty} onClick={()=>setDraft(baseline)}>{t('voice.discardSettings')}</button>
+      <button className="dsh-channel-primary" disabled={busy||!dirty||!writable} onClick={()=>void save()}>{busy?t('action.saving'):t('voice.saveSettings')}</button>
     </div>
     <p className="dsh-channel-muted">{t('voice.restartHint')}</p>
   </details>

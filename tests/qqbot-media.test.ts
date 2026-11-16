@@ -37,3 +37,29 @@ it('refuses oversized and non-HTTPS attachments before HTTP and reports the unav
     expect(audio).toHaveLength(0)
   }finally{await rm(cwd,{recursive:true,force:true})}
 })
+
+it('preserves new text without automatically replaying quoted audio',async()=>{
+  const {QQBotAdapter}=await import('../src/channels/qqbot.js')
+  const cwd=await mkdtemp(join(tmpdir(),'qq-quote-'))
+  vi.stubGlobal('fetch',vi.fn(async()=>new Response(Buffer.from('ID3sample'))))
+  try{
+    const adapter=new QQBotAdapter({appId:'test',appSecret:'test',ownerUserId:'test',cwd},async()=>{},()=>{})
+    const body=await (adapter as any).body({state:{envelope:'Please explain the previous recording',quote:{attachments:[{contentType:'audio/mpeg',filename:'old.mp3',url:'https://public.example/old'}]}},message:{content:'Please explain the previous recording',attachments:[]}},new AbortController().signal)
+    expect(body.audio).toHaveLength(0)
+    expect(body.text).toContain('Please explain the previous recording')
+    expect(body.text).toContain('old.mp3')
+  }finally{await rm(cwd,{recursive:true,force:true})}
+})
+
+it('reports audio over 10 MiB while retaining the existing private disk cache',async()=>{
+  const {stat}=await import('node:fs/promises')
+  const cwd=await mkdtemp(join(tmpdir(),'qq-audio-size-'))
+  vi.stubGlobal('fetch',vi.fn(async()=>new Response(Buffer.alloc(10*1024*1024+1))))
+  try{
+    const result=await receiveAttachments([{content_type:'audio/mpeg',filename:'large.mp3',url:'https://public.example/large'}],cwd,new AbortController().signal)
+    expect(result.audio).toHaveLength(0);expect(result.audioIssue).toContain('10 MiB')
+    const info=await stat(result.parts[0]!.split('本地路径：')[1]!)
+    expect(info.size).toBe(10*1024*1024+1)
+    if(process.platform!=='win32')expect(info.mode&0o777).toBe(0o600)
+  }finally{await rm(cwd,{recursive:true,force:true})}
+})

@@ -54,6 +54,7 @@ export class QQBotAdapter implements ChannelAdapter {
       // Preserve exact slash commands and approval credentials; envelopes are task content only.
       if(!/^\/(approve|deny|answer|new|reset|clear|compact|model|preset|stop|cancel|status|help|bot-status|bot-help|bot-settings)(?:\s|$)/.test(m.content.trim())){
         const body=await this.body(ctx,controller.signal);message.text=body.text
+        if(body.audioIssue)message.audioIssue=body.audioIssue
         if(body.audio.length)message.audio=body.audio
       }
       if(message.text.trim())await this.receive(message)
@@ -93,10 +94,12 @@ export class QQBotAdapter implements ChannelAdapter {
     const parts=[ctx.state.envelope||ctx.message.content]
     const attachments=ctx.message.attachments??[]
     const quoted=ctx.state.quote?.attachments??[]
-    const raw=[...attachments,...quoted.map(a=>({content_type:a.contentType??'',filename:a.filename??'attachment',url:a.url??'',size:0,asr_refer_text:a.asrText}))]
-    const received=await receiveAttachments(raw,this.credential.cwd,signal)
+    const raw=quoted.map(a=>({content_type:a.contentType??'',filename:a.filename??'attachment',url:a.url??'',size:0,asr_refer_text:a.asrText}))
+    const received=await receiveAttachments(attachments,this.credential.cwd,signal)
+    const references=await receiveAttachments(raw,this.credential.cwd,signal)
+    parts.push(...references.parts)
     parts.push(...received.parts)
-    return {text:parts.filter(Boolean).join('\n\n'),audio:received.audio}
+    return {text:parts.filter(Boolean).join('\n\n'),audio:received.audio,audioIssue:received.audioIssue}
   }
   async approvalMessage(){
     if(this.state.phase!=='listening')throw new Error('QQ is not connected')
