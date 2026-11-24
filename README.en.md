@@ -2,7 +2,7 @@
 
 **The default `main` branch now contains the DSH channel plugin. The old standalone macOS App is preserved in `archive/standalone-macos-main-20261104`.**
 
-A DeepSeek Harness plugin for iMessage, Telegram, Weixin iLink and QQ Bot. This version supports DSH `>=0.2.2-rc.1 <0.2.3` (including `0.2.2-rc.1` and `0.2.2-rc.2`), with development dependencies matching `0.2.2-rc.2`.
+A DeepSeek Harness plugin for iMessage, Telegram, Weixin iLink and QQ Bot. This version supports DSH `>=0.2.3-alpha.2 <0.3.0` (Cordis `4.2.0-alpha.1`), with development dependencies matching `0.2.3-alpha.2`.
 
 DSH owns agents, models, tools, permissions, inboxes, cancellation and durable session logs. This plugin owns verified channel bindings, provider-message deduplication and reply delivery. It exposes the Cordis `name / inject / apply` entry point, with no standalone application, backend bridge, desktop shell, service installer or executable CLI.
 
@@ -12,9 +12,9 @@ One read-only Agent tool, `channel_status`, reports each configured channel's en
 
 ## Install
 
-This version is **`1.1.2`**. `1.1.2` only widens the host compatibility declaration: `engines.dsh` changes from the fixed `0.2.2-rc.1` to `>=0.2.2-rc.1 <0.2.3` and runtime peers become `^0.2.2-rc.1`, fixing the `incompatible-version` rejection that kept the bundle from mounting at all on DSH `0.2.2-rc.2`; plugin behavior, configuration, storage domains and row IDs are unchanged. The previous stable release `1.1.1` remains published. The DSH plugin is now `main`, so versions use ordinary SemVer without the `-dsh.N` suffix previously used to distinguish the standalone macOS App. The package remains `@showin2333/dsh-plugin-channels`; the old App stays archived, and existing releases and Git tags are retained.
+This version is **`1.1.3`**. `1.1.3` follows DSH `0.2.3` / Cordis `4.2.0-alpha.1`: since Cordis 4.0.0-rc.12, `ctx.root` is replaced by `ctx[Context.root]`, and the old form made every channel binding throw `cannot get property "root" without inject` at startup and stay in `activation-failed`; this release reads the symbol instead, widens `engines.dsh` to `>=0.2.3-alpha.2 <0.3.0` and moves runtime peers to `^0.2.3-alpha.2`. Plugin behavior, configuration, storage domains and row IDs are unchanged. `1.1.2` remains the build for DSH `<0.2.3`.
 
-This version supports DSH `>=0.2.2-rc.1 <0.2.3`, so a host upgrade to `0.2.2-rc.2` no longer waits on a pinned plugin release. The iMessage channel additionally requires macOS with Messages; Telegram, Weixin iLink and QQ Bot are cross-platform.
+This version supports DSH `>=0.2.3-alpha.2 <0.3.0`, so a host upgrade to `0.2.3` no longer waits on a pinned plugin release. The iMessage channel additionally requires macOS with Messages; Telegram, Weixin iLink and QQ Bot are cross-platform.
 
 The npm package is `@showin2333/dsh-plugin-channels`. Installing it mounts two Cordis rows as a bundle (`dsh-channels` and the project grouping); the browser panel is discovered from `dsh.client`.
 

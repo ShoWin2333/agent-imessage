@@ -50,7 +50,7 @@ it('keeps a real shared Agent and desktop inbox through full transport-plugin un
   const transport=await world.plugin({
     inject:['agents','sessions','agentPresets','agentDefaultModel','permissionPresets'],
     async apply(ctx:Context) {
-      const lifetime=ctx.root.extend({[Context.isolate]:ctx[Context.isolate]})
+      const lifetime=ctx[Context.root].extend({[Context.isolate]:ctx[Context.isolate]})
       native=await new DshNativeHost(ctx,'/tmp','workspace-write','binding',undefined,undefined,'telegram',lifetime).open(undefined,binding.signal)
       ctx.effect(()=>()=>{binding.abort();return native.close()})
     },
@@ -89,7 +89,7 @@ it('unloads promptly while real root-owned Agent preset initialization is suspen
   const transport=await world.plugin({
     inject:['agents','sessions','agentPresets','agentDefaultModel','permissionPresets'],
     apply(ctx:Context) {
-      const lifetime=ctx.root.extend({[Context.isolate]:ctx[Context.isolate]})
+      const lifetime=ctx[Context.root].extend({[Context.isolate]:ctx[Context.isolate]})
       const host=new DshNativeHost(ctx,'/tmp','workspace-write','binding',undefined,undefined,'telegram',lifetime)
       bridge=new ChannelBridge(host,{read:()=>({receipts:[]}),write:async()=>{writes++}})
       ctx.effect(()=>()=>bridge.close())
@@ -120,7 +120,7 @@ it.each([undefined, 'high'] as const)('retains the full configured model in the 
   const {world,close}=await runtime()
   const selection={provider:'configured',model:'selected',...(reasoningEffort?{reasoningEffort}:{})}
   const native=await new DshNativeHost(world,'/tmp','workspace-write','binding',selection,undefined,'telegram',
-    world.root.extend({[Context.isolate]:world[Context.isolate]})).open()
+    world[Context.root].extend({[Context.isolate]:world[Context.isolate]})).open()
   try {
     const agent=world.agents.get(native.id as never)!
     expect(agent.options).toMatchObject(selection)
