@@ -99,7 +99,7 @@ export async function apply(ctx: Context, config: Config | { bindings: Volatile<
     // Shared conversations belong to the application, not this reloadable
     // transport plugin. Preserve the caller's service isolation labels while
     // using the root fiber as the factory transaction/lifecycle owner.
-    const lifetime = ctx.root.extend({ [Context.isolate]: ctx[Context.isolate] })
+    const lifetime = ctx[Context.root].extend({ [Context.isolate]: ctx[Context.isolate] })
     const bridge = new ChannelBridge(new DshNativeHost(ctx, binding.cwd, binding.permissionPreset, scopeKey, binding.model, table.get(key)?.legacyIdentity, binding.channel.kind, lifetime, binding.channel.kind==='qqbot'&&binding.channel.visionProvider&&binding.channel.visionModel?{provider:binding.channel.visionProvider,model:binding.channel.visionModel}:undefined,binding.channel.kind==='qqbot'?binding.channel:{}), {
       read: () => table.get(key)!, write: value => table.put(key, value),
     }, binding.channel.kind==='qqbot'?new QQCommands(ctx,{binding:scopeKey,legacyIdentity:table.get(key)?.legacyIdentity,model:binding.model,options:binding.channel,lifetime}):undefined, channelLog)

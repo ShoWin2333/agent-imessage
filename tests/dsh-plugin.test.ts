@@ -3,7 +3,7 @@ import { ChannelBridge, type BindingState, type NativeResult, type NativeSession
 import { resultFromEvents, DshNativeHost } from '../src/plugin/native.js'
 import { bindingKey, pluginConfigSchema, apply } from '../src/plugin/index.js'
 import type { ChannelMessage } from '../src/channels/types.js'
-import type { Context } from '@deepseek-ai/cordis'
+import { Context } from '@deepseek-ai/cordis'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(r => { resolve = r }); return { promise, resolve } }
@@ -172,7 +172,7 @@ it('unload while credential resolution is pending cannot start a late channel', 
   const records = new Map<string, unknown>()
   const put = vi.fn(async (key: string, value: unknown) => { if (closed) throw new Error('write after close'); records.set(key, value) })
   const ctx = {
-    root:{extend:()=>ctx},
+    [Context.root]:{extend:()=>ctx},
 logger: () => ({ warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() }), plugin: vi.fn(), get: () => undefined, on: vi.fn(), tools: { register: vi.fn(() => () => {}) },
 permissionPresets: { resolve: () => { } }, storageDomain: { open: async () => ({ table: () => ({ get: (key: string) => records.get(key), put }), close: async () => { closed = true } }) },
     credentials: { resolve: resolveCredential }, effect: (fn: () => () => Promise<void>) => { stop = fn() },

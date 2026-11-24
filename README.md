@@ -2,7 +2,7 @@
 
 **默认分支 `main` 现为 DSH 渠道插件产品线。旧独立 macOS App 已归档至 `archive/standalone-macos-main-20261104`，历史完整保留。**
 
-将 iMessage、Telegram、微信 iLink 和 QQ Bot 消息送入 **DeepSeek Harness（DSH）** 的原生会话，并回传执行结果。当前支持 DSH `>=0.2.2-rc.1 <0.2.3`（含 `0.2.2-rc.1` 与 `0.2.2-rc.2`），开发依赖对齐该系列当前版本 `0.2.2-rc.2`。
+将 iMessage、Telegram、微信 iLink 和 QQ Bot 消息送入 **DeepSeek Harness（DSH）** 的原生会话，并回传执行结果。当前支持 DSH `>=0.2.3-alpha.2 <0.3.0`（Cordis `4.2.0-alpha.1`），开发依赖对齐该系列当前版本 `0.2.3-alpha.2`。
 
 DSH 负责 Agent、模型、工具、权限、执行队列、取消和会话日志；本插件负责消息渠道、固定身份绑定、去重和回复投递。宿主与浏览器端均为原生 Cordis 插件，没有独立平台、服务安装器或执行后端。
 
@@ -10,9 +10,9 @@ DSH 负责 Agent、模型、工具、权限、执行队列、取消和会话日�
 
 ## 安装
 
-本版为 **`1.1.2`**。`1.1.2` 修正宿主兼容声明：`engines.dsh` 由固定 `0.2.2-rc.1` 改为 `>=0.2.2-rc.1 <0.2.3`，运行时 peer 改为 `^0.2.2-rc.1`，修复 DSH `0.2.2-rc.2` 下插件被判定为 `incompatible-version` 而完全无法挂载的问题；插件行为、配置、存储域和行 ID 不变。上一稳定版 `1.1.1` 已发布。DSH 插件已成为 `main`，版本号改用普通 SemVer，不再添加用于区分旧 macOS App 的 `-dsh.N` 后缀。包名仍为 `@showin2333/dsh-plugin-channels`；旧 App 留在归档分支，既有发布版本与 Git 标签保留。
+本版为 **`1.1.3`**。`1.1.3` 跟随 DSH `0.2.3` / Cordis `4.2.0-alpha.1`：Cordis 4.0.0-rc.12 起 `ctx.root` 被 `ctx[Context.root]` 取代，旧写法会让每个渠道绑定在启动时抛 `cannot get property "root" without inject` 并停在 `activation-failed`，本版改为符号访问；同时 `engines.dsh` 放宽到 `>=0.2.3-alpha.2 <0.3.0`、运行时 peer 改为 `^0.2.3-alpha.2`，插件行为、配置、存储域和行 ID 不变。上一稳定版 `1.1.2` 仍支持 DSH `<0.2.3`。
 
-本版支持 DSH `>=0.2.2-rc.1 <0.2.3`；宿主升级到 `0.2.2-rc.2` 后无需再为固定版本号等待插件更新。iMessage 通道额外要求 macOS 与本机 Messages；Telegram、微信 iLink、QQ Bot 跨平台。
+本版支持 DSH `>=0.2.3-alpha.2 <0.3.0`；宿主升级到 `0.2.3` 后无需再为固定版本号等待插件更新。iMessage 通道额外要求 macOS 与本机 Messages；Telegram、微信 iLink、QQ Bot 跨平台。
 
 npm 包：`@showin2333/dsh-plugin-channels`。安装后以 bundle 形式挂载两条 Cordis 行（`dsh-channels` 与项目分组），浏览器面板由 `dsh.client` 自动发现。
 
@@ -129,6 +129,6 @@ pnpm install --frozen-lockfile --ignore-scripts
 npm run check
 ```
 
-检查包括类型检查、合成消息/模拟渠道测试、构建和打包清单检查。开发依赖和主锁文件对齐当前宿主 `0.2.2-rc.2`，运行时 peer 使用 `^0.2.2-rc.1`，`engines.dsh` 声明 `>=0.2.2-rc.1 <0.2.3`，不再保留旧 SDK 兼容分支。`cordis` 和 `zod` 也固定在经过验证的版本。没有真实消息或付费模型测试脚本。
+检查包括类型检查、合成消息/模拟渠道测试、构建和打包清单检查。开发依赖和主锁文件对齐当前宿主 `0.2.3-alpha.2`，运行时 peer 使用 `^0.2.3-alpha.2`，`engines.dsh` 声明 `>=0.2.3-alpha.2 <0.3.0`，不再保留旧 SDK 兼容分支。`cordis`（`4.2.0-alpha.1`）和 `zod` 也固定在经过验证的版本。没有真实消息或付费模型测试脚本。
 
 接口依据、恢复语义和已知边界见 [迁移指南](docs/dsh-channel-migration.md)。[English](README.en.md) · [安全边界](SECURITY.md)

@@ -65,6 +65,7 @@ export declare function Remote(options: RemoteOptions): RemoteDecorator
     skipLibCheck: true,
     experimentalDecorators: false,
     lib: ['ES2024', 'DOM', 'DOM.Iterable'],
+    types: ['node'],
   }
   writeFileSync(join(packageRoot, 'tsconfig.json'), `${JSON.stringify({
     compilerOptions: { ...compilerOptions, composite: true, noEmit: true },
